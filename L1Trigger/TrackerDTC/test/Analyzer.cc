@@ -92,7 +92,7 @@ namespace trackerDTC {
     // analyze DTC products and find still reconstrucable TrackingParticles
     void analyzeStubs(const TTDTC*, const TTDTC*, const map<TTStubRef, set<TPPtr>>&, map<TPPtr, set<TTStubRef>>&);
     // fill stub related histograms
-    void analyzeStream(const TTDTC::Stream& stream, int region, int channel, int& sum, TH2F* th2f);
+    void analyzeStream(const TTDTC::Stream& stream, int region, int channel, int& sum, TH2F* th2f, TH2F* th2fXYBarrel, TH2F* th2fXYEndCap);
     // returns layerId [1-6, 11-15] of stub
     int layerId(const TTStubRef& ttStubRef) const;
     // analyze survived TPs
@@ -128,7 +128,11 @@ namespace trackerDTC {
     TProfile* profChannel_;
     TH1F* hisChannel_;
     TH2F* hisRZStubs_;
+    TH2F* hisXYStubsBarrel_;
+    TH2F* hisXYStubsEndCap_;
     TH2F* hisRZStubsLost_;
+    TH2F* hisXYStubsLostBarrel_;
+    TH2F* hisXYStubsLostEndCap_;
     TH2F* hisRZStubsEff_;
     vector<TH1F*> hisResolution_;
     vector<TProfile2D*> profResolution_;
@@ -332,8 +336,8 @@ namespace trackerDTC {
           for (const TPPtr& tp : it->second)
             mapTPsStubs[tp].insert(frame.first);
         }
-        analyzeStream(stream, region, channel, nStubs, hisRZStubs_);
-        analyzeStream(lost->stream(region, channel), region, channel, nLost, hisRZStubsLost_);
+        analyzeStream(stream, region, channel, nStubs, hisRZStubs_, hisXYStubsBarrel_, hisXYStubsEndCap_);
+        analyzeStream(lost->stream(region, channel), region, channel, nLost, hisRZStubsLost_, hisXYStubsLostBarrel_, hisXYStubsLostEndCap_);
       }
       profDTC_->Fill(1, nStubs);
       profDTC_->Fill(2, nLost);
@@ -341,7 +345,7 @@ namespace trackerDTC {
   }
 
   // fill stub related histograms
-  void Analyzer::analyzeStream(const TTDTC::Stream& stream, int region, int channel, int& sum, TH2F* th2f) {
+  void Analyzer::analyzeStream(const TTDTC::Stream& stream, int region, int channel, int& sum, TH2F* th2f, TH2F* th2fXYBarrel, TH2F* th2fXYEndCap) {
     for (const TTDTC::Frame& frame : stream) {
       if (frame.first.isNull())
         continue;
@@ -355,6 +359,12 @@ namespace trackerDTC {
         profResolution_[r]->Fill(ttPos.z(), ttPos.perp(), abs(resolutions[r]));
       }
       th2f->Fill(ttPos.z(), ttPos.perp());
+      if( abs(ttPos.z()) < 125 ){	
+	th2fXYBarrel->Fill(ttPos.x(), ttPos.y());
+      }
+      else{
+	th2fXYEndCap->Fill(ttPos.x(), ttPos.y());
+      }
       // check layerId encoding
       if (!hybrid_)
         continue;
@@ -498,7 +508,11 @@ namespace trackerDTC {
     constexpr double maxZ = 300.;
     constexpr double maxR = 120.;
     hisRZStubs_ = dir.make<TH2F>("RZ Stubs", ";;", bins, -maxZ, maxZ, bins, 0., maxR);
+    hisXYStubsBarrel_ = dir.make<TH2F>("XY Stubs Barrel", ";;", bins, -maxR, maxR, bins, -maxR, maxR);
+    hisXYStubsEndCap_ = dir.make<TH2F>("XY Stubs EndCap", ";;", bins, -maxR, maxR, bins, -maxR, maxR);
     hisRZStubsLost_ = dir.make<TH2F>("RZ Stubs Lost", ";;", bins, -maxZ, maxZ, bins, 0., maxR);
+    hisXYStubsLostBarrel_ = dir.make<TH2F>("XY Stubs Lost Barrel", ";;", bins, -maxR, maxR, bins, -maxR, maxR);
+    hisXYStubsLostEndCap_ = dir.make<TH2F>("XY Stubs Lost EndCap", ";;", bins, -maxR, maxR, bins, -maxR, maxR);
     hisRZStubsEff_ = dir.make<TH2F>("RZ Stubs Eff", ";;", bins, -maxZ, maxZ, bins, 0., maxR);
     // stub parameter resolutions
     dir = fs->mkdir("DTC/Res");

@@ -1,10 +1,12 @@
-############################################################
+###########################################################
 # define basic process
 ############################################################
 
 import FWCore.ParameterSet.Config as cms
 import FWCore.Utilities.FileUtils as FileUtils
 import os
+import FWCore.ParameterSet.VarParsing as VarParsing ##parsing argument
+
 process = cms.Process("L1TrackNtuple")
 
 ############################################################
@@ -12,6 +14,11 @@ process = cms.Process("L1TrackNtuple")
 ############################################################
 
 GEOMETRY = "D49"
+
+options = VarParsing.VarParsing ('analysis')
+# get and parse the command line arguments
+options.parseArguments()
+
 # Set L1 tracking algorithm: 
 # 'HYBRID' (baseline, 4par fit) or 'HYBRID_DISPLACED' (extended, 5par fit). 
 # (Or legacy algos 'TMTT' or 'TRACKLET').
@@ -35,6 +42,10 @@ if GEOMETRY == "D49":
     print "using geometry " + GEOMETRY + " (tilted)"
     process.load('Configuration.Geometry.GeometryExtended2026D49Reco_cff')
     process.load('Configuration.Geometry.GeometryExtended2026D49_cff')
+elif GEOMETRY == "D76": 
+    print "using geometry " + GEOMETRY + " (tilted)"
+    process.load('Configuration.Geometry.GeometryExtended2026D76Reco_cff')
+    process.load('Configuration.Geometry.GeometryExtended2026D76_cff')
 else:
     print "this is not a valid geometry!!!"
 
@@ -49,7 +60,8 @@ process.GlobalTag = GlobalTag(process.GlobalTag, 'auto:phase2_realistic', '')
 # input and output
 ############################################################
 
-process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(100))
+process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(options.maxEvents))
+#process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(10000))
 
 #--- To use MCsamples scripts, defining functions get*data*(), 
 #--- follow instructions https://cernbox.cern.ch/index.php/s/enCnnfUZ4cpK7mT
@@ -71,15 +83,36 @@ if GEOMETRY == "D49":
   #inputMC=getCMSdata(dataName)
 
   # Or read specified .root file:
-  inputMC = ["/store/relval/CMSSW_11_3_0_pre3/RelValTTbar_14TeV/GEN-SIM-DIGI-RAW/PU_113X_mcRun4_realistic_v3_2026D49PU200_rsb-v1/00000/00260a30-734a-4a3a-a4b0-f836ce5502c6.root"] 
+  inputMC = ["/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/0210f667-5334-4592-84c8-097840e0991c.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/04d4d021-449d-4b25-9a38-9d7448ba8f00.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/073f02c2-cfde-487f-a5bf-29435025025c.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/0ad9414a-64ca-4aaf-897b-1691f5068d67.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/0b75d04e-8b00-42d0-a9b3-a6b410079756.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/0fff19a9-40c3-4c61-9413-126764dbba0f.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/175a4823-96ae-4ebb-9663-96ada5f13fbb.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/1868a4af-6b24-48ec-a5a6-0088d8f75bf4.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/18ec7825-7c15-4b33-a754-312d7862f170.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D49noPU-v1/10000/1ba20f6b-b806-4540-a950-39cf9c2ab9fc.root"
+            ] 
   #inputMC = ["/store/relval/CMSSW_11_3_0_pre3/RelValSingleMuPt10/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v3_2026D49noPU-v1/00000/04514913-efc7-49fc-8df4-90efe43ca047.root"]
-
+elif GEOMETRY == "D76":
+  inputMC = ["/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/05f802b7-b0b3-4cca-8b70-754682c3bb4c.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/0b69ed0a-66e9-403a-88f0-fb3115615461.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/0f4dea68-7574-43bb-97c3-5382d68a2704.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/156b3ca6-c74a-4f46-ae5e-03d9b01acd4c.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/16727f1d-2922-4e0a-8239-82e1ffecd43b.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/1af620bf-1f6d-4d5a-8170-4135ac798581.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/1dc513d9-75fc-44c0-b8e0-e2925323416b.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/2010f402-2133-4c3a-851b-1ae68fe23eb3.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/228dfbba-3d5c-42b9-b827-cfa8f11a2f38.root",
+             "/store/relval/CMSSW_11_3_0_pre6/RelValSingleMuFlatPt2To100/GEN-SIM-DIGI-RAW/113X_mcRun4_realistic_v6_2026D76noPU-v1/10000/27d006b1-d023-4775-8430-382e6962149c.root"
+            ]
 else:
   print "this is not a valid geometry!!!"    
     
-process.source = cms.Source("PoolSource", fileNames = cms.untracked.vstring(*inputMC))
+process.source = cms.Source("PoolSource", fileNames = cms.untracked.vstring(options.inputFiles))
 
-process.TFileService = cms.Service("TFileService", fileName = cms.string('TTbar_PU200_'+GEOMETRY+'.root'), closeFileFast = cms.untracked.bool(True))
+process.TFileService = cms.Service("TFileService", fileName = cms.string(options.outputFile), closeFileFast = cms.untracked.bool(True))
 process.Timing = cms.Service("Timing", summaryOnly = cms.untracked.bool(True))
 
 
@@ -168,7 +201,7 @@ process.L1TrackNtuple = cms.EDAnalyzer('L1TrackNtupleMaker',
                                        MyProcess = cms.int32(1),
                                        DebugMode = cms.bool(False),      # printout lots of debug statements
                                        SaveAllTracks = cms.bool(True),   # save *all* L1 tracks, not just truth matched to primary particle
-                                       SaveStubs = cms.bool(False),      # save some info for *all* stubs
+                                       SaveStubs = cms.bool(True),      # save some info for *all* stubs
                                        L1Tk_nPar = cms.int32(NHELIXPAR), # use 4 or 5-parameter L1 tracking?
                                        L1Tk_minNStub = cms.int32(4),     # L1 tracks with >= 4 stubs
                                        TP_minNStub = cms.int32(4),       # require TP to have >= X number of stubs associated with it
@@ -203,7 +236,7 @@ process.load( 'L1Trigger.TrackerDTC.ProducerED_cff' )
 process.load( 'L1Trigger.TrackerDTC.Analyzer_cff' )
 #process.TrackTriggerSetup.FrontEnd.BendCut=5.0
 #process.TrackTriggerSetup.Hybrid.MinPt=1.0
-process.dtc = cms.Path( process.TrackerDTCProducer )#* process.TrackerDTCAnalyzer )
+process.dtc = cms.Path( process.TrackerDTCProducer * process.TrackerDTCAnalyzer )
 
 # use this if you want to re-run the stub making
 # process.schedule = cms.Schedule(process.TTClusterStub,process.TTClusterStubTruth,process.dtc,process.TTTracksEmulationWithTruth,process.ana)

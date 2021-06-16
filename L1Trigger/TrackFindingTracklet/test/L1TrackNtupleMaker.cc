@@ -200,6 +200,7 @@ private:
   std::vector<float>* m_matchtrk_pt;
   std::vector<float>* m_matchtrk_eta;
   std::vector<float>* m_matchtrk_phi;
+  std::vector<unsigned int>* m_matchtrk_phiSector;
   std::vector<float>* m_matchtrk_d0;  //this variable is only filled if L1Tk_nPar==5
   std::vector<float>* m_matchtrk_z0;
   std::vector<float>* m_matchtrk_chi2;
@@ -367,6 +368,7 @@ void L1TrackNtupleMaker::beginJob() {
   m_matchtrk_pt = new std::vector<float>;
   m_matchtrk_eta = new std::vector<float>;
   m_matchtrk_phi = new std::vector<float>;
+  m_matchtrk_phiSector = new std::vector<unsigned int>;
   m_matchtrk_z0 = new std::vector<float>;
   m_matchtrk_d0 = new std::vector<float>;
   m_matchtrk_chi2 = new std::vector<float>;
@@ -470,6 +472,7 @@ void L1TrackNtupleMaker::beginJob() {
   eventTree->Branch("matchtrk_pt", &m_matchtrk_pt);
   eventTree->Branch("matchtrk_eta", &m_matchtrk_eta);
   eventTree->Branch("matchtrk_phi", &m_matchtrk_phi);
+  eventTree->Branch("matchtrk_phiSector", &m_matchtrk_phiSector);
   eventTree->Branch("matchtrk_z0", &m_matchtrk_z0);
   eventTree->Branch("matchtrk_d0", &m_matchtrk_d0);
   eventTree->Branch("matchtrk_chi2", &m_matchtrk_chi2);
@@ -593,6 +596,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
   m_matchtrk_pt->clear();
   m_matchtrk_eta->clear();
   m_matchtrk_phi->clear();
+  m_matchtrk_phiSector->clear();
   m_matchtrk_z0->clear();
   m_matchtrk_d0->clear();
   m_matchtrk_chi2->clear();
@@ -1355,6 +1359,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     float tmp_matchtrk_pt = -999;
     float tmp_matchtrk_eta = -999;
     float tmp_matchtrk_phi = -999;
+    unsigned int tmp_matchtrk_phiSector = 10;
     float tmp_matchtrk_z0 = -999;
     float tmp_matchtrk_d0 = -999;
     float tmp_matchtrk_chi2 = -999;
@@ -1375,6 +1380,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
       tmp_matchtrk_pt = matchedTracks.at(i_track)->momentum().perp();
       tmp_matchtrk_eta = matchedTracks.at(i_track)->momentum().eta();
       tmp_matchtrk_phi = matchedTracks.at(i_track)->momentum().phi();
+      tmp_matchtrk_phiSector = matchedTracks.at(i_track)->phiSector();
       tmp_matchtrk_z0 = matchedTracks.at(i_track)->z0();
 
       if (L1Tk_nPar == 5) {
@@ -1441,6 +1447,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     m_matchtrk_pt->push_back(tmp_matchtrk_pt);
     m_matchtrk_eta->push_back(tmp_matchtrk_eta);
     m_matchtrk_phi->push_back(tmp_matchtrk_phi);
+    m_matchtrk_phiSector->push_back(tmp_matchtrk_phiSector);
     m_matchtrk_z0->push_back(tmp_matchtrk_z0);
     m_matchtrk_d0->push_back(tmp_matchtrk_d0);
     m_matchtrk_chi2->push_back(tmp_matchtrk_chi2);

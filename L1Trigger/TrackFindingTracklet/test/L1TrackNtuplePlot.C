@@ -29,7 +29,12 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <math.h>
 
+#if __has_include(<boost/math/special_functions/beta.hpp>)
+#include <boost/math/special_functions/beta.hpp>
+#define HAS_BOOST
+#endif
 using namespace std;
 
 void SetPlotStyle();
@@ -39,6 +44,9 @@ double getIntervalContainingFractionOfEntries(TH1* histogram, double interval, i
 void makeResidualIntervalPlot(
     TString type, TString dir, TString variable, TH1F* h_68, TH1F* h_90, TH1F* h_99, double minY, double maxY);
 
+long double mjMethod(TH1* absResidualHistogram, double quantile);
+long double calcKMoment(std::vector<double> binCenters, double quantile, int k);
+long double calcVariance(std::vector<double> binCenters, double quantile);
 // ----------------------------------------------------------------------------------------------------------------
 // Main script
 // ----------------------------------------------------------------------------------------------------------------
@@ -54,9 +62,9 @@ void L1TrackNtuplePlot(TString type,
                        float TP_minPt = 2.0,
                        float TP_maxPt = 100.0,
                        float TP_maxEta = 2.4,
-                       float TP_maxDxy = 1.0,
-                       float TP_maxD0 = 1.0,
-                       bool doDetailedPlots = false) {
+                       float TP_maxDxy = 10.0,
+                       float TP_maxD0 = 10.0,
+                       bool doDetailedPlots = true) {
   // type:              this is the name of the input file you want to process (minus ".root" extension)
   // type_dir:          this is the directory containing the input file you want to process. Note that this must end with a "/", as in "EventSets/"
   // TP_select_pdgid:   if non-zero, only select TPs with a given PDG ID
@@ -158,6 +166,7 @@ void L1TrackNtuplePlot(TString type,
   vector<float>* matchtrk_pt;
   vector<float>* matchtrk_eta;
   vector<float>* matchtrk_phi;
+  vector<unsigned int>* matchtrk_phiSector;
   vector<float>* matchtrk_d0;
   vector<float>* matchtrk_z0;
   vector<float>* matchtrk_chi2;
@@ -209,6 +218,7 @@ void L1TrackNtuplePlot(TString type,
   TBranch* b_matchtrk_pt;
   TBranch* b_matchtrk_eta;
   TBranch* b_matchtrk_phi;
+  TBranch* b_matchtrk_phiSector;
   TBranch* b_matchtrk_d0;
   TBranch* b_matchtrk_z0;
   TBranch* b_matchtrk_chi2;
@@ -259,6 +269,7 @@ void L1TrackNtuplePlot(TString type,
   matchtrk_pt = 0;
   matchtrk_eta = 0;
   matchtrk_phi = 0;
+  matchtrk_phiSector = 0;
   matchtrk_d0 = 0;
   matchtrk_z0 = 0;
   matchtrk_chi2 = 0;
@@ -332,6 +343,7 @@ void L1TrackNtuplePlot(TString type,
     tree->SetBranchAddress("matchtrk_pt", &matchtrk_pt, &b_matchtrk_pt);
     tree->SetBranchAddress("matchtrk_eta", &matchtrk_eta, &b_matchtrk_eta);
     tree->SetBranchAddress("matchtrk_phi", &matchtrk_phi, &b_matchtrk_phi);
+    tree->SetBranchAddress("matchtrk_phiSector", &matchtrk_phiSector, &b_matchtrk_phiSector);
     tree->SetBranchAddress("matchtrk_d0", &matchtrk_d0, &b_matchtrk_d0);
     tree->SetBranchAddress("matchtrk_z0", &matchtrk_z0, &b_matchtrk_z0);
     tree->SetBranchAddress("matchtrk_chi2", &matchtrk_chi2, &b_matchtrk_chi2);
@@ -694,8 +706,18 @@ void L1TrackNtuplePlot(TString type,
   // ----------------------------------------------------------------------------------------------------------------
 
   const float maxD0plot = TP_maxD0;
-
   TH1F* h_tp_phi = new TH1F("tp_phi", ";Tracking particle #phi [rad]; Tracking particles / 0.1", 64, -3.2, 3.2);
+  TH1F* h_tp_phi_L = new TH1F("tp_phi_L", ";Tracking particle #phi [rad]; Tracking particles / 0.1", 64, -3.2, 3.2);
+  TH1F* h_tp_phi_H = new TH1F("tp_phi_H", ";Tracking particle #phi [rad]; Tracking particles / 0.1", 64, -3.2, 3.2);
+  TH1F* h_tp_phi_sector = new TH1F("tp_phi_sector",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_tp_phi_sector_pt2 = new TH1F("tp_phi_sector_pt2",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_tp_phi_sector_pt2To8 = new TH1F("tp_phi_sector_pt2To8",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_tp_phi_sector_pt8 = new TH1F("tp_phi_sector_pt8",";Track #phi; Tracks / 0.1",100,-1,1);
+  std::vector<TH1F*> h_tp_phi_sector_layer;
+  for(uint k = 0; k < 11;k++){
+    //TH1F* h = new TH1F("tp_phi_sector_layer"+k,";Track #phi; Tracks / 0.1",100,-1,1);
+    //h_tp_phi_sector_layer.push_back(h);
+  }
   TH1F* h_tp_d0 =
       new TH1F("tp_d0", ";Tracking particle d_{0} [cm]; Tracking particles / 0.01 cm", 50, -maxD0plot, maxD0plot);
   TH1F* h_tp_absd0 =
@@ -707,6 +729,20 @@ void L1TrackNtuplePlot(TString type,
 
   TH1F* h_match_tp_phi =
       new TH1F("match_tp_phi", ";Tracking particle #phi [rad]; Tracking particles / 0.1", 64, -3.2, 3.2);
+  TH1F* h_match_tp_phi_L =
+    new TH1F("match_tp_phi_L", ";Tracking particle #phi [rad]; Tracking particles / 0.1", 64, -3.2, 3.2);
+  TH1F* h_match_tp_phi_H =
+    new TH1F("match_tp_phi_H", ";Tracking particle #phi [rad]; Tracking particles / 0.1", 64, -3.2, 3.2);
+  TH1F* h_match_tp_phi_trkSector = new TH1F("match_tp_phi_trkSector",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_match_tp_phi_sector = new TH1F("match_tp_phi_sector",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_match_tp_phi_sector_pt2 = new TH1F("match_tp_phi_sector_pt2",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_match_tp_phi_sector_pt2To8 = new TH1F("match_tp_phi_sector_pt2To8",";Track #phi; Tracks / 0.1",100,-1,1);
+  TH1F* h_match_tp_phi_sector_pt8 = new TH1F("match_tp_phi_sector_pt8",";Track #phi; Tracks / 0.1",100,-1,1);
+  std::vector<TH1F*> h_match_tp_phi_sector_layer;
+  for(uint k = 0; k < 11;k++){
+    //TH1F* h = new TH1F("match_tp_phi_sector_layer"+k,";Track #phi; Tracks / 0.1",100,-1,1);
+    //h_match_tp_phi_sector_layer.push_back(h);
+  }
   TH1F* h_match_tp_d0 =
       new TH1F("match_tp_d0", ";Tracking particle d_{0} [cm]; Tracking particles / 0.01 cm", 50, -maxD0plot, maxD0plot);
   TH1F* h_match_tp_absd0 =
@@ -1235,17 +1271,52 @@ void L1TrackNtuplePlot(TString type,
         else
           n_all_eta2p5++;
 
-        if (std::abs(tp_pt->at(it)) > 2.0)
+	float sectorphi = tp_phi->at(it);
+	while (sectorphi < -TMath::Pi()/9 ) sectorphi += 2*TMath::Pi();
+	while (sectorphi > TMath::Pi()*2 ) sectorphi -= 2*TMath::Pi();
+	while (sectorphi > TMath::Pi()/9) sectorphi -= 2*TMath::Pi()/9;
+
+        if (std::abs(tp_pt->at(it)) > 2.0){
           n_all_ptg2++;
-        if (std::abs(tp_pt->at(it)) > 2.0 && std::abs(tp_pt->at(it)) < 8.0)
+	  h_tp_phi_sector_pt2->Fill(sectorphi);
+	}
+        if (std::abs(tp_pt->at(it)) > 2.0 && std::abs(tp_pt->at(it)) < 8.0){
           n_all_pt2to8++;
-        if (std::abs(tp_pt->at(it)) > 8.0)
+	  h_tp_phi_sector_pt2To8->Fill(sectorphi);
+	}
+        if (std::abs(tp_pt->at(it)) > 8.0){
           n_all_ptg8++;
+	  h_tp_phi_sector_pt8->Fill(sectorphi);
+	}
         if (std::abs(tp_pt->at(it)) > 40.0)
           n_all_ptg40++;
 
         h_tp_eta->Fill(tp_eta->at(it));
         h_tp_phi->Fill(tp_phi->at(it));
+	h_tp_phi_sector->Fill(sectorphi);
+	int num_layers = 6;
+	int num_discs = 5;
+	int lhits = matchtrk_lhits->at(it);
+	int dhits = matchtrk_dhits->at(it);
+	std::vector<int> layers = {};
+	for (int layer_index = 0; layer_index < num_layers + num_discs; layer_index++) {
+	  if (layer_index < num_layers) {
+	    layers.push_back(lhits % 10);
+	    lhits /= 10;
+	  } else {
+	    layers.push_back(dhits % 10);
+	    dhits /= 10;
+	  }
+	}
+	
+	for (unsigned int layer = 0; layer < layers.size(); layer++) {
+	  if (layers.at(layer)) {                                         // if there was a hit at this layer...
+	    //h_tp_phi_sector_layer[i]->Fill(sectorphi);
+	  }
+	}
+
+	
+
         h_tp_z0->Fill(tp_z0->at(it));
         h_tp_d0->Fill(tp_d0->at(it));
         h_tp_absd0->Fill(std::abs(tp_d0->at(it)));
@@ -1264,9 +1335,11 @@ void L1TrackNtuplePlot(TString type,
         if (tp_pt->at(it) < 8.0) {
           h_tp_eta_L->Fill(tp_eta->at(it));
           h_tp_z0_L->Fill(tp_z0->at(it));
+	  h_tp_phi_L->Fill(tp_phi->at(it));
         } else {
           h_tp_eta_H->Fill(tp_eta->at(it));
           h_tp_z0_H->Fill(tp_z0->at(it));
+	  h_tp_phi_H->Fill(tp_phi->at(it));
         }
       }
 
@@ -1389,6 +1462,20 @@ void L1TrackNtuplePlot(TString type,
       if (tp_pt->at(it) > TP_minPt) {
         h_match_tp_eta->Fill(tp_eta->at(it));
         h_match_tp_phi->Fill(tp_phi->at(it));
+	if(matchtrk_phiSector->at(it)!=10){
+	  float trkSectorPhi = tp_phi->at(it) - ( matchtrk_phiSector->at(it)*2*TMath::Pi()/9 );
+	  if (trkSectorPhi > TMath::Pi()) trkSectorPhi -= 2*TMath::Pi();
+	  if (trkSectorPhi < -TMath::Pi()) trkSectorPhi += 2*TMath::Pi();
+	  float sectorphi = tp_phi->at(it);
+	  while (sectorphi < -TMath::Pi()/9 ) sectorphi += 2*TMath::Pi();
+	  while (sectorphi > TMath::Pi()*2 ) sectorphi -= 2*TMath::Pi();
+	  while (sectorphi > TMath::Pi()/9) sectorphi -= 2*TMath::Pi()/9;
+	  h_match_tp_phi_sector->Fill(sectorphi);
+	  h_match_tp_phi_trkSector->Fill(trkSectorPhi);
+	  if (std::abs(tp_pt->at(it)) > 2.0) h_match_tp_phi_sector_pt2->Fill(sectorphi);
+	  if (std::abs(tp_pt->at(it)) > 2.0 && std::abs(tp_pt->at(it)) < 8.0) h_match_tp_phi_sector_pt2To8->Fill(sectorphi);
+	  if (std::abs(tp_pt->at(it)) > 8.0) h_match_tp_phi_sector_pt8->Fill(sectorphi);
+	}
         h_match_tp_z0->Fill(tp_z0->at(it));
         h_match_tp_d0->Fill(tp_d0->at(it));
         h_match_tp_absd0->Fill(std::abs(tp_d0->at(it)));
@@ -1423,9 +1510,11 @@ void L1TrackNtuplePlot(TString type,
         if (tp_pt->at(it) < 8.0) {
           h_match_tp_eta_L->Fill(tp_eta->at(it));
           h_match_tp_z0_L->Fill(tp_z0->at(it));
+	  h_match_tp_phi_L->Fill(tp_phi->at(it));
         } else {
           h_match_tp_z0_H->Fill(tp_z0->at(it));
           h_match_tp_eta_H->Fill(tp_eta->at(it));
+	  h_match_tp_phi_H->Fill(tp_phi->at(it));
         }
       }
 
@@ -1817,54 +1906,90 @@ void L1TrackNtuplePlot(TString type,
     h2_resVsPt_d0->SetBinError(i + 1, h_resVsPt_d0[i]->GetRMSError());
 
     h2_resVsPt_pt_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_pt[i], 0.68));
+    h2_resVsPt_pt_68->SetBinError(i + 1, mjMethod(h_absResVsPt_pt[i],0.68));
     h2_resVsPt_pt_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_pt[i], 0.90));
+    h2_resVsPt_pt_90->SetBinError(i + 1, mjMethod(h_absResVsPt_pt[i],0.90));
     h2_resVsPt_pt_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_pt[i], 0.99));
+    h2_resVsPt_pt_99->SetBinError(i + 1, mjMethod(h_absResVsPt_pt[i],0.99));
 
     h2_resVsPt_ptRel_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_ptRel[i], 0.68));
+    h2_resVsPt_ptRel_68->SetBinError(i + 1, mjMethod(h_absResVsPt_ptRel[i],0.68));
     h2_resVsPt_ptRel_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_ptRel[i], 0.90));
+    h2_resVsPt_ptRel_90->SetBinError(i + 1, mjMethod(h_absResVsPt_ptRel[i],0.90));
     h2_resVsPt_ptRel_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_ptRel[i], 0.99));
+    h2_resVsPt_ptRel_99->SetBinError(i + 1, mjMethod(h_absResVsPt_ptRel[i],0.99));
 
     h2_resVsPt_eta_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_eta[i], 0.68));
+    h2_resVsPt_eta_68->SetBinError(i + 1, mjMethod(h_absResVsPt_eta[i],0.68));
     h2_resVsPt_eta_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_eta[i], 0.90));
+    h2_resVsPt_eta_90->SetBinError(i + 1, mjMethod(h_absResVsPt_eta[i],0.90));
     h2_resVsPt_eta_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_eta[i], 0.99));
+    h2_resVsPt_eta_99->SetBinError(i + 1, mjMethod(h_absResVsPt_eta[i],0.99));
 
     h2_resVsPt_z0_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_z0[i], 0.68));
+    h2_resVsPt_z0_68->SetBinError(i + 1, mjMethod(h_absResVsPt_z0[i],0.68));
     h2_resVsPt_z0_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_z0[i], 0.90));
+    h2_resVsPt_z0_90->SetBinError(i + 1, mjMethod(h_absResVsPt_z0[i],0.90));
     h2_resVsPt_z0_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_z0[i], 0.99));
+    h2_resVsPt_z0_99->SetBinError(i + 1, mjMethod(h_absResVsPt_z0[i],0.99));
 
     h2_resVsPt_phi_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_phi[i], 0.68));
+    h2_resVsPt_phi_68->SetBinError(i + 1, mjMethod(h_absResVsPt_phi[i],0.68));
     h2_resVsPt_phi_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_phi[i], 0.90));
+    h2_resVsPt_phi_90->SetBinError(i + 1, mjMethod(h_absResVsPt_phi[i],0.90));
     h2_resVsPt_phi_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_phi[i], 0.99));
+    h2_resVsPt_phi_99->SetBinError(i + 1, mjMethod(h_absResVsPt_phi[i],0.99));
 
     h2_resVsPt_d0_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_d0[i], 0.68));
+    h2_resVsPt_d0_68->SetBinError(i + 1, mjMethod(h_absResVsPt_d0[i],0.68));
     h2_resVsPt_d0_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_d0[i], 0.90));
+    h2_resVsPt_d0_90->SetBinError(i + 1, mjMethod(h_absResVsPt_d0[i],0.90));
     h2_resVsPt_d0_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_d0[i], 0.99));
+    h2_resVsPt_d0_99->SetBinError(i + 1, mjMethod(h_absResVsPt_d0[i],0.99));
   }
 
   for (int i = 0; i < nRANGE_L; i++) {
     h2_resVsPt_pt_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_pt_L[i], 0.68));
+    h2_resVsPt_pt_L_68->SetBinError(i + 1, mjMethod(h_absResVsPt_pt_L[i],0.68));
     h2_resVsPt_pt_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_pt_L[i], 0.90));
+    h2_resVsPt_pt_L_90->SetBinError(i + 1, mjMethod(h_absResVsPt_pt_L[i],0.90));
     h2_resVsPt_pt_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_pt_L[i], 0.99));
+    h2_resVsPt_pt_L_99->SetBinError(i + 1, mjMethod(h_absResVsPt_pt_L[i],0.99));
 
     h2_resVsPt_ptRel_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_ptRel_L[i], 0.68));
+    h2_resVsPt_ptRel_L_68->SetBinError(i + 1, mjMethod(h_absResVsPt_ptRel_L[i],0.68));
     h2_resVsPt_ptRel_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_ptRel_L[i], 0.90));
+    h2_resVsPt_ptRel_L_90->SetBinError(i + 1, mjMethod(h_absResVsPt_ptRel_L[i],0.90));
     h2_resVsPt_ptRel_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_ptRel_L[i], 0.99));
+    h2_resVsPt_ptRel_L_99->SetBinError(i + 1, mjMethod(h_absResVsPt_ptRel_L[i],0.99));
 
     h2_resVsPt_eta_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_eta_L[i], 0.68));
+    h2_resVsPt_eta_L_68->SetBinError(i + 1, mjMethod(h_absResVsPt_eta_L[i],0.68));
     h2_resVsPt_eta_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_eta_L[i], 0.90));
+    h2_resVsPt_eta_L_90->SetBinError(i + 1, mjMethod(h_absResVsPt_eta_L[i],0.90));
     h2_resVsPt_eta_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_eta_L[i], 0.99));
+    h2_resVsPt_eta_L_99->SetBinError(i + 1, mjMethod(h_absResVsPt_eta_L[i],0.99));
 
     h2_resVsPt_z0_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_z0_L[i], 0.68));
+    h2_resVsPt_z0_L_68->SetBinError(i + 1, mjMethod(h_absResVsPt_z0_L[i],0.68));
     h2_resVsPt_z0_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_z0_L[i], 0.90));
+    h2_resVsPt_z0_L_90->SetBinError(i + 1, mjMethod(h_absResVsPt_z0_L[i],0.90));
     h2_resVsPt_z0_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_z0_L[i], 0.99));
+    h2_resVsPt_z0_L_99->SetBinError(i + 1, mjMethod(h_absResVsPt_z0_L[i],0.99));
 
     h2_resVsPt_phi_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_phi_L[i], 0.68));
+    h2_resVsPt_phi_L_68->SetBinError(i + 1, mjMethod(h_absResVsPt_phi_L[i],0.68));
     h2_resVsPt_phi_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_phi_L[i], 0.90));
+    h2_resVsPt_phi_L_90->SetBinError(i + 1, mjMethod(h_absResVsPt_phi_L[i],0.90));
     h2_resVsPt_phi_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_phi_L[i], 0.99));
+    h2_resVsPt_phi_L_99->SetBinError(i + 1, mjMethod(h_absResVsPt_phi_L[i],0.99));
 
     h2_resVsPt_d0_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_d0_L[i], 0.68));
+    h2_resVsPt_d0_L_68->SetBinError(i + 1, mjMethod(h_absResVsPt_d0_L[i],0.68));
     h2_resVsPt_d0_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_d0_L[i], 0.90));
+    h2_resVsPt_d0_L_90->SetBinError(i + 1, mjMethod(h_absResVsPt_d0_L[i],0.90));
     h2_resVsPt_d0_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPt_d0_L[i], 0.99));
+    h2_resVsPt_d0_L_99->SetBinError(i + 1, mjMethod(h_absResVsPt_d0_L[i],0.99));
   }
 
   // resolution vs. eta histograms
@@ -2073,66 +2198,111 @@ void L1TrackNtuplePlot(TString type,
     h2_resVsEta_d0_H->SetBinError(i + 1, h_resVsEta_d0_H[i]->GetRMSError());
 
     h2_resVsEta_eta_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta[i], 0.68));
+    h2_resVsEta_eta_68->SetBinError(i + 1, mjMethod(h_absResVsEta_eta[i],0.68));
     h2_resVsEta_eta_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta[i], 0.90));
+    h2_resVsEta_eta_90->SetBinError(i + 1, mjMethod(h_absResVsEta_eta[i],0.90));
     h2_resVsEta_eta_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta[i], 0.99));
+    h2_resVsEta_eta_99->SetBinError(i + 1, mjMethod(h_absResVsEta_eta[i],0.99));
 
     h2_resVsEta_z0_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0[i], 0.68));
+    h2_resVsEta_z0_68->SetBinError(i + 1, mjMethod(h_absResVsEta_z0[i],0.68));
     h2_resVsEta_z0_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0[i], 0.90));
+    h2_resVsEta_z0_90->SetBinError(i + 1, mjMethod(h_absResVsEta_z0[i],0.90));
     h2_resVsEta_z0_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0[i], 0.99));
+    h2_resVsEta_z0_99->SetBinError(i + 1, mjMethod(h_absResVsEta_z0[i],0.99));
 
     h2_resVsEta_phi_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi[i], 0.68));
+    h2_resVsEta_phi_68->SetBinError(i + 1, mjMethod(h_absResVsEta_phi[i],0.68));
     h2_resVsEta_phi_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi[i], 0.90));
+    h2_resVsEta_phi_90->SetBinError(i + 1, mjMethod(h_absResVsEta_phi[i],0.90));
     h2_resVsEta_phi_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi[i], 0.99));
+    h2_resVsEta_phi_99->SetBinError(i + 1, mjMethod(h_absResVsEta_phi[i],0.99));
 
     h2_resVsEta_ptRel_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel[i], 0.68));
+    h2_resVsEta_ptRel_68->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel[i],0.68));
     h2_resVsEta_ptRel_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel[i], 0.90));
+    h2_resVsEta_ptRel_90->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel[i],0.90));
     h2_resVsEta_ptRel_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel[i], 0.99));
+    h2_resVsEta_ptRel_99->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel[i],0.99));
 
     h2_resVsEta_d0_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0[i], 0.68));
+    h2_resVsEta_d0_68->SetBinError(i + 1, mjMethod(h_absResVsEta_d0[i],0.68));
     h2_resVsEta_d0_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0[i], 0.90));
+    h2_resVsEta_d0_90->SetBinError(i + 1, mjMethod(h_absResVsEta_d0[i],0.90));
     h2_resVsEta_d0_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0[i], 0.99));
+    h2_resVsEta_d0_99->SetBinError(i + 1, mjMethod(h_absResVsEta_d0[i],0.99));
 
     h2_resVsEta_eta_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta_L[i], 0.68));
+    h2_resVsEta_eta_L_68->SetBinError(i + 1, mjMethod(h_absResVsEta_eta_L[i],0.68));
     h2_resVsEta_z0_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0_L[i], 0.68));
+    h2_resVsEta_z0_L_68->SetBinError(i + 1, mjMethod(h_absResVsEta_z0_L[i],0.68));
     h2_resVsEta_phi_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi_L[i], 0.68));
+    h2_resVsEta_phi_L_68->SetBinError(i + 1, mjMethod(h_absResVsEta_phi_L[i],0.68));
     h2_resVsEta_ptRel_L_68->SetBinContent(i + 1,
                                           getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel_L[i], 0.68));
+    h2_resVsEta_ptRel_L_68->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel_L[i],0.68));
     h2_resVsEta_d0_L_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0_L[i], 0.68));
+    h2_resVsEta_d0_L_68->SetBinError(i + 1, mjMethod(h_absResVsEta_d0_L[i],0.68));
 
     h2_resVsEta_eta_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta_L[i], 0.90));
+    h2_resVsEta_eta_L_90->SetBinError(i + 1, mjMethod(h_absResVsEta_eta_L[i],0.90));
     h2_resVsEta_z0_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0_L[i], 0.90));
+    h2_resVsEta_z0_L_90->SetBinError(i + 1, mjMethod(h_absResVsEta_z0_L[i],0.90));
     h2_resVsEta_phi_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi_L[i], 0.90));
+    h2_resVsEta_phi_L_90->SetBinError(i + 1, mjMethod(h_absResVsEta_phi_L[i],0.90));
     h2_resVsEta_ptRel_L_90->SetBinContent(i + 1,
                                           getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel_L[i], 0.90));
+    h2_resVsEta_ptRel_L_90->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel_L[i],0.90));
     h2_resVsEta_d0_L_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0_L[i], 0.90));
+    h2_resVsEta_d0_L_90->SetBinError(i + 1, mjMethod(h_absResVsEta_d0_L[i],0.90));
 
     h2_resVsEta_eta_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta_L[i], 0.99));
+    h2_resVsEta_eta_L_99->SetBinError(i + 1, mjMethod(h_absResVsEta_eta_L[i],0.99));
     h2_resVsEta_z0_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0_L[i], 0.99));
+    h2_resVsEta_z0_L_99->SetBinError(i + 1, mjMethod(h_absResVsEta_z0_L[i],0.99));
     h2_resVsEta_phi_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi_L[i], 0.99));
+    h2_resVsEta_phi_L_99->SetBinError(i + 1, mjMethod(h_absResVsEta_phi_L[i],0.99));
     h2_resVsEta_ptRel_L_99->SetBinContent(i + 1,
                                           getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel_L[i], 0.99));
+    h2_resVsEta_ptRel_L_99->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel_L[i],0.99));
     h2_resVsEta_d0_L_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0_L[i], 0.99));
+    h2_resVsEta_d0_L_99->SetBinError(i + 1, mjMethod(h_absResVsEta_d0_L[i],0.99));
 
     h2_resVsEta_eta_H_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta_H[i], 0.68));
+    h2_resVsEta_eta_H_68->SetBinError(i + 1, mjMethod(h_absResVsEta_eta_H[i],0.68));
     h2_resVsEta_z0_H_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0_H[i], 0.68));
+    h2_resVsEta_z0_H_68->SetBinError(i + 1, mjMethod(h_absResVsEta_z0_H[i],0.68));
     h2_resVsEta_phi_H_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi_H[i], 0.68));
+    h2_resVsEta_phi_H_68->SetBinError(i + 1, mjMethod(h_absResVsEta_phi_H[i],0.68));
     h2_resVsEta_ptRel_H_68->SetBinContent(i + 1,
                                           getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel_H[i], 0.68));
+    h2_resVsEta_ptRel_H_68->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel_H[i],0.68));
     h2_resVsEta_d0_H_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0_H[i], 0.68));
+    h2_resVsEta_d0_H_68->SetBinError(i + 1, mjMethod(h_absResVsEta_d0_H[i],0.68));
 
     h2_resVsEta_eta_H_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta_H[i], 0.90));
+    h2_resVsEta_eta_H_90->SetBinError(i + 1, mjMethod(h_absResVsEta_eta_H[i],0.90));
     h2_resVsEta_z0_H_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0_H[i], 0.90));
+    h2_resVsEta_z0_H_90->SetBinError(i + 1, mjMethod(h_absResVsEta_z0_H[i],0.90));
     h2_resVsEta_phi_H_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi_H[i], 0.90));
+    h2_resVsEta_phi_H_90->SetBinError(i + 1, mjMethod(h_absResVsEta_phi_H[i],0.90));
     h2_resVsEta_ptRel_H_90->SetBinContent(i + 1,
                                           getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel_H[i], 0.90));
+    h2_resVsEta_ptRel_H_90->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel_H[i],0.90));
     h2_resVsEta_d0_H_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0_H[i], 0.90));
+    h2_resVsEta_d0_H_90->SetBinError(i + 1, mjMethod(h_absResVsEta_d0_H[i],0.90));
 
     h2_resVsEta_eta_H_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_eta_H[i], 0.99));
+    h2_resVsEta_eta_H_99->SetBinError(i + 1, mjMethod(h_absResVsEta_eta_H[i],0.99));
     h2_resVsEta_z0_H_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_z0_H[i], 0.99));
+    h2_resVsEta_z0_H_99->SetBinError(i + 1, mjMethod(h_absResVsEta_z0_H[i],0.99));
     h2_resVsEta_phi_H_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_phi_H[i], 0.99));
+    h2_resVsEta_phi_H_99->SetBinError(i + 1, mjMethod(h_absResVsEta_phi_H[i],0.99));
     h2_resVsEta_ptRel_H_99->SetBinContent(i + 1,
                                           getIntervalContainingFractionOfEntries(h_absResVsEta_ptRel_H[i], 0.99));
+    h2_resVsEta_ptRel_H_99->SetBinError(i + 1, mjMethod(h_absResVsEta_ptRel_H[i],0.99));
     h2_resVsEta_d0_H_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsEta_d0_H[i], 0.99));
+    h2_resVsEta_d0_H_99->SetBinError(i + 1, mjMethod(h_absResVsEta_d0_H[i],0.99));
 
     // ---------------------------------------------------------------------------------------------------
     // gaussian fit instead
@@ -2311,12 +2481,18 @@ void L1TrackNtuplePlot(TString type,
 
   for (int i = 0; i < nPHIRANGE; i++) {
     h2_resVsPhi_pt_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPhi_pt[i], 0.68));
+    h2_resVsPhi_pt_68->SetBinError(i + 1, mjMethod(h_absResVsPhi_pt[i],0.68));
     h2_resVsPhi_pt_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPhi_pt[i], 0.90));
+    h2_resVsPhi_pt_90->SetBinError(i + 1, mjMethod(h_absResVsPhi_pt[i],0.90));
     h2_resVsPhi_pt_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPhi_pt[i], 0.99));
+    h2_resVsPhi_pt_99->SetBinError(i + 1, mjMethod(h_absResVsPhi_pt[i],0.99));
 
     h2_resVsPhi_ptRel_68->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPhi_ptRel[i], 0.68));
+    h2_resVsPhi_ptRel_68->SetBinError(i + 1, mjMethod(h_absResVsPhi_ptRel[i],0.68));
     h2_resVsPhi_ptRel_90->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPhi_ptRel[i], 0.90));
+    h2_resVsPhi_ptRel_90->SetBinError(i + 1, mjMethod(h_absResVsPhi_ptRel[i],0.90));
     h2_resVsPhi_ptRel_99->SetBinContent(i + 1, getIntervalContainingFractionOfEntries(h_absResVsPhi_ptRel[i], 0.99));
+    h2_resVsPhi_ptRel_99->SetBinError(i + 1, mjMethod(h_absResVsPhi_ptRel[i],0.99));
   }
 
   // set minimum to zero
@@ -2836,7 +3012,16 @@ void L1TrackNtuplePlot(TString type,
   h_tp_pt->Rebin(2);
   h_match_tp_pt->Rebin(2);
   h_tp_phi->Rebin(2);
+  h_tp_phi_sector->Rebin(2);
+  h_tp_phi_sector_pt2->Rebin(2);
+  h_tp_phi_sector_pt2To8->Rebin(2);
+  h_tp_phi_sector_pt8->Rebin(2);
   h_match_tp_phi->Rebin(2);
+  h_match_tp_phi_trkSector->Rebin(2);
+  h_match_tp_phi_sector->Rebin(2);
+  h_match_tp_phi_sector_pt2->Rebin(2);
+  h_match_tp_phi_sector_pt2To8->Rebin(2);
+  h_match_tp_phi_sector_pt8->Rebin(2);
 
   h_tp_pt_L->Rebin(2);
   h_match_tp_pt_L->Rebin(2);
@@ -2930,6 +3115,49 @@ void L1TrackNtuplePlot(TString type,
   h_eff_phi->GetYaxis()->SetTitle("Efficiency");
   h_eff_phi->Divide(h_match_tp_phi, h_tp_phi, 1.0, 1.0, "B");
 
+  h_match_tp_phi_L->Sumw2();
+  h_tp_phi_L->Sumw2();
+  TH1F* h_eff_phi_L = (TH1F*)h_match_tp_phi_L->Clone();
+  h_eff_phi_L->SetName("eff_phi_L");
+  h_eff_phi_L->GetYaxis()->SetTitle("Efficiency");
+  h_eff_phi_L->Divide(h_match_tp_phi_L, h_tp_phi_L, 1.0, 1.0, "B");
+
+  h_match_tp_phi_H->Sumw2();
+  h_tp_phi_H->Sumw2();
+  TH1F* h_eff_phi_H = (TH1F*)h_match_tp_phi_H->Clone();
+  h_eff_phi_H->SetName("eff_phi_H");
+  h_eff_phi_H->GetYaxis()->SetTitle("Efficiency");
+  h_eff_phi_H->Divide(h_match_tp_phi_H, h_tp_phi_H, 1.0, 1.0, "B");
+
+  h_match_tp_phi_trkSector->Sumw2();
+  h_match_tp_phi_sector->Sumw2();
+  h_tp_phi_sector->Sumw2();
+  TH1F* h_eff_phi_sector = (TH1F*)h_match_tp_phi_sector->Clone();
+  h_eff_phi_sector->SetName("eff_phi_sector");
+  h_eff_phi_sector->GetYaxis()->SetTitle("Efficiency");
+  h_eff_phi_sector->Divide(h_match_tp_phi_sector, h_tp_phi_sector, 1.0, 1.0, "B");
+
+  h_match_tp_phi_sector_pt2->Sumw2();
+  h_tp_phi_sector_pt2->Sumw2();
+  TH1F* h_eff_phi_sector_pt2 = (TH1F*)h_match_tp_phi_sector_pt2->Clone();
+  h_eff_phi_sector_pt2->SetName("eff_phi_sector_pt2");
+  h_eff_phi_sector_pt2->GetYaxis()->SetTitle("Efficiency");
+  h_eff_phi_sector_pt2->Divide(h_match_tp_phi_sector_pt2, h_tp_phi_sector_pt2, 1.0, 1.0, "B");
+
+  h_match_tp_phi_sector_pt2To8->Sumw2();
+  h_tp_phi_sector_pt2To8->Sumw2();
+  TH1F* h_eff_phi_sector_pt2To8 = (TH1F*)h_match_tp_phi_sector_pt2To8->Clone();
+  h_eff_phi_sector_pt2To8->SetName("eff_phi_sector_pt2To8");
+  h_eff_phi_sector_pt2To8->GetYaxis()->SetTitle("Efficiency");
+  h_eff_phi_sector_pt2To8->Divide(h_match_tp_phi_sector_pt2To8, h_tp_phi_sector_pt2To8, 1.0, 1.0, "B");
+
+  h_match_tp_phi_sector_pt8->Sumw2();
+  h_tp_phi_sector_pt8->Sumw2();
+  TH1F* h_eff_phi_sector_pt8 = (TH1F*)h_match_tp_phi_sector_pt8->Clone();
+  h_eff_phi_sector_pt8->SetName("eff_phi_sector_pt8");
+  h_eff_phi_sector_pt8->GetYaxis()->SetTitle("Efficiency");
+  h_eff_phi_sector_pt8->Divide(h_match_tp_phi_sector_pt8, h_tp_phi_sector_pt8, 1.0, 1.0, "B");
+
   h_match_tp_z0->Sumw2();
   h_tp_z0->Sumw2();
   TH1F* h_eff_z0 = (TH1F*)h_match_tp_z0->Clone();
@@ -2991,6 +3219,12 @@ void L1TrackNtuplePlot(TString type,
   h_eff_eta_35->SetAxisRange(0, 1.1, "Y");
   h_eff_eta_5->SetAxisRange(0, 1.1, "Y");
   h_eff_phi->SetAxisRange(0, 1.1, "Y");
+  h_eff_phi_L->SetAxisRange(0, 1.1, "Y");
+  h_eff_phi_H->SetAxisRange(0, 1.1, "Y");
+  h_eff_phi_sector->SetAxisRange(0, 1.1, "Y");
+  h_eff_phi_sector_pt2->SetAxisRange(0, 1.1, "Y");
+  h_eff_phi_sector_pt2To8->SetAxisRange(0, 1.1, "Y");
+  h_eff_phi_sector_pt8->SetAxisRange(0, 1.1, "Y");
   h_eff_z0->SetAxisRange(0, 1.1, "Y");
   h_eff_z0_L->SetAxisRange(0, 1.1, "Y");
   h_eff_z0_H->SetAxisRange(0, 1.1, "Y");
@@ -3003,7 +3237,7 @@ void L1TrackNtuplePlot(TString type,
   gPad->SetGridy();
 
   // draw and save plots
-  h_eff_pt->Draw();
+  h_eff_pt->Draw("p");
   h_eff_pt->Write();
   c.SaveAs(DIR + type + "_eff_pt.pdf");
 
@@ -3012,7 +3246,7 @@ void L1TrackNtuplePlot(TString type,
     c.SaveAs(DIR + type + "_eff_pt_zoom.pdf");
   }
 
-  h_eff_pt_L->Draw();
+  h_eff_pt_L->Draw("p");
   h_eff_pt_L->Write();
   sprintf(ctxt, "p_{T} < 8 GeV");
   mySmallText(0.45, 0.5, 1, ctxt);
@@ -3025,28 +3259,28 @@ void L1TrackNtuplePlot(TString type,
     mySmallText(0.45, 0.5, 1, ctxt);
     c.SaveAs(DIR + type + "_eff_pt_LC.pdf");
   }
-  h_eff_pt_H->Draw();
+  h_eff_pt_H->Draw("p");
   h_eff_pt_H->Write();
   sprintf(ctxt, "p_{T} > 8 GeV");
   mySmallText(0.45, 0.5, 1, ctxt);
   c.SaveAs(DIR + type + "_eff_pt_H.pdf");
 
-  h_eff_eta->Draw();
+  h_eff_eta->Draw("p");
   h_eff_eta->Write();
   c.SaveAs(DIR + type + "_eff_eta.pdf");
 
-  if (type.Contains("Mu")) {
-    h_eff_eta->GetYaxis()->SetRangeUser(0.8, 1.01);  // zoomed-in plot
-    c.SaveAs(DIR + type + "_eff_eta_zoom.pdf");
-  }
+  //if (type.Contains("Mu")) {
+  h_eff_eta->GetYaxis()->SetRangeUser(0.8, 1.01);  // zoomed-in plot
+  c.SaveAs(DIR + type + "_eff_eta_zoom.pdf");
+  //}
 
-  h_eff_eta_L->Draw();
+  h_eff_eta_L->Draw("p");
   h_eff_eta_L->Write();
   sprintf(ctxt, "p_{T} < 8 GeV");
   mySmallText(0.45, 0.5, 1, ctxt);
   c.SaveAs(DIR + type + "_eff_eta_L.pdf");
 
-  h_eff_eta_H->Draw();
+  h_eff_eta_H->Draw("p");
   h_eff_eta_H->Write();
   sprintf(ctxt, "p_{T} > 8 GeV");
   mySmallText(0.45, 0.5, 1, ctxt);
@@ -3083,9 +3317,33 @@ void L1TrackNtuplePlot(TString type,
     h_eff_phi->Write();
     c.SaveAs(DIR + type + "_eff_phi.pdf");
 
+    h_match_tp_phi_trkSector->Write();
+    h_match_tp_phi_sector->Write();
+
+    h_eff_phi_sector->Draw();
+    h_eff_phi_sector->Write();
+    c.SaveAs(DIR + type + "_eff_phi_sector.pdf");
+
+    h_eff_phi_sector_pt2->Draw();
+    h_eff_phi_sector_pt2->Write();
+    c.SaveAs(DIR + type + "_eff_phi_sector_pt2.pdf");
+
+    h_eff_phi_sector_pt2To8->Draw();
+    h_eff_phi_sector_pt2To8->Write();
+    c.SaveAs(DIR + type + "_eff_phi_sector_pt2To8.pdf");
+
+    h_eff_phi_sector_pt8->Draw();
+    h_eff_phi_sector_pt8->Write();
+    c.SaveAs(DIR + type + "_eff_phi_sector_pt8.pdf");
+
+    h_eff_phi_L->Write();
+    h_eff_phi_H->Write();
+
     if (type.Contains("Mu")) {
       h_eff_phi->GetYaxis()->SetRangeUser(0.8, 1.01);  // zoomed-in plot
       c.SaveAs(DIR + type + "_eff_phi_zoom.pdf");
+      h_eff_phi_sector->GetYaxis()->SetRangeUser(0.5, 0.6);  // zoomed-in plot
+      c.SaveAs(DIR + type + "_eff_phi_sector_zoom.pdf");
     }
   }
 
@@ -3610,14 +3868,14 @@ void L1TrackNtuplePlot(TString type,
   cout << "# TP/event (pt > 3.0) = " << (float)ntp_pt3 / nevt << endl;
   cout << "# TP/event (pt > 10.0) = " << (float)ntp_pt10 / nevt << endl;
 
-  cout << "# tracks/event (pt > " << std::max(TP_minPt, 2.0f) << ") = " << (float)ntrk_pt2 / nevt << endl;
-  cout << "# tracks/event (pt > 3.0) = " << (float)ntrk_pt3 / nevt << endl;
-  cout << "# tracks/event (pt > 10.0) = " << (float)ntrk_pt10 / nevt << endl;
+  cout << "# tracks/event (pt > " << std::max(TP_minPt, 2.0f) << ") = " << (float)ntrk_pt2 / nevt << " +- " << sqrt((float)ntrk_pt2) / nevt  << endl;
+  cout << "# tracks/event (pt > 3.0) = " << (float)ntrk_pt3 / nevt << " +- " << sqrt((float)ntrk_pt3) / nevt  << endl;
+  cout << "# tracks/event (pt > 10.0) = " << (float)ntrk_pt10 / nevt << " +- " << sqrt((float)ntrk_pt10) / nevt  << endl;
 }
 
 void SetPlotStyle() {
   // from ATLAS plot style macro
-
+  gStyle->SetErrorX(0.);
   // use plain black on white colors
   gStyle->SetFrameBorderMode(0);
   gStyle->SetFrameFillColor(0);
@@ -3664,7 +3922,7 @@ void SetPlotStyle() {
   gStyle->SetLineStyleString(2, "[12 12]");
 
   // get rid of error bar caps
-  gStyle->SetEndErrorSize(0.);
+  gStyle->SetEndErrorSize(0);
 
   // do not display any of the standard histogram decorations
   gStyle->SetOptTitle(0);
@@ -3727,11 +3985,11 @@ void makeResidualIntervalPlot(
   h_90->SetMarkerStyle(26);
   h_99->SetMarkerStyle(24);
 
-  h_68->Draw("P");
+  h_68->Draw("p");
   h_68->Write();
-  h_90->Draw("P same");
+  h_90->Draw("p same");
   h_90->Write();
-  h_99->Draw("P same");
+  h_99->Draw("p same");
   h_99->Write();
 
   TLegend* l = new TLegend(0.65, 0.65, 0.85, 0.85);
@@ -3748,3 +4006,92 @@ void makeResidualIntervalPlot(
 
   delete l;
 }
+
+
+#ifdef HAS_BOOST
+//Maritz-Jarrett Method Helper Functions
+long double calcKMoment(std::vector<double> binCenters, double quantile, int k){
+  long double sum = 0;
+  long double n = binCenters.size();
+  //long double a = quantile*(n+1);
+  //long double b = (1-quantile)*(n+1);
+  int m = (quantile * n) + 0.5;
+  long double a = m-1;
+  long double b = n-m;
+  for (int i=1;i<n+1;i++){
+    long double l_i = (i-1)/n;
+    long double r_i = i/n;
+    //Normalized incomplete beta function from Boost's special function library
+    if((a==0)&&(b==0)&&((l_i == 1) || (r_i == 1))){
+      continue;
+    }
+    long double W_ni = boost::math::ibeta(a,b,r_i)-boost::math::ibeta(a,b,l_i);
+    sum += W_ni * pow(binCenters[i-1],k);
+  }
+  return sum;
+}
+#if 0
+long double calcVariance(std::vector<double> binCenters, double quantile){
+  long double w_sum = 0, w_sum2 = 0, mean = 0, S = 0;
+  long double n = binCenters.size();
+  int m = (quantile * n) + 0.5;
+  long double a = m-1;
+  long double b = n-m;
+  for (int i=1;i<n+1;i++){
+    long double l_i = (i-1)/n;
+    long double r_i = i/n;
+    //Normalized incomplete beta function from Boost's special function library
+    long double w = boost::math::ibeta(a,b,r_i)-boost::math::ibeta(a,b,l_i);
+    if(w==0){
+      continue;
+    }
+    w_sum = w_sum + w;
+    w_sum2 = w_sum2 + w * w;
+    long double mean_old = mean;
+    //cout<<"mean_old: "<<mean_old<<endl;
+    //cout<<"w: "<<w<<endl;
+    //cout<<"w_sum: "<<w_sum<<endl;
+    //cout<<"w_sum2: "<<w_sum2<<endl;
+    //cout<<"w/w_sum: "<<w/w_sum<<endl;
+    mean = mean_old + (w / w_sum) * (binCenters[i-1] - mean_old);
+    //cout<<"mean: "<<mean<<endl;
+    S = S + w * (binCenters[i-1] - mean_old) * (binCenters[i-1] - mean);
+    //cout<<"S: "<<S<<endl;
+  }
+  long double population_variance = S / w_sum;
+  // Bessel's correction for weighted samples
+  // Frequency weights
+  long double sample_frequency_variance = S / (w_sum - 1);
+  //Reliability weights
+  long double sample_reliability_variance = S / (w_sum - w_sum2 / w_sum);
+  
+
+  return sample_frequency_variance;
+}
+#endif
+
+long double mjMethod(TH1* absResidualHistogram, double quantile){
+  int nBins = absResidualHistogram->GetNbinsX();
+  std::vector<double> binCenters;
+  for (int i=1;i<nBins+1;i++){
+    int nEntries = absResidualHistogram->GetBinContent(i);
+    for (int j=0;j<nEntries;j++){
+      binCenters.push_back(absResidualHistogram->GetBinCenter(i));
+    }
+  }
+  long double C_1 = calcKMoment(binCenters,quantile,1);
+  long double C_2 = calcKMoment(binCenters,quantile,2);
+  //cout<<"mjMethod out: "<< C_2-pow(C_1,2)<<endl;
+  //cout<<"calcVariance out: "<< calcVariance(binCenters,quantile)<<endl;
+  if(pow(C_1,2)>=C_2){
+    //cout<<"not enough precision"<<endl;
+    return 0;
+  }
+  return sqrt(C_2-pow(C_1,2));
+} 
+#else
+long double mjMethod(TH1* absResidualHistogram, double quantile){
+  //cout<<"boost not found"<<endl;
+  return 0;
+}
+#endif
