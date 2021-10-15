@@ -56,8 +56,6 @@ public:
                     std::string const& ONNXInputName,
                     std::vector<std::string> const& featureNames);
 
-  void setHPHSetup(const hph::Setup* setup);
-
 private:
   // Private Member Data
   QualityAlgorithm qualityAlgorithm_ = QualityAlgorithm::None;
@@ -71,7 +69,5 @@ private:
   float minPt_;
   int nStubsmin_;
   float ONNXInvRScaling_;
-  const hph::Setup* setup_;
-  bool useHPH;
 };
 #endif
