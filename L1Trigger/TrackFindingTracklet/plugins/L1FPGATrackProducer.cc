@@ -163,7 +163,10 @@ private:
   std::ofstream asciiEventOut_;
 
   // settings containing various constants for the tracklet processing
-  trklet::Settings settings;
+  trklet::Settings settings_;
+
+  // event processor for the tracklet track finding
+  trklet::TrackletEventProcessor eventProcessor;
 
   unsigned int nHelixPar_;
   bool extended_;
@@ -228,10 +231,6 @@ L1FPGATrackProducer::L1FPGATrackProducer(edm::ParameterSet const& iConfig)
   }
 
   produces<std::vector<TTTrack<Ref_Phase2TrackerDigi_>>>("Level1TTTracks").setBranchAlias("Level1TTTracks");
-  // book ED output token for clock and bit accurate TrackBuilder tracks
-  edPutTokenTracks_ = produces<Streams>("Level1TTTracks");
-  // book ED output token for clock and bit accurate TrackBuilder stubs
-  edPutTokenStubs_ = produces<StreamsStub>("Level1TTTracks");
 
   asciiEventOutName_ = iConfig.getUntrackedParameter<string>("asciiFileName", "");
 
@@ -249,9 +248,12 @@ L1FPGATrackProducer::L1FPGATrackProducer(edm::ParameterSet const& iConfig)
     tableTREFile = iConfig.getParameter<edm::FileInPath>("tableTREFile");
   }
 
-  // book ES product to assign tracks and stubs to InputRouter input channel and TrackBuilder output channel
+  // book ED output token for clock and bit accurate tracks
+  edPutTokenTracks_ = produces<Streams>("Level1TTTracks");
+  // book ED output token for clock and bit accurate stubs
+  edPutTokenStubs_ = produces<StreamsStub>("Level1TTTracks");
+  // book ES product
   esGetTokenChannelAssignment_ = esConsumes<ChannelAssignment, ChannelAssignmentRcd, Transition::BeginRun>();
-  // book ES product for track trigger cinfiguration
   esGetToken_ = esConsumes<tt::Setup, tt::SetupRcd, edm::Transition::BeginRun>();
   // initial ES products
   channelAssignment_ = nullptr;
@@ -260,26 +262,28 @@ L1FPGATrackProducer::L1FPGATrackProducer(edm::ParameterSet const& iConfig)
   // set options in Settings based on inputs from configuration files
   // --------------------------------------------------------------------------------
 
-  settings.setExtended(extended_);
-  settings.setReduced(reduced_);
-  settings.setNHelixPar(nHelixPar_);
+  settings_.setExtended(extended_);
+  settings_.setReduced(reduced_);
+  settings_.setNHelixPar(nHelixPar_);
 
-  settings.setFitPatternFile(fitPatternFile.fullPath());
-  settings.setProcessingModulesFile(processingModulesFile.fullPath());
-  settings.setMemoryModulesFile(memoryModulesFile.fullPath());
-  settings.setWiresFile(wiresFile.fullPath());
+  settings_.setFitPatternFile(fitPatternFile.fullPath());
+  settings_.setProcessingModulesFile(processingModulesFile.fullPath());
+  settings_.setMemoryModulesFile(memoryModulesFile.fullPath());
+  settings_.setWiresFile(wiresFile.fullPath());
 
-  settings.setFakefit(iConfig.getParameter<bool>("Fakefit"));
-  settings.setStoreTrackBuilderOutput(iConfig.getParameter<bool>("StoreTrackBuilderOutput"));
+  settings_.setFakefit(iConfig.getParameter<bool>("Fakefit"));
+  settings_.setStoreTrackBuilderOutput(iConfig.getParameter<bool>("StoreTrackBuilderOutput"));
+  settings_.setRemovalType(iConfig.getParameter<string>("RemovalType"));
+  settings_.setDoMultipleMatches(iConfig.getParameter<bool>("DoMultipleMatches"));
 
   if (extended_) {
-    settings.setTableTEDFile(tableTEDFile.fullPath());
-    settings.setTableTREFile(tableTREFile.fullPath());
+    settings_.setTableTEDFile(tableTEDFile.fullPath());
+    settings_.setTableTREFile(tableTREFile.fullPath());
 
     //FIXME: The TED and TRE tables are currently disabled by default, so we
     //need to allow for the additional tracklets that will eventually be
     //removed by these tables, once they are finalized
-    settings.setNbitstrackletindex(10);
+    settings_.setNbitstrackletindex(10);
   }
 
   eventnum = 0;
@@ -287,7 +291,7 @@ L1FPGATrackProducer::L1FPGATrackProducer(edm::ParameterSet const& iConfig)
     asciiEventOut_.open(asciiEventOutName_.c_str());
   }
 
-  if (settings.debugTracklet()) {
+  if (settings_.debugTracklet()) {
     edm::LogVerbatim("Tracklet") << "fit pattern :     " << fitPatternFile.fullPath()
                                  << "\n process modules : " << processingModulesFile.fullPath()
                                  << "\n memory modules :  " << memoryModulesFile.fullPath()
@@ -302,13 +306,13 @@ L1FPGATrackProducer::L1FPGATrackProducer(edm::ParameterSet const& iConfig)
   if (trackQuality_) {
     trackQualityModel_ = std::make_unique<TrackQuality>(iConfig.getParameter<edm::ParameterSet>("TrackQualityPSet"));
   }
-  if (settings.storeTrackBuilderOutput() && (settings.doMultipleMatches() || settings.removalType() != "")) {
+  if (settings_.storeTrackBuilderOutput() && (settings_.doMultipleMatches() || settings_.removalType() != "")) {
     cms::Exception exception("ConfigurationNotSupported.");
     exception.addContext("L1FPGATrackProducer::produce");
-    if (settings.doMultipleMatches())
-      exception << "Stroing of TrackBuilder output does not support doMultipleMatches.";
-    if (settings.removalType() != "")
-      exception << "Stroing of TrackBuilder output does not support duplicate removal.";
+    if (settings_.doMultipleMatches())
+      exception << "Storing of TrackBuilder output does not support doMultipleMatches.";
+    if (settings_.removalType() != "")
+      exception << "Storing of TrackBuilder output does not support duplicate removal.";
     throw exception;
   }
 }
@@ -334,19 +338,17 @@ void L1FPGATrackProducer::beginRun(const edm::Run& run, const edm::EventSetup& i
   iSetup.get<IdealMagneticFieldRecord>().get(magneticFieldHandle);
   const MagneticField* theMagneticField = magneticFieldHandle.product();
   double mMagneticFieldStrength = theMagneticField->inTesla(GlobalPoint(0, 0, 0)).z();
-  settings.setBfield(mMagneticFieldStrength);
+  settings_.setBfield(mMagneticFieldStrength);
 
   setup_ = iSetup.getData(esGetToken_);
   channelAssignment_ = &iSetup.getData(esGetTokenChannelAssignment_);
+  // initialize the tracklet event processing (this sets all the processing & memory modules, wiring, etc)
+  eventProcessor.init(settings_, channelAssignment_);
 }
 
 //////////
 // PRODUCE
 void L1FPGATrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
-  // event processor for the tracklet track finding
-  trklet::TrackletEventProcessor eventProcessor;
-  // initialize the tracklet event processing (this sets all the processing & memory modules, wiring, etc)
-  eventProcessor.init(settings, channelAssignment_);
   typedef std::map<trklet::L1TStub,
                    edm::Ref<edmNew::DetSetVector<TTStub<Ref_Phase2TrackerDigi_>>, TTStub<Ref_Phase2TrackerDigi_>>,
                    L1TStubCompare>
@@ -445,20 +447,14 @@ void L1FPGATrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSe
   /// READ DTC STUB INFORMATION ///
   /////////////////////////////////
 
-  // Process stubs in each region and channel within that region
+  // Process stubs in each region and channel within that tracking region
   for (const int& region : handleDTC->tfpRegions()) {
     for (const int& channel : handleDTC->tfpChannels()) {
       // Get the DTC name form the channel
-
-      static string dtcbasenames[12] = {
-          "PS10G_1", "PS10G_2", "PS10G_3", "PS10G_4", "PS_1", "PS_2", "2S_1", "2S_2", "2S_3", "2S_4", "2S_5", "2S_6"};
-
-      string dtcname = dtcbasenames[channel % 12];
-
-      if (channel % 24 >= 12)
-        dtcname = "neg" + dtcname;
-
-      dtcname += (channel < 24) ? "_A" : "_B";
+      unsigned int atcaSlot = channel % 12;
+      string dtcname = settings_.slotToDTCname(atcaSlot);
+      if (channel % 24 >= 12) dtcname = "neg" + dtcname;
+      dtcname += (channel < 24) ? "_A" : "_B"; // which detector region
 
       // Get the stubs from the DTC
       const tt::StreamStub& streamFromDTC{handleDTC->stream(region, channel)};
@@ -610,11 +606,11 @@ void L1FPGATrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSe
     ntracks++;
 
     // this is where we create the TTTrack object
-    double tmp_rinv = track.rinv(settings);
-    double tmp_phi = track.phi0(settings);
-    double tmp_tanL = track.tanL(settings);
-    double tmp_z0 = track.z0(settings);
-    double tmp_d0 = track.d0(settings);
+    double tmp_rinv = track.rinv(settings_);
+    double tmp_phi = track.phi0(settings_);
+    double tmp_tanL = track.tanL(settings_);
+    double tmp_z0 = track.z0(settings_);
+    double tmp_d0 = track.d0(settings_);
     double tmp_chi2rphi = track.chisqrphi();
     double tmp_chi2rz = track.chisqrz();
     unsigned int tmp_hit = track.hitpattern();
@@ -630,8 +626,8 @@ void L1FPGATrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSe
                                            0,
                                            0,
                                            tmp_hit,
-                                           settings.nHelixPar(),
-                                           settings.bfield());
+                                           settings_.nHelixPar(),
+                                           settings_.bfield());
 
     unsigned int trksector = track.sector();
     unsigned int trkseed = (unsigned int)abs(track.seed());
@@ -659,7 +655,7 @@ void L1FPGATrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSe
 
     // pt consistency
     aTrack.setStubPtConsistency(
-        StubPtConsistency::getConsistency(aTrack, theTrackerGeom, tTopo, settings.bfield(), settings.nHelixPar()));
+        StubPtConsistency::getConsistency(aTrack, theTrackerGeom, tTopo, settings_.bfield(), settings_.nHelixPar()));
 
     // set TTTrack word
     aTrack.setTrackWordBits();
