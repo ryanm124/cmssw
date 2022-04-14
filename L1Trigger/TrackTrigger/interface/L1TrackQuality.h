@@ -22,6 +22,8 @@ C.Brown 28/07/20
 #include "DataFormats/L1TrackTrigger/interface/TTTypes.h"
 #include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
 
+#include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
+
 class TrackQuality {
 public:
   // Enum class used for determining prediction behaviour in setL1TrackQuality
@@ -56,6 +58,8 @@ public:
                     std::string const& ONNXInputName,
                     std::vector<std::string> const& featureNames);
 
+  void setHPHSetup(const hph::Setup* setup);
+
 private:
   // Private Member Data
   QualityAlgorithm qualityAlgorithm_ = QualityAlgorithm::None;
@@ -69,5 +73,7 @@ private:
   float minPt_;
   int nStubsmin_;
   float ONNXInvRScaling_;
+  const hph::Setup* setup_;
+  bool useHPH;
 };
 #endif
