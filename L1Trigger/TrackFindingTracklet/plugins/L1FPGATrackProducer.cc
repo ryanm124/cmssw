@@ -99,7 +99,7 @@
 #include "DataFormats/GeometrySurface/interface/BoundPlane.h"
 
 #include "L1Trigger/TrackTrigger/interface/StubPtConsistency.h"
-#include "L1Trigger/TrackTrigger/interface/TrackQuality.h"
+#include "L1Trigger/TrackTrigger/interface/L1TrackQuality.h"
 #include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
 
 //////////////

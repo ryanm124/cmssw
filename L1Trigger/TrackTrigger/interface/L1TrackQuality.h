@@ -24,7 +24,7 @@ C.Brown 28/07/20
 
 #include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
 
-class TrackQuality {
+class L1TrackQuality {
 public:
   // Enum class used for determining prediction behaviour in setL1TrackQuality
   enum class QualityAlgorithm { Cut, GBDT, NN, None };
@@ -72,7 +72,6 @@ private:
   float bendchi2Max_;
   float minPt_;
   int nStubsmin_;
-  float ONNXInvRScaling_;
   const hph::Setup* setup_;
   bool useHPH;
 };
