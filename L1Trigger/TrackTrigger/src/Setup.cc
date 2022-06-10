@@ -403,7 +403,7 @@ namespace tt {
         exception.addContext("tt::Setup::checkGeometry");
         throw exception;
       }
-      if (find(sgXMLVersions_.begin(), sgXMLVersions_.end(), version) == sgXMLVersions_.end()) {
+      if (find(sgXMLVersions_.begin(), sgXMLVersions_.end(), version) != sgXMLVersions_.end()) {
         configurationSupported_ = false;
         LogWarning("ConfigurationNotSupported")
             << "Geometry Configuration " << sgXMLPath_ << version << "/" << sgXMLFile_ << " is not supported. ";
