@@ -252,7 +252,7 @@ void MatchCalculator::execute(unsigned int iSector, double phioffset) {
 
       if (imatch) {
         countsel++;
-          
+
         // TO DO: storing the matches in both FullMatchMemory & Tracklet is ugly.
         // Should clean this up, to avoid the need to store them in Tracklet.
 
