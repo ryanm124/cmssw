@@ -33,7 +33,7 @@ L1TrackQuality::L1TrackQuality(const edm::ParameterSet& qualityParams) : setup_(
 }
 
 std::vector<float> L1TrackQuality::featureTransform(TTTrack<Ref_Phase2TrackerDigi_>& aTrack,
-                                                  std::vector<std::string> const& featureNames) {
+                                                    std::vector<std::string> const& featureNames) {
   // List input features for MVA in proper order below, the current features options are
   // {"phi", "eta", "z0", "bendchi2_bin", "nstub", "nlaymiss_interior", "chi2rphi_bin",
   // "chi2rz_bin"}
