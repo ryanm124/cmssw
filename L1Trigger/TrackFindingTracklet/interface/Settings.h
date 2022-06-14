@@ -224,9 +224,9 @@ namespace trklet {
     unsigned int maxStubsPerBin() const { return maxStubsPerBin_; }
 
     std::string geomext() const {
-      if (combined_)
-        return "hourglassCombined";
-      return extended_ ? "hourglassExtended" : "hourglass";
+      std::string geo = extended_ ? "hourglassExtended" : "hourglass";
+      if (combined_) geo += "Combined";
+      return geo;
     }
 
     bool exactderivatives() const { return exactderivatives_; }
@@ -945,7 +945,11 @@ namespace trklet {
     bool extended_{false};       // turn on displaced tracking
     bool reduced_{false};        // use reduced (Summer Chain) config
 
-    bool combined_{false};  // use combined TP (TE+TC) and MP (PR+ME+MC) configuration
+    // Use combined TP (TE+TC) and MP (PR+ME+MC) configuration (with prompt tracking)
+    bool combined_{false};
+    // N.B. To use combined modules with extended tracking, edit
+    // Tracklet_cfi.py to refer to *_hourglassExtendedCombined.dat,
+    // but leave combined_=false.
 
     std::string skimfile_{""};  //if not empty events will be written out in ascii format to this file
 
