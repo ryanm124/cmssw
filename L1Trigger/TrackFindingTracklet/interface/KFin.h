@@ -6,7 +6,6 @@
 #include "L1Trigger/TrackerTFP/interface/LayerEncoding.h"
 #include "L1Trigger/TrackFindingTracklet/interface/ChannelAssignment.h"
 #include "L1Trigger/TrackFindingTracklet/interface/Settings.h"
-#include "SimTracker/TrackTriggerAssociation/interface/TTTypes.h"
 
 #include <vector>
 

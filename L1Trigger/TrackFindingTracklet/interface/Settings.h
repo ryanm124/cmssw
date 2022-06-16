@@ -225,7 +225,8 @@ namespace trklet {
 
     std::string geomext() const {
       std::string geo = extended_ ? "hourglassExtended" : "hourglass";
-      if (combined_) geo += "Combined";
+      if (combined_)
+        geo += "Combined";
       return geo;
     }
 
