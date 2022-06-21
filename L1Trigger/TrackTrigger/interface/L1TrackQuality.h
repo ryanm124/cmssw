@@ -21,8 +21,8 @@ C.Brown 28/07/20
 #include "DataFormats/L1TrackTrigger/interface/TTTrack.h"
 #include "DataFormats/L1TrackTrigger/interface/TTTypes.h"
 #include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
-
-#include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
+#include "PhysicsTools/ONNXRuntime/interface/ONNXRuntime.h"
+#include <memory>
 
 class L1TrackQuality {
 public:
@@ -58,7 +58,7 @@ public:
                     std::string const& ONNXInputName,
                     std::vector<std::string> const& featureNames);
 
-  void setHPHSetup(const hph::Setup* setup);
+  void beginRun(const hph::Setup* setup);
 
 private:
   // Private Member Data
@@ -72,7 +72,8 @@ private:
   float bendchi2Max_;
   float minPt_;
   int nStubsmin_;
-  const hph::Setup* setup_;
-  bool useHPH;
+  const hph::Setup* setupHPH_;
+  bool useHPH_;
+  std::unique_ptr<cms::Ort::ONNXRuntime> runTime_;
 };
 #endif

@@ -5,13 +5,12 @@ C.Brown & C.Savard 07/2020
 */
 
 #include "L1Trigger/TrackTrigger/interface/L1TrackQuality.h"
-#include "PhysicsTools/ONNXRuntime/interface/ONNXRuntime.h"
 
 //Constructors
 
 L1TrackQuality::L1TrackQuality() {}
 
-L1TrackQuality::L1TrackQuality(const edm::ParameterSet& qualityParams) : setup_(), useHPH(false) {
+L1TrackQuality::L1TrackQuality(const edm::ParameterSet& qualityParams) : setupHPH_(), useHPH_(false) {
   std::string AlgorithmString = qualityParams.getParameter<std::string>("qualityAlgorithm");
   // Unpacks EDM parameter set itself to save unecessary processing within TrackProducers
   if (AlgorithmString == "Cut") {
@@ -29,6 +28,7 @@ L1TrackQuality::L1TrackQuality(const edm::ParameterSet& qualityParams) : setup_(
                  qualityParams.getParameter<edm::FileInPath>("ONNXmodel"),
                  qualityParams.getParameter<std::string>("ONNXInputName"),
                  qualityParams.getParameter<std::vector<std::string>>("featureNames"));
+    runTime_ = std::make_unique<cms::Ort::ONNXRuntime>(this->ONNXmodel_.fullPath());
   }
 }
 
@@ -68,8 +68,8 @@ std::vector<float> L1TrackQuality::featureTransform(TTTrack<Ref_Phase2TrackerDig
   int tmp_trk_chi2rz_bin = aTrack.getChi2RZBits();
 
   // Extra variables from HitPatternHelper don't improve performance, so commented out.
-  //if (useHPH) {
-  //  hph::HitPatternHelper hph(setup_, tmp_trk_hitpattern, tmp_trk_tanL, tmp_trk_z0);
+  //if (useHPH_) {
+  //  hph::HitPatternHelper hph(setupHPH_, tmp_trk_hitpattern, tmp_trk_tanL, tmp_trk_z0);
   //  hitpattern_expanded_binary = hph.binary();
   //  tmp_trk_nlaymiss_PS = hph.numMissingPS();
   //  tmp_trk_nlaymiss_2S = hph.numMissing2S();
@@ -134,10 +134,10 @@ void L1TrackQuality::setL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack) 
     cms::Ort::FloatArrays ortoutputs;
 
     std::vector<float> Transformed_features = featureTransform(aTrack, this->featureNames_);
-    cms::Ort::ONNXRuntime Runtime(this->ONNXmodel_.fullPath());  //Setup ONNX runtime
+    //    cms::Ort::ONNXRuntime runTime(this->ONNXmodel_.fullPath());  //Setup ONNX runtime
 
     ortinput_names.push_back(this->ONNXInputName_);
-    ortoutput_names = Runtime.getOutputNames();
+    ortoutput_names = runTime_->getOutputNames();
 
     //ONNX runtime recieves a vector of vectors of floats so push back the input
     // vector of float to create a 1,1,21 ortinput
@@ -146,7 +146,7 @@ void L1TrackQuality::setL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack) 
     // batch_size 1 as only one set of transformed features is being processed
     int batch_size = 1;
     // Run classification
-    ortoutputs = Runtime.run(ortinput_names, ortinput, {}, ortoutput_names, batch_size);
+    ortoutputs = runTime_->run(ortinput_names, ortinput, {}, ortoutput_names, batch_size);
 
     if (this->qualityAlgorithm_ == QualityAlgorithm::NN) {
       aTrack.settrkMVA1(ortoutputs[0][0]);
@@ -197,7 +197,8 @@ void L1TrackQuality::setONNXModel(std::string const& AlgorithmString,
   featureNames_ = featureNames;
 }
 
-void L1TrackQuality::setHPHSetup(const hph::Setup* setup) {
-  setup_ = setup;
-  useHPH = true;
+void L1TrackQuality::beginRun(const hph::Setup* setupHPH) {
+  // Initialize helper for decoding hit patterns.
+  setupHPH_ = setupHPH;
+  useHPH_ = true;
 }
