@@ -304,7 +304,7 @@ L1TrackNtupleMaker::L1TrackNtupleMaker(edm::ParameterSet const& iConfig) : confi
   ttStubMCTruthToken_ = consumes<TTStubAssociationMap<Ref_Phase2TrackerDigi_> >(MCTruthStubInputTag);
 
   TrackingParticleToken_ = consumes<std::vector<TrackingParticle> >(TrackingParticleInputTag);
-  //TrackingVertexToken_ = consumes<std::vector<TrackingVertex> >(TrackingVertexInputTag);
+  TrackingVertexToken_ = consumes<std::vector<TrackingVertex> >(TrackingVertexInputTag);
   GenJetToken_ = consumes<std::vector<reco::GenJet> >(GenJetInputTag);
 
   getTokenTrackerGeom_ = esConsumes<TrackerGeometry, TrackerDigiGeometryRecord>();
