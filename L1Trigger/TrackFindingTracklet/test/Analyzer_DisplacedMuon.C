@@ -1,0 +1,7926 @@
+// ----------------------------------------------------------------------------------------------------------------
+// Feasibility study of using L1 Tracks to identify Displaced Vertex
+//
+// By Bharadwaj Harikrishnan, May 2021
+// Edited by Ryan McCarthy, Sept 2021
+// ----------------------------------------------------------------------------------------------------------------
+
+#include <TROOT.h>
+#include <TStyle.h>
+#include <TCanvas.h>
+#include <TSystem.h>
+#include <TLatex.h>
+#include <TVector3.h>
+#include "TFile.h"
+#include "TTree.h"
+#include "TChain.h"
+#include "TBranch.h"
+#include "TLeaf.h"
+#include <TCanvas.h>
+#include "TLegend.h"
+#include "TH1.h"
+#include "TH2.h"
+#include "TF1.h"
+#include "TGraph.h"
+#include "TMath.h"
+#include <math.h>
+#include <sstream>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <valarray>
+#include <deque>
+#include <THStack.h>
+#include <TF2.h>
+
+using namespace std;
+
+bool VERBOSE[]={false,false,false,false};
+
+//float d0_res = 0.0105; //cm
+//float z0_res = 0.3477; //cm
+float d0_res = 0.0554; //cm
+float z0_res = 0.7045; //cm
+float CUTOFF = 1.0; // Common z cut off in cm for Displaced Vertex and verification
+
+void SetPlotStyle();
+void mySmallText(Double_t x, Double_t y, Color_t color, char *text);
+
+class Track_Parameters
+{
+public:
+  float pt;
+  float d0;
+  float dxy = -99999;
+  float z0;
+  float eta;
+  float phi;
+  float charge;
+  float rho;
+  int index;
+  int pdgid = -99999;
+  float tp_pt;
+  float x0;
+  float y0;
+  float dist_calc(float x_dv, float y_dv, float x, float y){
+    dxy = TMath::Sqrt((x_dv-x)*(x_dv-x) + (y_dv-y)*(y_dv-y));
+    return dxy;
+  }
+  float x(float phi_T=0){
+    return (-charge * rho * TMath::Sin(phi - charge*phi_T) + (d0 + charge * rho) * TMath::Sin(phi));
+  }
+  float y(float phi_T=0){
+    return ( charge * rho * TMath::Cos(phi - charge*phi_T) - (d0 + charge * rho) * TMath::Cos(phi));
+  }
+  float z(float phi_T=0){
+    float theta = 2 * TMath::ATan(TMath::Exp(-eta));
+    return (z0 + rho*phi_T/TMath::Tan(theta));
+  }
+  float deltaPhi_T(Double_t phi1, Double_t phi2)
+  {
+    Double_t dPhi = phi1 - phi2;
+    if (dPhi >= TMath::Pi())
+      dPhi -= 2. * TMath::Pi();
+    if (dPhi <= -TMath::Pi())
+      dPhi += 2. * TMath::Pi();
+    return dPhi;
+  }
+  float phi_T(float x, float y){
+    float num = x - (d0 + charge * rho) * TMath::Sin(phi);
+    float den = y + (d0 + charge * rho) * TMath::Cos(phi);
+    return ((phi-TMath::ATan2(num,-den))/charge);
+  }
+  float z(float x, float y){
+    float t = std::sinh(eta);
+    float r = TMath::Sqrt(pow(x,2)+pow(y,2));
+    return (z0+t*r); // can do higher order terms if necessary from displaced math
+  }
+  Track_Parameters(float pt_in, float d0_in, float z0_in, float eta_in, float phi_in, float charge_in, int index_in, int pdgid_in, float tp_pt_in = 0)
+  {
+    pt = pt_in;
+    d0 = d0_in;
+    z0 = z0_in;
+    eta = eta_in;
+    phi = phi_in;
+    if(charge_in > 0){
+      charge = 1;
+    }
+    else if (charge_in < 0){
+      charge = -1;
+    }
+    else{
+      charge = 0;
+    }
+    index = index_in;
+    pdgid = pdgid_in;
+    tp_pt = tp_pt_in;
+    rho = 100*pt / (0.3 * 3.8);
+    x0 =  (d0 + charge * rho)*TMath::Sin(phi);
+    y0 = -(d0 + charge * rho)*TMath::Cos(phi);
+  }
+  ~Track_Parameters(){};
+};
+
+class Vertex_Parameters
+{
+public:
+  Double_t x_dv;
+  Double_t y_dv;
+  Double_t z_dv;
+  float score;
+  Track_Parameters a;
+  Track_Parameters b;
+  bool matched = false;
+  int errorCode = 0;
+  Vertex_Parameters(Double_t x_dv_in, Double_t y_dv_in, Double_t z_dv_in, Track_Parameters a_in, Track_Parameters b_in, float score_in=-1):   
+    a(a_in),
+    b(b_in)
+  {
+    x_dv = x_dv_in;
+    y_dv = y_dv_in;
+    z_dv = z_dv_in;
+    score = score_in;
+  }
+  ~Vertex_Parameters(){};
+};
+
+void displayProgress(long current, long max)
+{
+  using std::cerr;
+  if (max < 2500)
+    return;
+  if (current % (max / 2500) != 0 && current < max - 1)
+    return;
+
+  int width = 52; // Hope the terminal is at least that wide.
+  int barWidth = width - 2;
+  cerr << "\x1B[2K";    // Clear line
+  cerr << "\x1B[2000D"; // Cursor left
+  cerr << '[';
+  for (int i = 0; i < barWidth; ++i)
+    {
+      if (i < barWidth * current / max)
+	{
+	  cerr << '=';
+	}
+      else
+	{
+	  cerr << ' ';
+	}
+    }
+  cerr << ']';
+  cerr << " " << Form("%8d/%8d (%5.2f%%)", (int)current, (int)max, 100.0 * current / max);
+  cerr.flush();
+}
+
+bool ComparePtTrack(Track_Parameters a, Track_Parameters b) { return a.pt > b.pt; }
+bool CompareZ0Track(Track_Parameters a, Track_Parameters b) { return a.z0 > b.z0; }
+bool CompareD0Track(Track_Parameters a, Track_Parameters b) { return a.d0 > b.d0; }
+
+std::valarray<float> calcPVec(Track_Parameters a, double_t v_x, double_t v_y)
+{
+  std::valarray<float> r_vec = {float(v_x)-a.x0,float(v_y)-a.y0};
+  std::valarray<float> p_vec = {-r_vec[1],r_vec[0]};
+  if(a.charge>0){
+    p_vec *= -1;
+  }
+  p_vec /= TMath::Sqrt(pow(p_vec[0],2)+pow(p_vec[1],2));
+  p_vec *= a.pt;
+  return p_vec;
+}
+
+template<typename T>
+std::vector<T> linspace(T start, T end, int num){
+  std::vector<T> out;
+  T delta = (end - start) / (num-1);
+  for(int i=0; i<num-1; i++){
+    out.push_back(start+delta*i);
+  }
+  out.push_back(end);
+  return out;
+}
+
+Double_t deltaPhi(Double_t phi1, Double_t phi2)
+{
+  Double_t dPhi = phi1 - phi2;
+  if (dPhi > TMath::Pi())
+    dPhi -= 2. * TMath::Pi();
+  if (dPhi < -TMath::Pi())
+    dPhi += 2. * TMath::Pi();
+  return dPhi;
+}
+
+Double_t deltaR(Double_t eta1, Double_t phi1, Double_t eta2, Double_t phi2)
+{
+  Double_t dEta, dPhi;
+  dEta = eta1 - eta2;
+  dPhi = deltaPhi(phi1, phi2);
+  return sqrt(dEta * dEta + dPhi * dPhi);
+}
+
+Double_t dist(Double_t x1, Double_t y1 , Double_t x2=0, Double_t y2=0){ // Distance between 2 points
+  return (TMath::Sqrt((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2)));
+}
+
+Double_t dist_Vertex(Double_t x_vtx, Double_t y_vtx, Track_Parameters *a){ // Distance between track and displaced vertex
+  float R = dist(x_vtx,y_vtx,a->x0,a->y0);
+  return (fabs(R-(a->rho)));
+}
+
+Double_t dist_TPs(Track_Parameters a, Track_Parameters b); // Closest distance between 2 tracks
+bool CompareDeltaXY(Vertex_Parameters v1, Vertex_Parameters v2) {return dist_TPs(v1.a,v1.b) < dist_TPs(v2.a,v2.b); }
+
+
+Int_t Vertex(Track_Parameters a, Track_Parameters b, Double_t &x_vtx, Double_t &y_vtx, Double_t &z_vtx); 
+// Identify the displaced vertex (x_vtx,y_vtx,z_vtx) and return the status 
+//-2 = Circles with same center. No Intersection
+//-1 = Circles don't Intersect. A point on the line connecting the centers is chosen.
+// 0 = Only 1 Intersection not satisfying Z cutoff
+// 1 = Only 1 Intersection satisfying Z cutoff
+// 2 = Only 1 Intersection detectable dist(x,y)<20
+// 3 = 2 Intersections 
+
+void Analyzer_DisplacedMuon(TString inputFilePath,
+			    TString outputDir,
+			    float TP_maxD0 = 1.9,
+			    float TP_minD0 = 0.0004196)
+{
+  TChain *tree = new TChain("L1TrackNtuple/eventTree"); 
+  tree->Add(inputFilePath);
+  //TChain *vertTree = new TChain("L1TrackNtuple/dispVertTree");
+  //vertTree->Add(inputFilePath);
+  std::string inputFileString(inputFilePath.Data());
+  inputFileString = inputFileString.substr(inputFileString.find_last_of("/")+1);
+  TString inputFile(inputFileString);
+  std::cout<<"input: "<<inputFile<<std::endl;
+  gROOT->SetBatch();
+  gErrorIgnoreLevel = kWarning;
+
+  SetPlotStyle();
+
+  float TP_minPt = 2.0;
+  float TP_maxPt = 10000.0;
+  float TP_maxEta = 2.4;
+  float maxBendchi2 = 10.0;
+  TP_maxD0 = 2.0;
+
+  //float TP_minD0_L = 0.14;
+  float TP_minD0_L = 0.7;
+  float TP_maxZ0_L = 14.0;
+  float maxChi2rzdof_L = 1.4;
+
+  float TP_minD0_H = 0.7;  
+  float TP_maxZ0_H = 14.0;
+  float maxChi2rzdof_H = 1.4;
+  float maxChi2rphidof_H = 5.94;
+
+  vector<float>   *trk_pt;
+  vector<float>   *trk_eta;
+  vector<float>   *trk_phi;
+  vector<float>   *trk_d0;
+  vector<float>   *trk_rinv;
+  vector<float>   *trk_z0;
+  vector<float>   *trk_chi2;
+  vector<float>   *trk_chi2rphi;
+  vector<float>   *trk_chi2rz;
+  vector<float>   *trk_bendchi2;
+  vector<int>     *trk_nstub;
+  vector<int>     *trk_lhits;
+  vector<int>     *trk_dhits;
+  vector<int>     *trk_seed;
+  vector<int>     *trk_hitpattern;
+  vector<unsigned int> *trk_phiSector;
+  vector<int>     *trk_genuine;
+  vector<int>     *trk_loose;
+  vector<int>     *trk_unknown;
+  vector<int>     *trk_combinatoric;
+  vector<int>     *trk_fake;
+  vector<int>     *trk_MVA1;
+  vector<int>     *trk_matchtp_pdgid;
+  vector<bool>     *trk_matchtp_isHToB;
+  vector<float>   *trk_matchtp_pt;
+  vector<float>   *trk_matchtp_eta;
+  vector<float>   *trk_matchtp_phi;
+  vector<float>   *trk_matchtp_z0;
+  vector<float>   *trk_matchtp_dxy;
+  vector<float>   *tp_pt;
+  vector<float>   *tp_eta;
+  vector<float>   *tp_phi;
+  vector<float>   *tp_dxy;
+  vector<float>   *tp_d0;
+  vector<float>   *tp_z0;
+  vector<float>   *tp_x;
+  vector<float>   *tp_y;
+  vector<float>   *tp_z;
+  vector<float>   *tp_d0_prod;
+  vector<float>   *tp_z0_prod;
+  vector<int>     *tp_pdgid;
+  vector<bool>    *tp_isHToB;
+  vector<int>     *tp_nmatch;
+  vector<int>     *tp_nstub;
+  vector<int>     *tp_eventid;
+  vector<int>     *tp_charge;
+  vector<float>   *matchtrk_pt;
+  vector<float>   *matchtrk_eta;
+  vector<float>   *matchtrk_phi;
+  vector<float>   *matchtrk_z0;
+  vector<float>   *matchtrk_d0;
+  vector<float>   *matchtrk_rinv;
+  vector<float>   *matchtrk_chi2;
+  vector<float>   *matchtrk_chi2rphi;
+  vector<float>   *matchtrk_chi2rz;
+  vector<float>   *matchtrk_bendchi2;
+  vector<float>   *matchtrk_MVA1;
+  vector<int>     *matchtrk_nstub;
+  vector<int>     *matchtrk_lhits;
+  vector<int>     *matchtrk_dhits;
+  vector<int>     *matchtrk_seed;
+  vector<int>     *matchtrk_hitpattern;
+  vector<float>* vert_pt;
+  vector<float>* vert_z0;
+  vector<float>* vert_d0;
+  vector<float>* vert_eta;
+  vector<float>* vert_phi;
+  vector<float>* vert_delta_z;
+  vector<float>* vert_R_T;
+  vector<float>* vert_cos_T;
+  vector<float>* vert_d_T;
+  vector<float>* vert_chi2rzdofSum;
+  vector<int>* vert_numStubsSum;
+  vector<float>* vert_chi2rphidofSum;
+  vector<float>* vert_minD0;
+  vector<float>* vert_sumPt;
+  vector<float>* vert_score;
+  vector<float>* vert_x;
+  vector<float>* vert_y;
+  vector<float>* vert_z;
+
+  TBranch        *b_trk_pt;
+  TBranch        *b_trk_eta;
+  TBranch        *b_trk_phi;
+  TBranch        *b_trk_d0;
+  TBranch        *b_trk_rinv;
+  TBranch        *b_trk_z0;
+  TBranch        *b_trk_chi2;
+  TBranch        *b_trk_chi2rphi;
+  TBranch        *b_trk_chi2rz;
+  TBranch        *b_trk_bendchi2;
+  TBranch        *b_trk_nstub;
+  TBranch        *b_trk_lhits;
+  TBranch        *b_trk_dhits;
+  TBranch        *b_trk_seed;
+  TBranch        *b_trk_hitpattern;
+  TBranch        *b_trk_phiSector;
+  TBranch        *b_trk_genuine;
+  TBranch        *b_trk_loose;
+  TBranch        *b_trk_unknown;
+  TBranch        *b_trk_combinatoric;
+  TBranch        *b_trk_fake;
+  TBranch        *b_trk_MVA1;
+  TBranch        *b_trk_matchtp_pdgid;
+  TBranch        *b_trk_matchtp_isHToB;
+  TBranch        *b_trk_matchtp_pt;
+  TBranch        *b_trk_matchtp_eta;
+  TBranch        *b_trk_matchtp_phi;
+  TBranch        *b_trk_matchtp_z0;
+  TBranch        *b_trk_matchtp_dxy;
+  TBranch        *b_tp_pt;
+  TBranch        *b_tp_eta;
+  TBranch        *b_tp_phi;
+  TBranch        *b_tp_dxy;
+  TBranch        *b_tp_d0;
+  TBranch        *b_tp_z0;
+  TBranch        *b_tp_x;
+  TBranch        *b_tp_y;
+  TBranch        *b_tp_z;
+  TBranch        *b_tp_d0_prod;
+  TBranch        *b_tp_z0_prod;
+  TBranch        *b_tp_pdgid;
+  TBranch        *b_tp_isHToB;
+  TBranch        *b_tp_nmatch;
+  TBranch        *b_tp_nstub;
+  TBranch        *b_tp_eventid;
+  TBranch        *b_tp_charge;
+  TBranch        *b_matchtrk_pt;
+  TBranch        *b_matchtrk_eta;
+  TBranch        *b_matchtrk_phi;
+  TBranch        *b_matchtrk_z0;
+  TBranch        *b_matchtrk_d0;
+  TBranch        *b_matchtrk_rinv;
+  TBranch        *b_matchtrk_chi2;
+  TBranch        *b_matchtrk_chi2rphi;
+  TBranch        *b_matchtrk_chi2rz;
+  TBranch        *b_matchtrk_bendchi2;
+  TBranch        *b_matchtrk_MVA1;
+  TBranch        *b_matchtrk_nstub;
+  TBranch        *b_matchtrk_lhits;
+  TBranch        *b_matchtrk_dhits;
+  TBranch        *b_matchtrk_seed;
+  TBranch        *b_matchtrk_hitpattern;
+  TBranch *b_vert_pt;
+  TBranch *b_vert_z0;
+  TBranch *b_vert_d0;
+  TBranch *b_vert_eta;
+  TBranch *b_vert_phi;
+  TBranch *b_vert_delta_z;
+  TBranch *b_vert_R_T;
+  TBranch *b_vert_cos_T;
+  TBranch *b_vert_d_T;
+  TBranch *b_vert_chi2rzdofSum;
+  TBranch *b_vert_numStubsSum;
+  TBranch *b_vert_chi2rphidofSum;
+  TBranch *b_vert_minD0;
+  TBranch *b_vert_sumPt;
+  TBranch *b_vert_score;
+  TBranch *b_vert_x;
+  TBranch *b_vert_y;
+  TBranch *b_vert_z;
+
+  trk_pt = 0;
+  trk_eta = 0;
+  trk_phi = 0;
+  trk_d0 = 0;
+  trk_rinv = 0;
+  trk_z0 = 0;
+  trk_chi2 = 0;
+  trk_chi2rphi = 0;
+  trk_chi2rz = 0;
+  trk_bendchi2 = 0;
+  trk_nstub = 0;
+  trk_lhits = 0;
+  trk_dhits = 0;
+  trk_seed = 0;
+  trk_hitpattern = 0;
+  trk_phiSector = 0;
+  trk_genuine = 0;
+  trk_loose = 0;
+  trk_unknown = 0;
+  trk_combinatoric = 0;
+  trk_fake = 0;
+  trk_MVA1 = 0;
+  trk_matchtp_pdgid = 0;
+  trk_matchtp_isHToB = 0;
+  trk_matchtp_pt = 0;
+  trk_matchtp_eta = 0;
+  trk_matchtp_phi = 0;
+  trk_matchtp_z0 = 0;
+  trk_matchtp_dxy = 0;
+  tp_pt = 0;
+  tp_eta = 0;
+  tp_phi = 0;
+  tp_dxy = 0;
+  tp_d0 = 0;
+  tp_z0 = 0;
+  tp_x = 0;
+  tp_y = 0;
+  tp_z = 0;
+  tp_d0_prod = 0;
+  tp_z0_prod = 0;
+  tp_pdgid = 0;
+  tp_isHToB = 0;
+  tp_nmatch = 0;
+  tp_nstub = 0;
+  tp_eventid = 0;
+  tp_charge = 0;
+  matchtrk_pt = 0;
+  matchtrk_eta = 0;
+  matchtrk_phi = 0;
+  matchtrk_z0 = 0;
+  matchtrk_d0 = 0;
+  matchtrk_rinv = 0;
+  matchtrk_chi2 = 0;
+  matchtrk_chi2rphi = 0;
+  matchtrk_chi2rz = 0;
+  matchtrk_bendchi2 = 0;
+  matchtrk_MVA1 = 0;
+  matchtrk_nstub = 0;
+  matchtrk_lhits = 0;
+  matchtrk_dhits = 0;
+  matchtrk_seed = 0;
+  matchtrk_hitpattern = 0;
+  vert_pt = 0;
+  vert_z0 = 0;
+  vert_d0 = 0;
+  vert_eta = 0;
+  vert_phi = 0;
+  vert_delta_z = 0;
+  vert_R_T = 0;
+  vert_cos_T = 0;
+  vert_d_T = 0;
+  vert_chi2rzdofSum = 0;
+  vert_numStubsSum = 0;
+  vert_chi2rphidofSum = 0;
+  vert_minD0 = 0;
+  vert_sumPt = 0;
+  vert_score = 0;
+  vert_x = 0;
+  vert_y = 0;
+  vert_z = 0;
+
+  tree->SetMakeClass(1);
+  tree->SetBranchAddress("trk_pt", &trk_pt, &b_trk_pt);
+  tree->SetBranchAddress("trk_eta", &trk_eta, &b_trk_eta);
+  tree->SetBranchAddress("trk_phi", &trk_phi, &b_trk_phi);
+  tree->SetBranchAddress("trk_d0", &trk_d0, &b_trk_d0);
+  tree->SetBranchAddress("trk_rinv", &trk_rinv, &b_trk_rinv);
+  tree->SetBranchAddress("trk_z0", &trk_z0, &b_trk_z0);
+  tree->SetBranchAddress("trk_chi2", &trk_chi2, &b_trk_chi2);
+  tree->SetBranchAddress("trk_chi2rphi", &trk_chi2rphi, &b_trk_chi2rphi);
+  tree->SetBranchAddress("trk_chi2rz", &trk_chi2rz, &b_trk_chi2rz);
+  tree->SetBranchAddress("trk_bendchi2", &trk_bendchi2, &b_trk_bendchi2);
+  tree->SetBranchAddress("trk_nstub", &trk_nstub, &b_trk_nstub);
+  tree->SetBranchAddress("trk_lhits", &trk_lhits, &b_trk_lhits);
+  tree->SetBranchAddress("trk_dhits", &trk_dhits, &b_trk_dhits);
+  tree->SetBranchAddress("trk_seed", &trk_seed, &b_trk_seed);
+  tree->SetBranchAddress("trk_hitpattern", &trk_hitpattern, &b_trk_hitpattern);
+  tree->SetBranchAddress("trk_phiSector", &trk_phiSector, &b_trk_phiSector);
+  tree->SetBranchAddress("trk_genuine", &trk_genuine, &b_trk_genuine);
+  tree->SetBranchAddress("trk_loose", &trk_loose, &b_trk_loose);
+  tree->SetBranchAddress("trk_unknown", &trk_unknown, &b_trk_unknown);
+  tree->SetBranchAddress("trk_combinatoric", &trk_combinatoric, &b_trk_combinatoric);
+  tree->SetBranchAddress("trk_fake", &trk_fake, &b_trk_fake);
+  tree->SetBranchAddress("trk_MVA1", &trk_MVA1, &b_trk_MVA1);
+  tree->SetBranchAddress("trk_matchtp_pdgid", &trk_matchtp_pdgid, &b_trk_matchtp_pdgid);
+  tree->SetBranchAddress("trk_matchtp_isHToB", &trk_matchtp_isHToB, &b_trk_matchtp_isHToB);
+  tree->SetBranchAddress("trk_matchtp_pt", &trk_matchtp_pt, &b_trk_matchtp_pt);
+  tree->SetBranchAddress("trk_matchtp_eta", &trk_matchtp_eta, &b_trk_matchtp_eta);
+  tree->SetBranchAddress("trk_matchtp_phi", &trk_matchtp_phi, &b_trk_matchtp_phi);
+  tree->SetBranchAddress("trk_matchtp_z0", &trk_matchtp_z0, &b_trk_matchtp_z0);
+  tree->SetBranchAddress("trk_matchtp_dxy", &trk_matchtp_dxy, &b_trk_matchtp_dxy);
+  tree->SetBranchAddress("tp_pt", &tp_pt, &b_tp_pt);
+  tree->SetBranchAddress("tp_eta", &tp_eta, &b_tp_eta);
+  tree->SetBranchAddress("tp_phi", &tp_phi, &b_tp_phi);
+  tree->SetBranchAddress("tp_dxy", &tp_dxy, &b_tp_dxy);
+  tree->SetBranchAddress("tp_d0", &tp_d0, &b_tp_d0);
+  tree->SetBranchAddress("tp_z0", &tp_z0, &b_tp_z0);
+  tree->SetBranchAddress("tp_x", &tp_x, &b_tp_x);
+  tree->SetBranchAddress("tp_y", &tp_y, &b_tp_y);
+  tree->SetBranchAddress("tp_z", &tp_z, &b_tp_z);
+  tree->SetBranchAddress("tp_d0_prod", &tp_d0_prod, &b_tp_d0_prod);
+  tree->SetBranchAddress("tp_z0_prod", &tp_z0_prod, &b_tp_z0_prod);
+  tree->SetBranchAddress("tp_pdgid", &tp_pdgid, &b_tp_pdgid);
+  tree->SetBranchAddress("tp_isHToB", &tp_isHToB, &b_tp_isHToB);
+  tree->SetBranchAddress("tp_nmatch", &tp_nmatch, &b_tp_nmatch);
+  tree->SetBranchAddress("tp_nstub", &tp_nstub, &b_tp_nstub);
+  tree->SetBranchAddress("tp_eventid", &tp_eventid, &b_tp_eventid);
+  tree->SetBranchAddress("tp_charge", &tp_charge, &b_tp_charge);
+  tree->SetBranchAddress("matchtrk_pt", &matchtrk_pt, &b_matchtrk_pt);
+  tree->SetBranchAddress("matchtrk_eta", &matchtrk_eta, &b_matchtrk_eta);
+  tree->SetBranchAddress("matchtrk_phi", &matchtrk_phi, &b_matchtrk_phi);
+  tree->SetBranchAddress("matchtrk_z0", &matchtrk_z0, &b_matchtrk_z0);
+  tree->SetBranchAddress("matchtrk_d0", &matchtrk_d0, &b_matchtrk_d0);
+  tree->SetBranchAddress("matchtrk_rinv", &matchtrk_rinv, &b_matchtrk_rinv);
+  tree->SetBranchAddress("matchtrk_chi2", &matchtrk_chi2, &b_matchtrk_chi2);
+  tree->SetBranchAddress("matchtrk_chi2rphi", &matchtrk_chi2rphi, &b_matchtrk_chi2rphi);
+  tree->SetBranchAddress("matchtrk_chi2rz", &matchtrk_chi2rz, &b_matchtrk_chi2rz);
+  tree->SetBranchAddress("matchtrk_bendchi2", &matchtrk_bendchi2, &b_matchtrk_bendchi2);
+  tree->SetBranchAddress("matchtrk_MVA1", &matchtrk_MVA1, &b_matchtrk_MVA1);
+  tree->SetBranchAddress("matchtrk_nstub", &matchtrk_nstub, &b_matchtrk_nstub);
+  tree->SetBranchAddress("matchtrk_lhits", &matchtrk_lhits, &b_matchtrk_lhits);
+  tree->SetBranchAddress("matchtrk_dhits", &matchtrk_dhits, &b_matchtrk_dhits);
+  tree->SetBranchAddress("matchtrk_seed", &matchtrk_seed, &b_matchtrk_seed);
+  tree->SetBranchAddress("matchtrk_hitpattern", &matchtrk_hitpattern, &b_matchtrk_hitpattern);
+#if 0
+  vertTree->SetBranchAddress("vert_pt", &vert_pt, &b_vert_pt);
+  vertTree->SetBranchAddress("vert_z0", &vert_z0, &b_vert_z0);
+  vertTree->SetBranchAddress("vert_d0", &vert_d0, &b_vert_d0);
+  vertTree->SetBranchAddress("vert_eta", &vert_eta, &b_vert_eta);
+  vertTree->SetBranchAddress("vert_phi", &vert_phi, &b_vert_phi);
+  vertTree->SetBranchAddress("vert_delta_z", &vert_delta_z, &b_vert_delta_z);
+  vertTree->SetBranchAddress("vert_R_T", &vert_R_T, &b_vert_R_T);
+  vertTree->SetBranchAddress("vert_cos_T", &vert_cos_T, &b_vert_cos_T);
+  vertTree->SetBranchAddress("vert_d_T", &vert_d_T, &b_vert_d_T);
+  vertTree->SetBranchAddress("vert_chi2rzdofSum", &vert_chi2rzdofSum, &b_vert_chi2rzdofSum);
+  vertTree->SetBranchAddress("vert_numStubsSum", &vert_numStubsSum, &b_vert_numStubsSum);
+  vertTree->SetBranchAddress("vert_chi2rphidofSum", &vert_chi2rphidofSum, &b_vert_chi2rphidofSum);
+  vertTree->SetBranchAddress("vert_minD0", &vert_minD0, &b_vert_minD0);
+  vertTree->SetBranchAddress("vert_sumPt", &vert_sumPt, &b_vert_sumPt);
+  vertTree->SetBranchAddress("vert_score", &vert_score, &b_vert_score);
+  vertTree->SetBranchAddress("vert_x", &vert_x, &b_vert_x);
+  vertTree->SetBranchAddress("vert_y", &vert_y, &b_vert_y);
+  vertTree->SetBranchAddress("vert_z", &vert_z, &b_vert_z);
+  tree->AddFriend(vertTree);
+#endif  
+
+  TH1F *h_trk_d0 = new TH1F("h_trk_d0","h_trk_d0; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary = new TH1F("h_trk_d0_primary","h_trk_d0_primary; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary_noCuts = new TH1F("h_trk_d0_primary_noCuts","h_trk_d0_primary_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary_noCuts_H = new TH1F("h_trk_d0_primary_noCuts_H","h_trk_d0_primary_noCuts_H; Track d_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary_noCuts_L = new TH1F("h_trk_d0_primary_noCuts_L","h_trk_d0_primary_noCuts_L; Track d_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary_qualCuts = new TH1F("h_trk_d0_primary_qualCuts","h_trk_d0_primary_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary_qualCuts = new TH1F("h_trk_d0_primary_qualCuts","h_trk_d0_primary_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_ptWeightedD0_primary_qualCuts = new TH1F("h_trk_ptWeightedD0_primary_qualCuts","h_trk_ptWeightedD0_primary_qualCuts; Track p_{T}*d_{0} Distribution (GeV cm) ; Events / 0.02 GeV cm",200,-2,2);
+  // np = not primary
+  TH1F *h_trk_d0_np = new TH1F("h_trk_d0_np","h_trk_d0_np; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_np_noCuts = new TH1F("h_trk_d0_np_noCuts","h_trk_d0_np_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_np_noCuts_H = new TH1F("h_trk_d0_np_noCuts_H","h_trk_d0_np_noCuts_H; Track d_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_np_noCuts_L = new TH1F("h_trk_d0_np_noCuts_L","h_trk_d0_np_noCuts_L; Track d_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_fake_noCuts = new TH1F("h_trk_d0_fake_noCuts","h_trk_d0_fake_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_PU_noCuts = new TH1F("h_trk_d0_PU_noCuts","h_trk_d0_PU_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_notHiggs_noCuts = new TH1F("h_trk_d0_notHiggs_noCuts","h_trk_d0_notHiggs_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_np_qualCuts = new TH1F("h_trk_d0_np_qualCuts","h_trk_d0_np_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_ptWeightedD0_np_qualCuts = new TH1F("h_trk_ptWeightedD0_np_qualCuts","h_trk_ptWeightedD0_np_qualCuts; Track p_{T}*d_{0} Distribution (GeV cm) ; Events / 0.02 GeV cm",200,-2,2);
+  TH1F *h_trk_d0_fake_qualCuts = new TH1F("h_trk_d0_fake_qualCuts","h_trk_d0_fake_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_PU_qualCuts = new TH1F("h_trk_d0_PU_qualCuts","h_trk_d0_PU_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_notHiggs_qualCuts = new TH1F("h_trk_d0_notHiggs_qualCuts","h_trk_d0_notHiggs_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_pt = new TH1F("h_trk_pt","h_trk_pt; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
+  TH1F *h_trk_pt_noCuts = new TH1F("h_trk_pt_noCuts","h_trk_pt_noCuts; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
+  TH1F *h_trk_pt_oldCuts = new TH1F("h_trk_pt_oldCuts","h_trk_pt_oldCuts; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
+  TH1F *h_trk_pt_allCuts = new TH1F("h_trk_pt_allCuts","h_trk_pt_allCuts; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
+  TH1F *h_trk_pt_primary = new TH1F("h_trk_pt_primary","h_trk_pt_primary; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_noCuts = new TH1F("h_trk_pt_primary_noCuts","h_trk_pt_primary_noCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_qualCuts = new TH1F("h_trk_pt_primary_qualCuts","h_trk_pt_primary_qualCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_ptCuts = new TH1F("h_trk_pt_primary_ptCuts","h_trk_pt_primary_ptCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_d0Cuts = new TH1F("h_trk_pt_primary_d0Cuts","h_trk_pt_primary_d0Cuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_chi2rzdofCuts = new TH1F("h_trk_pt_primary_chi2rzdofCuts","h_trk_pt_primary_chi2rzdofCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_bendchi2Cuts = new TH1F("h_trk_pt_primary_bendchi2Cuts","h_trk_pt_primary_bendchi2Cuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_chi2rphidofCuts = new TH1F("h_trk_pt_primary_chi2rphidofCuts","h_trk_pt_primary_chi2rphidofCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_z0Cuts = new TH1F("h_trk_pt_primary_z0Cuts","h_trk_pt_primary_z0Cuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_primary_allCuts = new TH1F("h_trk_pt_primary_allCuts","h_trk_pt_primary_allCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np = new TH1F("h_trk_pt_np","h_trk_pt_np; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_noCuts = new TH1F("h_trk_pt_np_noCuts","h_trk_pt_np_noCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_fake_noCuts = new TH1F("h_trk_pt_fake_noCuts","h_trk_pt_fake_noCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_PU_noCuts = new TH1F("h_trk_pt_PU_noCuts","h_trk_pt_PU_noCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_notHiggs_noCuts = new TH1F("h_trk_pt_notHiggs_noCuts","h_trk_pt_notHiggs_noCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_qualCuts = new TH1F("h_trk_pt_np_qualCuts","h_trk_pt_np_qualCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_fake_qualCuts = new TH1F("h_trk_pt_fake_qualCuts","h_trk_pt_fake_qualCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_PU_qualCuts = new TH1F("h_trk_pt_PU_qualCuts","h_trk_pt_PU_qualCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_notHiggs_qualCuts = new TH1F("h_trk_pt_notHiggs_qualCuts","h_trk_pt_notHiggs_qualCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_ptCuts = new TH1F("h_trk_pt_np_ptCuts","h_trk_pt_np_ptCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_d0Cuts = new TH1F("h_trk_pt_np_d0Cuts","h_trk_pt_np_d0Cuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_chi2rzdofCuts = new TH1F("h_trk_pt_np_chi2rzdofCuts","h_trk_pt_np_chi2rzdofCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_bendchi2Cuts = new TH1F("h_trk_pt_np_bendchi2Cuts","h_trk_pt_np_bendchi2Cuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_chi2rphidofCuts = new TH1F("h_trk_pt_np_chi2rphidofCuts","h_trk_pt_np_chi2rphidofCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_z0Cuts = new TH1F("h_trk_pt_np_z0Cuts","h_trk_pt_np_z0Cuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_pt_np_allCuts = new TH1F("h_trk_pt_np_allCuts","h_trk_pt_np_allCuts; Track p_{T} Distribution (GeV); Events / 0.3 GeV", 100, 0, 30.0);
+  TH1F *h_trk_eta = new TH1F("h_trk_eta","h_trk_eta; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_primary = new TH1F("h_trk_eta_primary","h_trk_eta_primary; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_primary_noCuts = new TH1F("h_trk_eta_primary_noCuts","h_trk_eta_primary_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_primary_noCuts_H = new TH1F("h_trk_eta_primary_noCuts_H","h_trk_eta_primary_noCuts_H; Track #eta Distribution (p_{T}>10 GeV); Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_primary_noCuts_L = new TH1F("h_trk_eta_primary_noCuts_L","h_trk_eta_primary_noCuts_L; Track #eta Distribution (p_{T}<10 GeV); Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_primary_qualCuts = new TH1F("h_trk_eta_primary_qualCuts","h_trk_eta_primary_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_primary_allCuts = new TH1F("h_trk_eta_primary_allCuts","h_trk_eta_primary_allCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_np = new TH1F("h_trk_eta_np","h_trk_eta_np; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_np_noCuts = new TH1F("h_trk_eta_np_noCuts","h_trk_eta_np_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_np_noCuts_H = new TH1F("h_trk_eta_np_noCuts_H","h_trk_eta_np_noCuts_H; Track #eta Distribution (p_{T}>10 GeV); Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_np_noCuts_L = new TH1F("h_trk_eta_np_noCuts_L","h_trk_eta_np_noCuts_L; Track #eta Distribution (p_{T}<10 GeV); Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_fake_noCuts = new TH1F("h_trk_eta_fake_noCuts","h_trk_eta_fake_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_PU_noCuts = new TH1F("h_trk_eta_PU_noCuts","h_trk_eta_PU_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_notHiggs_noCuts = new TH1F("h_trk_eta_notHiggs_noCuts","h_trk_eta_notHiggs_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_np_qualCuts = new TH1F("h_trk_eta_np_qualCuts","h_trk_eta_np_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_fake_qualCuts = new TH1F("h_trk_eta_fake_qualCuts","h_trk_eta_fake_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_PU_qualCuts = new TH1F("h_trk_eta_PU_qualCuts","h_trk_eta_PU_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_notHiggs_qualCuts = new TH1F("h_trk_eta_notHiggs_qualCuts","h_trk_eta_notHiggs_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F *h_trk_eta_np_allCuts = new TH1F("h_trk_eta_np_allCuts","h_trk_eta_np_allCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
+  TH1F* h_trk_z0 = new TH1F("h_trk_z0","h_trk_z0; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_primary = new TH1F("h_trk_z0_primary","h_trk_z0_primary; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_primary_noCuts = new TH1F("h_trk_z0_primary_noCuts","h_trk_z0_primary_noCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_primary_noCuts_H = new TH1F("h_trk_z0_primary_noCuts_H","h_trk_z0_primary_noCuts_H; Track z_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_primary_noCuts_L = new TH1F("h_trk_z0_primary_noCuts_L","h_trk_z0_primary_noCuts_L; Track z_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_primary_qualCuts = new TH1F("h_trk_z0_primary_qualCuts","h_trk_z0_primary_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_np = new TH1F("h_trk_z0_np","h_trk_z0_np; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_np_noCuts = new TH1F("h_trk_z0_np_noCuts","h_trk_z0_np_noCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_np_noCuts_H = new TH1F("h_trk_z0_np_noCuts_H","h_trk_z0_np_noCuts_H; Track z_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_np_noCuts_L = new TH1F("h_trk_z0_np_noCuts_L","h_trk_z0_np_noCuts_L; Track z_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_fake_noCuts = new TH1F("h_trk_z0_fake_noCuts","h_trk_z0_fake_noCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_PU_noCuts = new TH1F("h_trk_z0_PU_noCuts","h_trk_z0_PU_noCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_notHiggs_noCuts = new TH1F("h_trk_z0_notHiggs_noCuts","h_trk_z0_notHiggs_noCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_np_qualCuts = new TH1F("h_trk_z0_np_qualCuts","h_trk_z0_np_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_fake_qualCuts = new TH1F("h_trk_z0_fake_qualCuts","h_trk_z0_fake_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_PU_qualCuts = new TH1F("h_trk_z0_PU_qualCuts","h_trk_z0_PU_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_notHiggs_qualCuts = new TH1F("h_trk_z0_notHiggs_qualCuts","h_trk_z0_notHiggs_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F *h_trk_phi = new TH1F("h_trk_phi","h_trk_phi; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_primary = new TH1F("h_trk_phi_primary","h_trk_phi_primary; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_primary_noCuts = new TH1F("h_trk_phi_primary_noCuts","h_trk_phi_primary_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_primary_noCuts_H = new TH1F("h_trk_phi_primary_noCuts_H","h_trk_phi_primary_noCuts_H; Track #phi_{0} Distribution (p_{T}>10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_primary_noCuts_L = new TH1F("h_trk_phi_primary_noCuts_L","h_trk_phi_primary_noCuts_L; Track #phi_{0} Distribution (p_{T}<10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_primary_qualCuts = new TH1F("h_trk_phi_primary_qualCuts","h_trk_phi_primary_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_np = new TH1F("h_trk_phi_np","h_trk_phi_np; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_np_noCuts = new TH1F("h_trk_phi_np_noCuts","h_trk_phi_np_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_np_noCuts_H = new TH1F("h_trk_phi_np_noCuts_H","h_trk_phi_np_noCuts_H; Track #phi_{0} Distribution (p_{T}>10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_np_noCuts_L = new TH1F("h_trk_phi_np_noCuts_L","h_trk_phi_np_noCuts_L; Track #phi_{0} Distribution (p_{T}<10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_fake_noCuts = new TH1F("h_trk_phi_fake_noCuts","h_trk_phi_fake_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_PU_noCuts = new TH1F("h_trk_phi_PU_noCuts","h_trk_phi_PU_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_notHiggs_noCuts = new TH1F("h_trk_phi_notHiggs_noCuts","h_trk_phi_notHiggs_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_np_qualCuts = new TH1F("h_trk_phi_np_qualCuts","h_trk_phi_np_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_fake_qualCuts = new TH1F("h_trk_phi_fake_qualCuts","h_trk_phi_fake_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_PU_qualCuts = new TH1F("h_trk_phi_PU_qualCuts","h_trk_phi_PU_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_notHiggs_qualCuts = new TH1F("h_trk_phi_notHiggs_qualCuts","h_trk_phi_notHiggs_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_sectorPhi = new TH1F("h_trk_sectorPhi","h_trk_sectorPhi; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_primary = new TH1F("h_trk_sectorPhi_primary","h_trk_sectorPhi_primary; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_primary_noCuts = new TH1F("h_trk_sectorPhi_primary_noCuts","h_trk_sectorPhi_primary_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_primary_noCuts_H = new TH1F("h_trk_sectorPhi_primary_noCuts_H","h_trk_sectorPhi_primary_noCuts_H; Track #sectorPhi_{0} Distribution (p_{T}>10 GeV); Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_primary_noCuts_L = new TH1F("h_trk_sectorPhi_primary_noCuts_L","h_trk_sectorPhi_primary_noCuts_L; Track #sectorPhi_{0} Distribution (p_{T}<10 GeV); Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_primary_qualCuts = new TH1F("h_trk_sectorPhi_primary_qualCuts","h_trk_sectorPhi_primary_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_np = new TH1F("h_trk_sectorPhi_np","h_trk_sectorPhi_np; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_np_noCuts = new TH1F("h_trk_sectorPhi_np_noCuts","h_trk_sectorPhi_np_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_np_noCuts_H = new TH1F("h_trk_sectorPhi_np_noCuts_H","h_trk_sectorPhi_np_noCuts_H; Track #sectorPhi_{0} Distribution (p_{T}>10 GeV); Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_np_noCuts_L = new TH1F("h_trk_sectorPhi_np_noCuts_L","h_trk_sectorPhi_np_noCuts_L; Track #sectorPhi_{0} Distribution (p_{T}<10 GeV); Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_fake_noCuts = new TH1F("h_trk_sectorPhi_fake_noCuts","h_trk_sectorPhi_fake_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_PU_noCuts = new TH1F("h_trk_sectorPhi_PU_noCuts","h_trk_sectorPhi_PU_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_notHiggs_noCuts = new TH1F("h_trk_sectorPhi_notHiggs_noCuts","h_trk_sectorPhi_notHiggs_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_np_qualCuts = new TH1F("h_trk_sectorPhi_np_qualCuts","h_trk_sectorPhi_np_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_fake_qualCuts = new TH1F("h_trk_sectorPhi_fake_qualCuts","h_trk_sectorPhi_fake_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_PU_qualCuts = new TH1F("h_trk_sectorPhi_PU_qualCuts","h_trk_sectorPhi_PU_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_notHiggs_qualCuts = new TH1F("h_trk_sectorPhi_notHiggs_qualCuts","h_trk_sectorPhi_notHiggs_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+   
+  TH1F *h_tp_pt = new TH1F("h_tp_pt", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F *h_tp_eta = new TH1F("h_tp_eta", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F *h_tp_d0 = new TH1F("h_tp_d0", ";Tracking particle d_{0} [cm]; Tracking particles / 0.01 cm", 50, -2, 2);
+  TH1F *h_numSelectedTrks = new TH1F("h_numSelectedTrks","h_numSelectedTrks; Number of Selected Tracks; Events / 1.0",100,0,100);
+  TH1F *h_trk_H_T = new TH1F("h_trk_H_T","h_trk_H_T; Event Track Scalar p_{T} Sum [GeV]; Events / 10.0",100,0,1000);
+  TH1F *h_trk_MET = new TH1F("h_trk_MET","h_trk_MET; Event Track Missing E_{T} [GeV]; Events / 4.0",100,0,400);
+  TH1F *h_trk_oneMatch_H_T = new TH1F("h_trk_oneMatch_H_T","h_trk_oneMatch_H_T; Event Track Scalar p_{T} Sum [GeV]; Events / 10.0",100,0,1000);
+  TH1F *h_trk_oneMatch_MET = new TH1F("h_trk_oneMatch_MET","h_trk_oneMatch_MET; Event Track Missing E_{T} [GeV]; Events / 4.0",100,0,400);
+  TH1F *h_trk_oneVert_H_T = new TH1F("h_trk_oneVert_H_T","h_trk_oneVert_H_T; Event Track Scalar p_{T} Sum [GeV]; Events / 10.0",100,0,1000);
+  TH1F *h_trk_oneVert_MET = new TH1F("h_trk_oneVert_MET","h_trk_oneVert_MET; Event Track Missing E_{T} [GeV]; Events / 4.0",100,0,400);
+  TH1F *h_tp_H_T = new TH1F("h_tp_H_T","h_tp_H_T; Event TP Scalar p_{T} Sum [GeV]; Events / 10.0",100,0,1000);
+  TH1F *h_tp_MET = new TH1F("h_tp_MET","h_tp_MET; Event TP Missing E_{T} [GeV]; Events / 4.0",100,0,400);
+
+  TH1F *h_trueVertex_errorCode = new TH1F("h_trueVertex_errorCode","h_trueVertex_errorCode; Error Code; Events / 1.0",11,0,11);
+  TH1F *h_trueVertex_numAllCuts = new TH1F("h_trueVertex_numAllCuts","h_trueVertex_numAllCuts; TP Vertices; Events / 1.0",40,0,40);
+  TH1F *h_trueVertex_numNoCuts = new TH1F("h_trueVertex_numNoCuts","h_trueVertex_numNoCuts; TP Vertices; Events / 1.0",40,0,40);
+  TH1F *h_trueVertex_x = new TH1F("h_trueVertex_x","h_trueVertex_x; TP Vertex X Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trueVertex_y = new TH1F("h_trueVertex_y","h_trueVertex_y; TP Vertex Y Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trueVertex_z = new TH1F("h_trueVertex_z","h_trueVertex_z; TP Vertex Z Position (cm); Events / 0.025 cm",4000,-50,50);
+  TH1F *h_trueVertex_sumPt = new TH1F("h_trueVertex_sumPt","h_trueVertex_sumPt; TP Vertex Momentum (GeV); Events / 1.0 GeV",200,0,200.0);
+  TH1F *h_trueVertex_highPt = new TH1F("h_trueVertex_highPt","h_trueVertex_highPt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",200,0,200.0);
+  TH1F *h_trueVertex_lowPt = new TH1F("h_trueVertex_lowPt","h_trueVertex_lowPt; p_{T} of Lower p_{T} TP from vertex (GeV); Events / 1.0 GeV",200,0,200.0);
+  TH1F *h_trueVertexCuts_x = new TH1F("h_trueVertexCuts_x","h_trueVertexCuts_x; TP Vertex X Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trueVertexCuts_y = new TH1F("h_trueVertexCuts_y","h_trueVertexCuts_y; TP Vertex Y Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trueVertexCuts_z = new TH1F("h_trueVertexCuts_z","h_trueVertexCuts_z; TP Vertex Z Position (cm); Events / 0.025 cm",4000,-50,50);
+  TH1F *h_trueVertexCuts_sumPt = new TH1F("h_trueVertexCuts_sumPt","h_trueVertexCuts_sumPt; TP Vertex Momentum (GeV); Events / 1.0 GeV",200,0,200.0);
+  TH1F *h_trueVertexCuts_indexPt = new TH1F("h_trueVertexCuts_indexPt","h_trueVertexCuts_indexPt; Pt Ranking of TP; Events / 1.0",100,0,100.0);
+  TH1F *h_trackVertex_numAllCuts = new TH1F("h_trackVertex_numAllCuts","h_trackVertex_numAllCuts; Track Vertices; Events / 1.0",40,0,40);
+  TH1F *h_trackVertex_numNoCuts = new TH1F("h_trackVertex_numNoCuts","h_trackVertex_numNoCuts; Track Vertices; Events / 1.0",40,0,40);
+  TH1F *h_trackVertex_x = new TH1F("h_trackVertex_x","h_trackVertex_x; Track Vertex X Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trackVertex_y = new TH1F("h_trackVertex_y","h_trackVertex_y; Track Vertex Y Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trackVertex_z = new TH1F("h_trackVertex_z","h_trackVertex_z; Track Vertex Z Position (cm); Events / 0.025 cm",4000,-50,50);
+  TH1F *h_trackVertex_sumPt = new TH1F("h_trackVertex_sumPt","h_trackVertex_sumPt; Track Vertex Momentum (GeV); Events / 1.0 GeV",200,0,200.0);
+  TH1F *h_trackVertexCuts_x = new TH1F("h_trackVertexCuts_x","h_trackVertexCuts_x; Track Vertex X Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trackVertexCuts_y = new TH1F("h_trackVertexCuts_y","h_trackVertexCuts_y; Track Vertex Y Position (cm); Events / 0.1 cm",100,-5.0,5.0);
+  TH1F *h_trackVertexCuts_z = new TH1F("h_trackVertexCuts_z","h_trackVertexCuts_z; Track Vertex Z Position (cm); Events / 0.025 cm",4000,-50,50);
+  TH1F *h_trackVertexCuts_sumPt = new TH1F("h_trackVertexCuts_sumPt","h_trackVertexCuts_sumPt; Track Vertex Momentum (GeV); Events / 1.0 GeV",200,0,200.0);
+  TH1F *h_trackVertexCuts_indexPt = new TH1F("h_trackVertexCuts_indexPt","h_trackVertexCuts_indexPt; Pt Ranking of Track; Events / 1.0",50,0,50.0);
+  TH1F *h_correct_trackVertex_indexPt = new TH1F("h_correct_trackVertex_indexPt","h_correct_trackVertex_indexPt; Pt Ranking of Track; Events / 1.0",100,0,100.0);
+
+  TH1F *h_trk_MVA1_primary_noCuts = new TH1F("h_trk_MVA1_primary_noCuts","h_trk_MVA1_primary_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_primary_noCuts_H = new TH1F("h_trk_MVA1_primary_noCuts_H","h_trk_MVA1_primary_noCuts_H; Track MVA Score (p_{T}>10 GeV); Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_primary_noCuts_L = new TH1F("h_trk_MVA1_primary_noCuts_L","h_trk_MVA1_primary_noCuts_L; Track MVA Score (p_{T}<10 GeV); Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_primary_qualCuts = new TH1F("h_trk_MVA1_primary_qualCuts","h_trk_MVA1_primary_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_np_noCuts = new TH1F("h_trk_MVA1_np_noCuts","h_trk_MVA1_np_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_np_noCuts_H = new TH1F("h_trk_MVA1_np_noCuts_H","h_trk_MVA1_np_noCuts_H; Track MVA Score (p_{T}>10 GeV); Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_np_noCuts_L = new TH1F("h_trk_MVA1_np_noCuts_L","h_trk_MVA1_np_noCuts_L; Track MVA Score (p_{T}<10 GeV); Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_fake_noCuts = new TH1F("h_trk_MVA1_fake_noCuts","h_trk_MVA1_fake_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_PU_noCuts = new TH1F("h_trk_MVA1_PU_noCuts","h_trk_MVA1_PU_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_notHiggs_noCuts = new TH1F("h_trk_MVA1_notHiggs_noCuts","h_trk_MVA1_notHiggs_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_np_qualCuts = new TH1F("h_trk_MVA1_np_qualCuts","h_trk_MVA1_np_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_fake_qualCuts = new TH1F("h_trk_MVA1_fake_qualCuts","h_trk_MVA1_fake_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_PU_qualCuts = new TH1F("h_trk_MVA1_PU_qualCuts","h_trk_MVA1_PU_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_notHiggs_qualCuts = new TH1F("h_trk_MVA1_notHiggs_qualCuts","h_trk_MVA1_notHiggs_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  // Chi2 plots
+  TH1F *h_trk_chi2rphidof = new TH1F("h_trk_chi2rphidof","h_trk_chi2rphidof; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rphidof_primary = new TH1F("h_trk_chi2rphidof_primary","h_trk_chi2rphidof_primary; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_primary_noCuts = new TH1F("h_trk_chi2rphidof_primary_noCuts","h_trk_chi2rphidof_primary_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_primary_noCuts_H = new TH1F("h_trk_chi2rphidof_primary_noCuts_H","h_trk_chi2rphidof_primary_noCuts_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_primary_noCuts_L = new TH1F("h_trk_chi2rphidof_primary_noCuts_L","h_trk_chi2rphidof_primary_noCuts_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_primary_qualCuts = new TH1F("h_trk_chi2rphidof_primary_qualCuts","h_trk_chi2rphidof_primary_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_np = new TH1F("h_trk_chi2rphidof_np","h_trk_chi2rphidof_np; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_np_noCuts = new TH1F("h_trk_chi2rphidof_np_noCuts","h_trk_chi2rphidof_np_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_np_noCuts_H = new TH1F("h_trk_chi2rphidof_np_noCuts_H","h_trk_chi2rphidof_np_noCuts_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_np_noCuts_L = new TH1F("h_trk_chi2rphidof_np_noCuts_L","h_trk_chi2rphidof_np_noCuts_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_fake_noCuts = new TH1F("h_trk_chi2rphidof_fake_noCuts","h_trk_chi2rphidof_fake_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_PU_noCuts = new TH1F("h_trk_chi2rphidof_PU_noCuts","h_trk_chi2rphidof_PU_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_notHiggs_noCuts = new TH1F("h_trk_chi2rphidof_notHiggs_noCuts","h_trk_chi2rphidof_notHiggs_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_np_qualCuts = new TH1F("h_trk_chi2rphidof_np_qualCuts","h_trk_chi2rphidof_np_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_fake_qualCuts = new TH1F("h_trk_chi2rphidof_fake_qualCuts","h_trk_chi2rphidof_fake_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_PU_qualCuts = new TH1F("h_trk_chi2rphidof_PU_qualCuts","h_trk_chi2rphidof_PU_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_notHiggs_qualCuts = new TH1F("h_trk_chi2rphidof_notHiggs_qualCuts","h_trk_chi2rphidof_notHiggs_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_H = new TH1F("h_trk_chi2rphidof_H","h_trk_chi2rphidof_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>8 GeV); Events / 0.1",50,0,5);   
+  TH1F *h_trk_chi2rphidof_L = new TH1F("h_trk_chi2rphidof_L","h_trk_chi2rphidof_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<8 GeV); Events / 0.1",50,0,5);   
+  TH1F *h_trk_chi2rphidof_C = new TH1F("h_trk_chi2rphidof_C","h_trk_chi2rphidof_C; Track #chi^{2}_{r#phi}/d.o.f (|#eta|<0.8); Events / 0.1",50,0,5);   
+  TH1F *h_trk_chi2rphidof_I = new TH1F("h_trk_chi2rphidof_I","h_trk_chi2rphidof_I; Track #chi^{2}_{r#phi}/d.o.f (0.8#leq|#eta|#leq1.6); Events / 0.1",50,0,5);   
+  TH1F *h_trk_chi2rphidof_F = new TH1F("h_trk_chi2rphidof_F","h_trk_chi2rphidof_F; Track #chi^{2}_{r#phi}/d.o.f (|#eta|>1.6); Events / 0.1",50,0,5);   
+  TH1F *h_trk_chi2rphidof_P = new TH1F("h_trk_chi2rphidof_P","h_trk_chi2rphidof_P; Track #chi^{2}_{r#phi}/d.o.f (d_{0}#leq 1 cm); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rphidof_D = new TH1F("h_trk_chi2rphidof_D","h_trk_chi2rphidof_D; Track #chi^{2}_{r#phi}/d.o.f (d_{0}>1 cm); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof = new TH1F("h_trk_chi2rzdof","h_trk_chi2rzdof; Track #chi^{2}_{rz}/d.o.f ; Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_primary = new TH1F("h_trk_chi2rzdof_primary","h_trk_chi2rzdof_primary; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_primary_noCuts = new TH1F("h_trk_chi2rzdof_primary_noCuts","h_trk_chi2rzdof_primary_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_primary_noCuts_H = new TH1F("h_trk_chi2rzdof_primary_noCuts_H","h_trk_chi2rzdof_primary_noCuts_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_primary_noCuts_L = new TH1F("h_trk_chi2rzdof_primary_noCuts_L","h_trk_chi2rzdof_primary_noCuts_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_primary_qualCuts = new TH1F("h_trk_chi2rzdof_primary_qualCuts","h_trk_chi2rzdof_primary_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_np = new TH1F("h_trk_chi2rzdof_np","h_trk_chi2rzdof_np; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_np_noCuts = new TH1F("h_trk_chi2rzdof_np_noCuts","h_trk_chi2rzdof_np_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_np_noCuts_H = new TH1F("h_trk_chi2rzdof_np_noCuts_H","h_trk_chi2rzdof_np_noCuts_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_np_noCuts_L = new TH1F("h_trk_chi2rzdof_np_noCuts_L","h_trk_chi2rzdof_np_noCuts_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_fake_noCuts = new TH1F("h_trk_chi2rzdof_fake_noCuts","h_trk_chi2rzdof_fake_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_PU_noCuts = new TH1F("h_trk_chi2rzdof_PU_noCuts","h_trk_chi2rzdof_PU_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_notHiggs_noCuts = new TH1F("h_trk_chi2rzdof_notHiggs_noCuts","h_trk_chi2rzdof_notHiggs_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_np_qualCuts = new TH1F("h_trk_chi2rzdof_np_qualCuts","h_trk_chi2rzdof_np_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_fake_qualCuts = new TH1F("h_trk_chi2rzdof_fake_qualCuts","h_trk_chi2rzdof_fake_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_PU_qualCuts = new TH1F("h_trk_chi2rzdof_PU_qualCuts","h_trk_chi2rzdof_PU_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_notHiggs_qualCuts = new TH1F("h_trk_chi2rzdof_notHiggs_qualCuts","h_trk_chi2rzdof_notHiggs_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_H = new TH1F("h_trk_chi2rzdof_H","h_trk_chi2rzdof_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>8 GeV); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_L = new TH1F("h_trk_chi2rzdof_L","h_trk_chi2rzdof_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<8 GeV); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_C = new TH1F("h_trk_chi2rzdof_C","h_trk_chi2rzdof_C; Track #chi^{2}_{rz}/d.o.f (|#eta|<0.8); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_I = new TH1F("h_trk_chi2rzdof_I","h_trk_chi2rzdof_I; Track #chi^{2}_{rz}/d.o.f (0.8#leq|#eta|#leq1.6); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_F = new TH1F("h_trk_chi2rzdof_F","h_trk_chi2rzdof_F; Track #chi^{2}_{rz}/d.o.f (|#eta|>1.6); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_P = new TH1F("h_trk_chi2rzdof_P","h_trk_chi2rzdof_P; Track #chi^{2}_{rz}/d.o.f (d_{0}#leq 1 cm); Events / 0.1",50,0,5);
+  TH1F *h_trk_chi2rzdof_D = new TH1F("h_trk_chi2rzdof_D","h_trk_chi2rzdof_D; Track #chi^{2}_{rz}/d.o.f (d_{0}>1 cm); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2 = new TH1F("h_trk_bendchi2","h_trk_bendchi2; Track bend #chi^{2} ; Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_primary = new TH1F("h_trk_bendchi2_primary","h_trk_bendchi2_primary; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_primary_noCuts = new TH1F("h_trk_bendchi2_primary_noCuts","h_trk_bendchi2_primary_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_primary_noCuts_H = new TH1F("h_trk_bendchi2_primary_noCuts_H","h_trk_bendchi2_primary_noCuts_H; Track bend #chi^{2} (p_{T}>10 GeV); Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_primary_noCuts_L = new TH1F("h_trk_bendchi2_primary_noCuts_L","h_trk_bendchi2_primary_noCuts_L; Track bend #chi^{2} (p_{T}<10 GeV); Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_primary_qualCuts = new TH1F("h_trk_bendchi2_primary_qualCuts","h_trk_bendchi2_primary_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_np = new TH1F("h_trk_bendchi2_np","h_trk_bendchi2_np; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_np_noCuts = new TH1F("h_trk_bendchi2_np_noCuts","h_trk_bendchi2_np_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_np_noCuts_H = new TH1F("h_trk_bendchi2_np_noCuts_H","h_trk_bendchi2_np_noCuts_H; Track bend #chi^{2} (p_{T}>10 GeV); Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_np_noCuts_L = new TH1F("h_trk_bendchi2_np_noCuts_L","h_trk_bendchi2_np_noCuts_L; Track bend #chi^{2} (p_{T}<10 GeV); Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_fake_noCuts = new TH1F("h_trk_bendchi2_fake_noCuts","h_trk_bendchi2_fake_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_PU_noCuts = new TH1F("h_trk_bendchi2_PU_noCuts","h_trk_bendchi2_PU_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_notHiggs_noCuts = new TH1F("h_trk_bendchi2_notHiggs_noCuts","h_trk_bendchi2_notHiggs_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_np_qualCuts = new TH1F("h_trk_bendchi2_np_qualCuts","h_trk_bendchi2_np_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_fake_qualCuts = new TH1F("h_trk_bendchi2_fake_qualCuts","h_trk_bendchi2_fake_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_PU_qualCuts = new TH1F("h_trk_bendchi2_PU_qualCuts","h_trk_bendchi2_PU_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_notHiggs_qualCuts = new TH1F("h_trk_bendchi2_notHiggs_qualCuts","h_trk_bendchi2_notHiggs_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_H = new TH1F("h_trk_bendchi2_H","h_trk_bendchi2_H; Track bend #chi^{2} (p_{T}>8 GeV); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_L = new TH1F("h_trk_bendchi2_L","h_trk_bendchi2_L; Track bend #chi^{2} (p_{T}<8 GeV); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_C = new TH1F("h_trk_bendchi2_C","h_trk_bendchi2_C; Track bend #chi^{2} (|#eta|<0.8); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_I = new TH1F("h_trk_bendchi2_I","h_trk_bendchi2_I; Track bend #chi^{2} (0.8#leq|#eta|#leq1.6); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_F = new TH1F("h_trk_bendchi2_F","h_trk_bendchi2_F; Track bend #chi^{2} (|#eta|>1.6); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_P = new TH1F("h_trk_bendchi2_P","h_trk_bendchi2_P; Track bend #chi^{2} (d_{0}#leq 1 cm); Events / 0.1",50,0,5);
+  TH1F *h_trk_bendchi2_D = new TH1F("h_trk_bendchi2_D","h_trk_bendchi2_D; Track bend #chi^{2} (d_{0}>1 cm); Events / 0.1",50,0,5);
+
+  // Efficiency of Identifying Tracks Plots
+  TH1F* h_tp_pt_noCuts = new TH1F("h_tp_pt_noCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
+  TH1F* h_tp_pt_noCuts_primary = new TH1F("h_tp_pt_noCuts_primary", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
+  TH1F* h_tp_pt_noCuts_PU = new TH1F("h_tp_pt_noCuts_PU", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_noCuts = new TH1F("h_match_tp_pt_noCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_noCuts_primary = new TH1F("h_match_tp_pt_noCuts_primary", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_noCuts = new TH1F("h_tp_eta_noCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_eta_noCuts_primary = new TH1F("h_tp_eta_noCuts_primary", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_eta_noCuts_PU = new TH1F("h_tp_eta_noCuts_PU", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_noCuts = new TH1F("h_match_tp_eta_noCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_noCuts = new TH1F("h_tp_d0_noCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
+  TH1F* h_tp_d0_noCuts_primary = new TH1F("h_tp_d0_noCuts_primary", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
+  TH1F* h_tp_d0_noCuts_PU = new TH1F("h_tp_d0_noCuts_PU", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
+  TH1F* h_match_tp_d0_noCuts = new TH1F("h_match_tp_d0_noCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
+  TH1F* h_tp_z0_noCuts = new TH1F("h_tp_z0_noCuts", ";Tracking particle z_{0} [cm]; Tracking particles / 0.1 cm", 220, -2, 20);
+  TH1F* h_tp_z0_noCuts_primary = new TH1F("h_tp_z0_noCuts_primary", ";Tracking particle z_{0} [cm]; Tracking particles / 0.1 cm", 220, -2, 20);
+  TH1F* h_tp_z0_noCuts_PU = new TH1F("h_tp_z0_noCuts_PU", ";Tracking particle z_{0} [cm]; Tracking particles / 0.1 cm", 220, -2, 20);
+
+  TH1F* h_tp_pt_maxD0Cut = new TH1F("h_tp_pt_maxD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_maxD0Cut = new TH1F("h_match_tp_pt_maxD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_maxD0Cut = new TH1F("h_tp_eta_maxD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_maxD0Cut = new TH1F("h_match_tp_eta_maxD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_maxD0Cut = new TH1F("h_tp_d0_maxD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_match_tp_d0_maxD0Cut = new TH1F("h_match_tp_d0_maxD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+   
+  TH1F* h_tp_pt_minD0Cut = new TH1F("h_tp_pt_minD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_minD0Cut = new TH1F("h_match_tp_pt_minD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_minD0Cut = new TH1F("h_tp_eta_minD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_minD0Cut = new TH1F("h_match_tp_eta_minD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_minD0Cut = new TH1F("h_tp_d0_minD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_match_tp_d0_minD0Cut = new TH1F("h_match_tp_d0_minD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_tp_pt_minPtCut = new TH1F("h_tp_pt_minPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_minPtCut = new TH1F("h_match_tp_pt_minPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_minPtCut = new TH1F("h_tp_eta_minPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_minPtCut = new TH1F("h_match_tp_eta_minPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_minPtCut = new TH1F("h_tp_d0_minPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_match_tp_d0_minPtCut = new TH1F("h_match_tp_d0_minPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_tp_pt_maxPtCut = new TH1F("h_tp_pt_maxPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_maxPtCut = new TH1F("h_match_tp_pt_maxPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_maxPtCut = new TH1F("h_tp_eta_maxPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_maxPtCut = new TH1F("h_match_tp_eta_maxPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_maxPtCut = new TH1F("h_tp_d0_maxPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_match_tp_d0_maxPtCut = new TH1F("h_match_tp_d0_maxPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_tp_pt_maxEtaCut = new TH1F("h_tp_pt_maxEtaCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_maxEtaCut = new TH1F("h_match_tp_pt_maxEtaCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_maxEtaCut = new TH1F("h_tp_eta_maxEtaCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_maxEtaCut = new TH1F("h_match_tp_eta_maxEtaCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_maxEtaCut = new TH1F("h_tp_d0_maxEtaCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_match_tp_d0_maxEtaCut = new TH1F("h_match_tp_d0_maxEtaCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_tp_pt_allCuts = new TH1F("h_tp_pt_allCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_allCuts = new TH1F("h_match_tp_pt_allCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_match_tp_pt_allCuts_trkCuts = new TH1F("h_match_tp_pt_allCuts_trkCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tp_eta_allCuts = new TH1F("h_tp_eta_allCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_match_tp_eta_allCuts = new TH1F("h_match_tp_eta_allCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_d0_allCuts = new TH1F("h_tp_d0_allCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_match_tp_d0_allCuts = new TH1F("h_match_tp_d0_allCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_trk_matchtp_pt_allCuts = new TH1F("h_trk_matchtp_pt_allCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_trk_matchtp_eta_allCuts = new TH1F("h_trk_matchtp_eta_allCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_dxy_allCuts = new TH1F("h_tp_dxy_allCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_trk_matchtp_dxy_allCuts = new TH1F("h_trk_matchtp_dxy_allCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_trk_matchtp_pt_noCuts = new TH1F("h_trk_matchtp_pt_noCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
+  TH1F* h_trk_matchtp_eta_noCuts = new TH1F("h_trk_matchtp_eta_noCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_dxy_noCuts = new TH1F("h_tp_dxy_noCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_trk_matchtp_dxy_noCuts = new TH1F("h_trk_matchtp_dxy_noCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  TH1F* h_trk_matchtp_pt_oldCuts = new TH1F("h_trk_matchtp_pt_oldCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_trk_matchtp_eta_oldCuts = new TH1F("h_trk_matchtp_eta_oldCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
+  TH1F* h_tp_dxy_oldCuts = new TH1F("h_tp_dxy_oldCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+  TH1F* h_trk_matchtp_dxy_oldCuts = new TH1F("h_trk_matchtp_dxy_oldCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
+
+  // Displaced Vertex Plots
+  TH1F *h_delta_dist_xy = new TH1F("h_delta_dist_xy","h_delta_dist_xy; (a) Distance between chosen TPs in x-y (cm) ; Events / 0.02 cm",50,0,1);
+  TH1F *h_error_delta_x = new TH1F("h_error_delta_x","h_error_delta_x; (b) #Delta x_{displaced} with chosen TP true x (cm) ; Events / 0.02 cm",100,0,2);
+  TH1F *h_delta_dist_z = new TH1F("h_delta_dist_z","h_delta_dist_z; (c) Distance between chosen TPs in z (cm) ; Events / 0.05 cm",40,0,2);
+  TH1F *h_error_delta_z = new TH1F("h_error_delta_z","h_error_delta_z; (d) Chosen TP error in z (cm) ; Events / 0.1 cm",100,0,10);
+  TH1F *h_delta_x = new TH1F("h_delta_x","h_delta_x; #Delta x between chosen TPs true x (cm) ; Events / 0.05 cm",40,0,2);
+
+  TH1I *h_trk_Counter_TPcombination = new TH1I("h_trk_Counter_TPcombination","h_trk_Counter_TPcombination; Track combination chosen; Events / 1.0",6,0,6);
+  TH1F *h_trk_delta_dist_xy = new TH1F("h_trk_delta_dist_xy","h_trk_delta_dist_xy; Distance between chosen Tracks in x-y (cm) ; Events / 2E-8 cm",50,0,0.000001);
+  TH1F *h_trk_delta_dist_z = new TH1F("h_trk_delta_dist_z","h_trk_delta_dist_z; Distance between chosen Tracks in z (cm) ; Events / 0.05 cm",40,0,2);
+  TH1F *h_trackVertex_cos_T = new TH1F("h_trackVertex_cos_T","h_trackVertex_cos_T; Cos(angle): parent momentum and vertex position; Events / 0.05",40,-1,1);
+  TH1F *h_trackVertex_alpha_T = new TH1F("h_trackVertex_alpha_T","h_trackVertex_alpha_T; angle btwn parent momentum and vertex position; Events / 0.315",40,-6.3,6.3);
+  TH1F *h_trackVertex_openingAngle = new TH1F("h_trackVertex_openingAngle","h_trackVertex_openingAngle; angle btwn tracks; Events / 0.157",40,-3.14,3.14);
+  TH1F *h_trackVertex_parentPt = new TH1F("h_trackVertex_parentPt","h_trackVertex_parentPt; Pt magnitude of parent; Events / 1.0",200,0,200.0);
+  TH1F *h_trackVertex_d_T = new TH1F("h_trackVertex_d_T","h_trackVertex_d_T; Impact parameter of parent (cm) ; Events / 0.005 cm",40,0,0.2);
+  TH1F *h_trackVertex_R_T = new TH1F("h_trackVertex_R_T","h_trackVertex_R_T; Tranverse distance of vertex (cm) ; Events / 0.25 cm",40,0,10);
+  TH1F *h_trueVertex_cos_T = new TH1F("h_trueVertex_cos_T","h_trueVertex_cos_T; Cos(angle): parent momentum and vertex position; Events / 0.05",40,-1,1);
+  TH1F *h_trueVertex_alpha_T = new TH1F("h_trueVertex_alpha_T","h_trueVertex_alpha_T; angle btwn parent momentum and vertex position; Events / 0.315",40,-6.3,6.3);
+  TH1F *h_trueVertex_openingAngle = new TH1F("h_trueVertex_openingAngle","h_trueVertex_openingAngle; angle btwn TPs; Events / 0.157",40,-3.14,3.14);
+  TH1F *h_trueVertex_parentPt = new TH1F("h_trueVertex_parentPt","h_trueVertex_parentPt; Pt magnitude of parent; Events / 1.0",200,0,200.0);
+  TH1F *h_trueVertex_d_T = new TH1F("h_trueVertex_d_T","h_trueVertex_d_T; Impact parameter of parent (cm) ; Events / 0.005 cm",40,0,0.2);
+  TH1F *h_trueVertex_R_T = new TH1F("h_trueVertex_R_T","h_trueVertex_R_T; Tranverse distance of vertex (cm) ; Events / 0.25 cm",40,0,10);
+  TH1F *h_trueVertex_delta_dist_z0 = new TH1F("h_trueVertex_delta_dist_z0","h_trueVertex_delta_dist_z0; Distance in z0 btwn TPs from vertex (cm) ; Events / 0.1 cm",100,0,10);
+  TH1F *h_trueVertex_delta_dist_d0 = new TH1F("h_trueVertex_delta_dist_d0","h_trueVertex_delta_dist_d0; Distance in d0 btwn TPs from vertex (cm) ; Events / 0.02 cm",100,0,2);
+  TH1F *h_trueVertex_delta_dist_eta = new TH1F("h_trueVertex_delta_dist_eta","h_trueVertex_delta_dist_eta; Distance in eta btwn TPs from vertex ; Events / 0.024",100,0,2.4);
+  TH1F *h_trueVertex_delta_dist_phi = new TH1F("h_trueVertex_delta_dist_phi","h_trueVertex_delta_dist_phi; Distance in phi btwn TPs from vertex ; Events / 0.063",100,0,6.3);
+  TH1F *h_trueVertex_delta_dist_indexPt = new TH1F("h_trueVertex_delta_dist_indexPt","h_trueVertex_delta_dist_indexPt; Distance in pt index btwn TPs from vertex ; Events / 1.0",20,0,20);
+  
+  TH1F *h_res_tp_trk_x = new TH1F("h_res_tp_trk_x","h_res_tp_trk_x; x residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
+  TH1F *h_res_tp_trk_y = new TH1F("h_res_tp_trk_y","h_res_tp_trk_y; y residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
+  TH1F *h_res_tp_trk_z = new TH1F("h_res_tp_trk_z","h_res_tp_trk_z; z residual of vertex (cm) ; Events / 0.02 cm",1000,-10,10);
+  TH1F *h_res_tp_trk_r = new TH1F("h_res_tp_trk_r","h_res_tp_trk_r; r residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
+  TH1F *h_res_tp_trk_phi = new TH1F("h_res_tp_trk_phi","h_res_tp_trk_phi; phi residual of vertex ; Events / 0.02",100,-1,1);
+
+  // Efficiency of Identifying Displaced Vertex Plots
+  TH1F *h_all_trueVertex_pt = new TH1F("h_all_trueVertex_pt","h_all_trueVertex_pt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_all_trueVertex_minD0 = new TH1F("h_all_trueVertex_minD0","h_all_trueVertex_minD0; minimum d_{0} of TPs from vertex (cm); Events / 0.05 cm",80,-2,2);
+  TH1F *h_all_trueVertex_lowPt = new TH1F("h_all_trueVertex_lowPt","h_all_trueVertex_lowPt; p_{T} of Lower p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_all_oneMatch_trueVertex_pt = new TH1F("h_all_oneMatch_trueVertex_pt","h_all_oneMatch_trueVertex_pt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_all_oneMatch_trueVertex_lowPt = new TH1F("h_all_oneMatch_trueVertex_lowPt","h_all_oneMatch_trueVertex_lowPt; p_{T} of Lower p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_all_oneMatchAlt_trueVertex_pt = new TH1F("h_all_oneMatchAlt_trueVertex_pt","h_all_oneMatchAlt_trueVertex_pt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_all_trackVertex_pt = new TH1F("h_all_trackVertex_pt","h_all_trackVertex_pt; p_{T} of Leading p_{T} trk from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_all_trackVertex_minD0 = new TH1F("h_all_trackVertex_minD0","h_all_trackVertex_minD0; minimum d_{0} of trks from vertex (cm); Events / 0.05 cm",80,-2,2);
+  TH1F *h_all_trackVertex_lowPt = new TH1F("h_all_trackVertex_lowPt","h_all_trackVertex_lowPt; p_{T} of Lower p_{T} trk from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_correct_trueVertex_pt = new TH1F("h_correct_trueVertex_pt","h_correct_trueVertex_pt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_correct_trueVertex_lowPt = new TH1F("h_correct_trueVertex_lowPt","h_correct_trueVertex_lowPt; p_{T} of Lower p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_correct_oneMatch_trueVertex_pt = new TH1F("h_correct_oneMatch_trueVertex_pt","h_correct_oneMatch_trueVertex_pt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_correct_oneMatch_trueVertex_lowPt = new TH1F("h_correct_oneMatch_trueVertex_lowPt","h_correct_oneMatch_trueVertex_lowPt; p_{T} of Lower p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_correct_oneMatchAlt_trueVertex_pt = new TH1F("h_correct_oneMatchAlt_trueVertex_pt","h_correct_oneMatchAlt_trueVertex_pt; p_{T} of Leading p_{T} TP from vertex (GeV); Events / 1.0 GeV",100,0,100);
+  TH1F *h_false_trackVertex_pt = new TH1F("h_false_trackVertex_pt","h_false_trackVertex_pt; p_{T} of Leading p_{T} trk from vertex (GeV); Events / 1.0 GeV",100,0,100);
+
+  TH1F *h_false_trackVertex_delta_dist_z = new TH1F("h_false_trackVertex_delta_dist_z","h_false_trackVertex_delta_dist_z; Distance in z btwn trks from vertex (cm); Events / 0.05 cm",100,0,5);
+  TH1F *h_correct_trackVertex_delta_dist_z = new TH1F("h_correct_trackVertex_delta_dist_z","h_correct_trackVertex_delta_dist_z; Distance in z btwn trks from vertex (cm); Events / 0.05 cm",100,0,5);
+  TH1F *h_correct_trackVertex_delta_dist_z0 = new TH1F("h_correct_trackVertex_delta_dist_z0","h_correct_trackVertex_delta_dist_z0; Distance in z0 btwn trks from vertex (cm); Events / 0.1 cm",100,0,10);
+  TH1F *h_correct_trackVertex_delta_dist_d0 = new TH1F("h_correct_trackVertex_delta_dist_d0","h_correct_trackVertex_delta_dist_d0; Distance in d0 btwn trks from vertex (cm); Events / 0.02 cm",100,0,2);
+  TH1F *h_correct_trackVertex_delta_dist_eta = new TH1F("h_correct_trackVertex_delta_dist_eta","h_correct_trackVertex_delta_dist_eta; Distance in eta btwn trks from vertex ; Events / 0.024",100,0,2.4);
+  TH1F *h_correct_trackVertex_delta_dist_phi = new TH1F("h_correct_trackVertex_delta_dist_phi","h_correct_trackVertex_delta_dist_phi; Distance in phi btwn trks from vertex ; Events / 0.063",100,0,6.3);
+  TH1F *h_correct_trackVertex_delta_dist_indexPt = new TH1F("h_correct_trackVertex_delta_dist_indexPt","h_correct_trackVertex_delta_dist_indexPt; Distance in pt index btwn trks from vertex ; Events / 1.0",20,0,20);
+  TH1F *h_all_trackVertex_numStubs = new TH1F("h_all_trackVertex_numStubs","h_all_trackVertex_numStubs; Number of stubs of trks from vertex; Events / 1.0",12,0,12);
+  TH1F *h_correct_trackVertex_numStubs = new TH1F("h_correct_trackVertex_numStubs","h_correct_trackVertex_numStubs; Number of stubs of trks from vertex; Events / 1.0",12,0,12);
+  TH1F *h_correct_trackVertex_numStubsSum = new TH1F("h_correct_trackVertex_numStubsSum","h_correct_trackVertex_numStubsSum; Number of stubs of trks from vertex; Events / 1.0",12,0,12);
+  TH1F *h_false_trackVertex_numStubs = new TH1F("h_false_trackVertex_numStubs","h_false_trackVertex_numStubs; Number of stubs of trks from vertex; Events / 1.0",12,0,12);
+  TH1F *h_false_trackVertex_numStubsSum = new TH1F("h_false_trackVertex_numStubsSum","h_false_trackVertex_numStubsSum; Number of stubs of trks from vertex; Events / 1.0",12,0,12);
+  TH1F *h_false_trackVertex_d0 = new TH1F("h_false_trackVertex_d0","h_false_trackVertex_d0; d_{0} of trks from vertex; Events / 0.05 cm",100,0,5);
+  TH1F *h_false_trackVertex_d_T = new TH1F("h_false_trackVertex_d_T","h_false_trackVertex_d_T; Impact parameter of parent (cm) ; Events / 0.025 cm",40,0,1);
+  TH1F *h_false_trackVertex_chi2rphidofSum = new TH1F("h_false_trackVertex_chi2rphidofSum","h_false_trackVertex_chi2rphidofSum; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.1",200,0,20);
+  TH1F *h_false_trackVertex_chi2rzdofSum = new TH1F("h_false_trackVertex_chi2rzdofSum","h_false_trackVertex_chi2rzdofSum; Track #chi^{2}_{rz}/d.o.f ; Events / 0.1",200,0,20);
+  TH1F *h_false_trackVertex_bendchi2Sum = new TH1F("h_false_trackVertex_bendchi2Sum","h_false_trackVertex_bendchi2Sum; Track bend #chi^{2} ; Events / 0.1",200,0,20);
+  TH1F *h_false_trackVertex_score = new TH1F("h_false_trackVertex_score","h_false_trackVertex_score; Vertex NN score ; Events / 0.1",100,0,1);
+  TH1F *h_correct_trackVertex_chi2rphidofSum = new TH1F("h_correct_trackVertex_chi2rphidofSum","h_correct_trackVertex_chi2rphidofSum; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.1",200,0,20);
+  TH1F *h_correct_trackVertex_chi2rzdofSum = new TH1F("h_correct_trackVertex_chi2rzdofSum","h_correct_trackVertex_chi2rzdofSum; Track #chi^{2}_{rz}/d.o.f ; Events / 0.1",200,0,20);
+  TH1F *h_correct_trackVertex_bendchi2Sum = new TH1F("h_correct_trackVertex_bendchi2Sum","h_correct_trackVertex_bendchi2Sum; Track bend #chi^{2} ; Events / 0.1",200,0,20);
+  TH1F *h_correct_trackVertex_score = new TH1F("h_correct_trackVertex_score","h_correct_trackVertex_score; Vertex NN score ; Events / 0.1",100,0,1);
+
+  TH1F *h_all_trueVertex_eta = new TH1F("h_all_trueVertex_eta","h_all_trueVertex_eta; #eta of Leading p_{T} TP from vertex; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_all_oneMatch_trueVertex_eta = new TH1F("h_all_oneMatch_trueVertex_eta","h_all_oneMatch_trueVertex_eta; #eta of Leading p_{T} TP from vertex ; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_all_oneMatchAlt_trueVertex_eta = new TH1F("h_all_oneMatchAlt_trueVertex_eta","h_all_oneMatchAlt_trueVertex_eta; #eta of Leading p_{T} TP from vertex ; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_all_trackVertex_eta = new TH1F("h_all_trackVertex_eta","h_all_trackVertex_eta; #eta of Leading p_{T} trk from vertex ; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_correct_trueVertex_eta = new TH1F("h_correct_trueVertex_eta","h_correct_trueVertex_eta; #eta of Leading p_{T} TP from vertex ; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_correct_oneMatch_trueVertex_eta = new TH1F("h_correct_oneMatch_trueVertex_eta","h_correct_oneMatch_trueVertex_eta; #eta of Leading p_{T} TP from vertex ; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_correct_oneMatchAlt_trueVertex_eta = new TH1F("h_correct_oneMatchAlt_trueVertex_eta","h_correct_oneMatchAlt_trueVertex_eta; #eta of Leading p_{T} TP from vertex ; Events / 0.096",50,-2.4,2.4);
+  TH1F *h_false_trackVertex_eta = new TH1F("h_false_trackVertex_eta","h_false_trackVertex_eta; #eta of Leading p_{T} trk from vertex ; Events / 0.096",50,-2.4,2.4);
+   
+  TH1F *h_all_trueVertex_dxy = new TH1F("h_all_trueVertex_dxy","h_all_trueVertex_dxy; dxy of vertex (cm); Events / 0.1 cm",20,0,2);
+  TH1F *h_all_oneMatch_trueVertex_dxy = new TH1F("h_all_oneMatch_trueVertex_dxy","h_all_oneMatch_trueVertex_dxy; dxy of vertex (cm); Events / 0.1 cm",20,0,2);
+  TH1F *h_all_oneMatchAlt_trueVertex_dxy = new TH1F("h_all_oneMatchAlt_trueVertex_dxy","h_all_oneMatchAlt_trueVertex_dxy; dxy of vertex (cm); Events / 0.1 cm",20,0,2);
+  TH1F *h_all_trackVertex_dxy = new TH1F("h_all_trackVertex_dxy","h_all_trackVertex_dxy; dxy of vertex (cm); Events / 0.1 cm",20,0,2);
+  TH1F *h_correct_trueVertex_dxy = new TH1F("h_correct_trueVertex_dxy","h_correct_trueVertex_dxy; dxy of vertex (cm) ; Events / 0.1 cm",20,0,2);
+  TH1F *h_correct_oneMatch_trueVertex_dxy = new TH1F("h_correct_oneMatch_trueVertex_dxy","h_correct_oneMatch_trueVertex_dxy; dxy of vertex (cm) ; Events / 0.1 cm",20,0,2);
+  TH1F *h_correct_oneMatchAlt_trueVertex_dxy = new TH1F("h_correct_oneMatchAlt_trueVertex_dxy","h_correct_oneMatchAlt_trueVertex_dxy; dxy of vertex (cm) ; Events / 0.1 cm",20,0,2);
+  TH1F *h_false_trackVertex_dxy = new TH1F("h_false_trackVertex_dxy","h_false_trackVertex_dxy; dxy of vertex (cm) ; Events / 0.1 cm",20,0,2);
+
+  // Trigger Rates Study 
+  TH2F *h_Count_trk_pt_d0 = new TH2F("h_Count_trk_pt_d0","h_Count_trk_pt_d0; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T}(GeV)",5,0.1,0.6,5,2,12); // Count of Selected tracks
+  TH2F *h_Count_trk_pt_d0_dv = new TH2F("h_Count_trk_pt_d0_dv","h_Count_trk_pt_d0_dv;(DV selection) Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T}(GeV)",5,0.1,0.6,5,2,12); // Count of Selected tracks including the displaced vertex selection
+  TH2F *h_trk_pt_vs_d0_primary_qualCuts = new TH2F("h_trk_pt_vs_d0_primary_qualCuts","h_trk_pt_vs_d0_primary_qualCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
+  TH2F *h_trk_pt_vs_d0_np_qualCuts = new TH2F("h_trk_pt_vs_d0_np_qualCuts","h_trk_pt_vs_d0_np_qualCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
+  TH2F *h_trk_pt_vs_eta_primary_qualCuts = new TH2F("h_trk_pt_vs_eta_primary_qualCuts","h_trk_pt_vs_eta_primary_qualCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
+  TH2F *h_trk_pt_vs_eta_np_qualCuts = new TH2F("h_trk_pt_vs_eta_np_qualCuts","h_trk_pt_vs_eta_np_qualCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
+  TH2F *h_trk_eta_vs_d0_primary_qualCuts = new TH2F("h_trk_eta_vs_d0_primary_qualCuts","h_trk_eta_vs_d0_primary_qualCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
+  TH2F *h_trk_eta_vs_d0_np_qualCuts = new TH2F("h_trk_eta_vs_d0_np_qualCuts","h_trk_eta_vs_d0_np_qualCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
+
+  std::string binVariable = "";
+  std::vector<std::vector<double>> track_bins = {{-1,1}};
+  std::vector<std::vector<double>> z0_bins = {{0,2},{1,3},{2,4},{3,5},{4,6},{5,7},{6,8}};
+  std::vector<std::vector<double>> phi_bins;
+  double phi_bin_min = -TMath::Pi();
+  double phi_bin_width = 0.504;
+  double phi_bin_max = phi_bin_min+phi_bin_width;
+  while(phi_bin_max<TMath::Pi()){
+    phi_bins.push_back({phi_bin_min,phi_bin_max});
+    phi_bin_min += (phi_bin_width/2);
+    phi_bin_max += (phi_bin_width/2);
+  }
+  if(binVariable=="z0") track_bins = z0_bins;
+  if(binVariable=="phi") track_bins = phi_bins;
+
+  float pt_cuts[5] = {2.0,4.0,6.0,8.0,10.0};     // Cuts to control event rate
+  float d0_cuts[5] = {0.1,0.2,0.3,0.4,0.5}; 
+  std::vector<double> dxy_cuts = linspace(0.0,0.0000001,5); //cut <dxy
+  std::vector<double> dz_cuts = linspace(0.0,3.0,5); //cut <dz
+  std::vector<double> cos_T_cuts = linspace(.95,.999,5); //cut >cos
+  std::vector<double> d_T_cuts = linspace(0.0,0.1,5); //cut <d_T
+  std::vector<double> R_T_cuts = linspace(0.0,2.0,5); //cut >R_T
+  std::vector<double> chi2rz_cuts = linspace(0.0,10.0,5); //cut <chi2rz
+  std::vector<double> minD0_cuts = linspace(0.0,1.0,5); //cut >minD0
+  std::vector<double> stubSum_cuts = linspace(8.0,12.0,5); //cut >stubSum
+  
+
+  double true_vertices = 0.0;
+
+  std::vector<double> correct_vert_dxy_cut(dxy_cuts.size()); 
+  std::vector<double> false_vert_dxy_cut(dxy_cuts.size());
+  std::vector<double> all_vert_dxy_cut(dxy_cuts.size());
+
+  std::vector<double> correct_vert_dz_cut(dz_cuts.size());
+  std::vector<double> false_vert_dz_cut(dz_cuts.size());
+  std::vector<double> all_vert_dz_cut(dz_cuts.size());
+  std::vector<double> prev_dz_cut(dz_cuts.size());
+
+  std::vector<double> correct_vert_cos_T_cut(cos_T_cuts.size());
+  std::vector<double> false_vert_cos_T_cut(cos_T_cuts.size());
+  std::vector<double> all_vert_cos_T_cut(cos_T_cuts.size());
+  std::vector<double> prev_cos_T_cut(cos_T_cuts.size());
+
+  std::vector<double> correct_vert_d_T_cut(d_T_cuts.size());
+  std::vector<double> false_vert_d_T_cut(d_T_cuts.size());
+  std::vector<double> all_vert_d_T_cut(d_T_cuts.size());
+  std::vector<double> prev_d_T_cut(d_T_cuts.size());
+
+  std::vector<double> correct_vert_R_T_cut(R_T_cuts.size());
+  std::vector<double> false_vert_R_T_cut(R_T_cuts.size());
+  std::vector<double> all_vert_R_T_cut(R_T_cuts.size());
+  std::vector<double> prev_R_T_cut(R_T_cuts.size());
+
+  std::vector<double> correct_vert_chi2rz_cut(chi2rz_cuts.size());
+  std::vector<double> false_vert_chi2rz_cut(chi2rz_cuts.size());
+  std::vector<double> all_vert_chi2rz_cut(chi2rz_cuts.size());
+  std::vector<double> prev_chi2rz_cut(chi2rz_cuts.size());
+
+  std::vector<double> correct_vert_minD0_cut(minD0_cuts.size());
+  std::vector<double> false_vert_minD0_cut(minD0_cuts.size());
+  std::vector<double> all_vert_minD0_cut(minD0_cuts.size());
+  std::vector<double> prev_minD0_cut(minD0_cuts.size());
+
+  std::vector<double> correct_vert_stubSum_cut(stubSum_cuts.size());
+  std::vector<double> false_vert_stubSum_cut(stubSum_cuts.size());
+  std::vector<double> all_vert_stubSum_cut(stubSum_cuts.size());
+  std::vector<double> prev_stubSum_cut(stubSum_cuts.size());
+   
+  double correct_vert_array_cut[dz_cuts.size()][cos_T_cuts.size()][d_T_cuts.size()][R_T_cuts.size()][chi2rz_cuts.size()][minD0_cuts.size()][stubSum_cuts.size()];
+  double false_vert_array_cut[dz_cuts.size()][cos_T_cuts.size()][d_T_cuts.size()][R_T_cuts.size()][chi2rz_cuts.size()][minD0_cuts.size()][stubSum_cuts.size()];
+  double all_vert_array_cut[dz_cuts.size()][cos_T_cuts.size()][d_T_cuts.size()][R_T_cuts.size()][chi2rz_cuts.size()][minD0_cuts.size()][stubSum_cuts.size()];
+  double prev_array_cut[dz_cuts.size()][cos_T_cuts.size()][d_T_cuts.size()][R_T_cuts.size()][chi2rz_cuts.size()][minD0_cuts.size()][stubSum_cuts.size()];
+
+  for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+    for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+      for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+	  for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+	    for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+	      for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		correct_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = 0;
+		false_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = 0;
+		all_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = 0;
+		prev_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = 0;
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  if (tree == 0) return;
+  Long64_t nevt = tree->GetEntries();
+  
+  for (Long64_t i_evnt=0; i_evnt<nevt; i_evnt++) {
+    //std::cout<<"event number: "<<i_evnt<<std::endl;
+    tree->GetEntry(i_evnt);
+    displayProgress(i_evnt, nevt);
+    std::vector<std::deque<Track_Parameters>> binnedSelectedTracks;
+    for(uint i=0; i<track_bins.size(); i++){
+      binnedSelectedTracks.push_back({});
+    }
+    std::deque<Track_Parameters> selectedTracks;      // Tracks 
+    std::vector<Track_Parameters> selectedTPs;         // Tracking particles
+    std::vector<Vertex_Parameters> trueVertices;
+    std::vector<Vertex_Parameters> trackVertices;
+    std::vector<Vertex_Parameters> tempVertices;
+    int maxPT_i = 0;
+    int firstMatch_j = 0;
+    bool oneMatch = false;
+    std::valarray<float> trkMET = {0.0,0.0};
+    float trkH_T = 0.0;
+    std::vector<float> matchtp_pt_noCuts_vec;
+    std::vector<float> matchtp_pt_oldCuts_vec;
+    std::vector<float> matchtp_pt_allCuts_vec;
+    std::vector<float> tp_pt_noCuts_primary_vec;
+    std::vector<float> tp_pt_oldCuts_vec;
+    std::vector<float> tp_pt_allCuts_vec;
+    // ----------------------------------------------------------------------------------------------------------------
+    // track loop
+    for (int it = 0; it < (int)trk_pt->size(); it++){
+
+      if(trk_matchtp_pt->at(it)!= -999 && find(matchtp_pt_noCuts_vec.begin(),matchtp_pt_noCuts_vec.end(),trk_matchtp_pt->at(it))==matchtp_pt_noCuts_vec.end() ){
+	matchtp_pt_noCuts_vec.push_back(trk_matchtp_pt->at(it));
+      }
+      h_trk_pt_noCuts->Fill(trk_pt->at(it));
+
+      float sectorphi = trk_phi->at(it);                                                                                       
+      while (sectorphi < -TMath::Pi()/9 ) sectorphi += 2*TMath::Pi();                           
+      while (sectorphi > TMath::Pi()*2 ) sectorphi -= 2*TMath::Pi();                                                          
+      while (sectorphi > TMath::Pi()/9) sectorphi -= 2*TMath::Pi()/9;
+      int ndof = 2 * trk_nstub->at(it) - 5;
+      float chi2rphidof = (float)trk_chi2rphi->at(it) / ndof;
+      float chi2rzdof = (float)trk_chi2rz->at(it) / ndof;
+
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_eta_primary_noCuts->Fill(trk_eta->at(it));
+	h_trk_pt_primary_noCuts->Fill(trk_pt->at(it));
+	h_trk_d0_primary_noCuts->Fill(trk_d0->at(it));
+	h_trk_z0_primary_noCuts->Fill(trk_z0->at(it));
+	h_trk_phi_primary_noCuts->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_primary_noCuts->Fill(sectorphi);
+	h_trk_chi2rphidof_primary_noCuts->Fill(chi2rphidof);
+	h_trk_MVA1_primary_noCuts->Fill(trk_MVA1->at(it));
+	h_trk_chi2rzdof_primary_noCuts->Fill(chi2rzdof);
+	h_trk_bendchi2_primary_noCuts->Fill(trk_bendchi2->at(it));
+	if(trk_pt->at(it) > 10){
+	  h_trk_eta_primary_noCuts_H->Fill(trk_eta->at(it));
+	  h_trk_d0_primary_noCuts_H->Fill(trk_d0->at(it));
+	  h_trk_z0_primary_noCuts_H->Fill(trk_z0->at(it));
+	  h_trk_phi_primary_noCuts_H->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_primary_noCuts_H->Fill(sectorphi);
+	  h_trk_chi2rphidof_primary_noCuts_H->Fill(chi2rphidof);
+	  h_trk_MVA1_primary_noCuts_H->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_primary_noCuts_H->Fill(chi2rzdof);
+	  h_trk_bendchi2_primary_noCuts_H->Fill(trk_bendchi2->at(it));
+	}
+	else{
+	  h_trk_eta_primary_noCuts_L->Fill(trk_eta->at(it));
+	  h_trk_d0_primary_noCuts_L->Fill(trk_d0->at(it));
+	  h_trk_z0_primary_noCuts_L->Fill(trk_z0->at(it));
+	  h_trk_phi_primary_noCuts_L->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_primary_noCuts_L->Fill(sectorphi);
+	  h_trk_chi2rphidof_primary_noCuts_L->Fill(chi2rphidof);
+	  h_trk_MVA1_primary_noCuts_L->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_primary_noCuts_L->Fill(chi2rzdof);
+	  h_trk_bendchi2_primary_noCuts_L->Fill(trk_bendchi2->at(it));
+	}
+      }
+      else{
+	h_trk_eta_np_noCuts->Fill(trk_eta->at(it));
+	h_trk_pt_np_noCuts->Fill(trk_pt->at(it));
+	h_trk_d0_np_noCuts->Fill(trk_d0->at(it));
+	h_trk_z0_np_noCuts->Fill(trk_z0->at(it));
+	h_trk_phi_np_noCuts->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_np_noCuts->Fill(sectorphi);
+	h_trk_chi2rphidof_np_noCuts->Fill(chi2rphidof);
+	h_trk_MVA1_np_noCuts->Fill(trk_MVA1->at(it));
+	h_trk_chi2rzdof_np_noCuts->Fill(chi2rzdof);
+	h_trk_bendchi2_np_noCuts->Fill(trk_bendchi2->at(it));
+	if(trk_pt->at(it) > 10){
+	  h_trk_eta_np_noCuts_H->Fill(trk_eta->at(it));
+	  h_trk_d0_np_noCuts_H->Fill(trk_d0->at(it));
+	  h_trk_z0_np_noCuts_H->Fill(trk_z0->at(it));
+	  h_trk_phi_np_noCuts_H->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_np_noCuts_H->Fill(sectorphi);
+	  h_trk_chi2rphidof_np_noCuts_H->Fill(chi2rphidof);
+	  h_trk_MVA1_np_noCuts_H->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_np_noCuts_H->Fill(chi2rzdof);
+	  h_trk_bendchi2_np_noCuts_H->Fill(trk_bendchi2->at(it));
+	}
+	else{
+	  h_trk_eta_np_noCuts_L->Fill(trk_eta->at(it));
+	  h_trk_d0_np_noCuts_L->Fill(trk_d0->at(it));
+	  h_trk_z0_np_noCuts_L->Fill(trk_z0->at(it));
+	  h_trk_phi_np_noCuts_L->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_np_noCuts_L->Fill(sectorphi);
+	  h_trk_chi2rphidof_np_noCuts_L->Fill(chi2rphidof);
+	  h_trk_MVA1_np_noCuts_L->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_np_noCuts_L->Fill(chi2rzdof);
+	  h_trk_bendchi2_np_noCuts_L->Fill(trk_bendchi2->at(it));
+	}
+	if(trk_fake->at(it)==0){
+	  h_trk_eta_fake_noCuts->Fill(trk_eta->at(it));
+	  h_trk_pt_fake_noCuts->Fill(trk_pt->at(it));
+	  h_trk_d0_fake_noCuts->Fill(trk_d0->at(it));
+	  h_trk_z0_fake_noCuts->Fill(trk_z0->at(it));
+	  h_trk_phi_fake_noCuts->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_fake_noCuts->Fill(sectorphi);
+	  h_trk_chi2rphidof_fake_noCuts->Fill(chi2rphidof);
+	  h_trk_MVA1_fake_noCuts->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_fake_noCuts->Fill(chi2rzdof);
+	  h_trk_bendchi2_fake_noCuts->Fill(trk_bendchi2->at(it));
+	}
+	if(trk_fake->at(it)==2){
+	  h_trk_eta_PU_noCuts->Fill(trk_eta->at(it));
+	  h_trk_pt_PU_noCuts->Fill(trk_pt->at(it));
+	  h_trk_d0_PU_noCuts->Fill(trk_d0->at(it));
+	  h_trk_z0_PU_noCuts->Fill(trk_z0->at(it));
+	  h_trk_phi_PU_noCuts->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_PU_noCuts->Fill(sectorphi);
+	  h_trk_chi2rphidof_PU_noCuts->Fill(chi2rphidof);
+	  h_trk_MVA1_PU_noCuts->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_PU_noCuts->Fill(chi2rzdof);
+	  h_trk_bendchi2_PU_noCuts->Fill(trk_bendchi2->at(it));
+	}
+	if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)==false){
+	  h_trk_eta_notHiggs_noCuts->Fill(trk_eta->at(it));
+	  h_trk_pt_notHiggs_noCuts->Fill(trk_pt->at(it));
+	  h_trk_d0_notHiggs_noCuts->Fill(trk_d0->at(it));
+	  h_trk_z0_notHiggs_noCuts->Fill(trk_z0->at(it));
+	  h_trk_phi_notHiggs_noCuts->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_notHiggs_noCuts->Fill(sectorphi);
+	  h_trk_chi2rphidof_notHiggs_noCuts->Fill(chi2rphidof);
+	  h_trk_MVA1_notHiggs_noCuts->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_notHiggs_noCuts->Fill(chi2rzdof);
+	  h_trk_bendchi2_notHiggs_noCuts->Fill(trk_bendchi2->at(it));
+	}
+      }
+      //Quality cuts
+      
+      h_trk_chi2rzdof->Fill(chi2rzdof);
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_chi2rzdof_primary->Fill(chi2rzdof);
+      }
+      else{
+	h_trk_chi2rzdof_np->Fill(chi2rzdof);
+      }
+      if( (trk_pt->at(it)<=10 && chi2rzdof>maxChi2rzdof_L) || (trk_pt->at(it)>10 && chi2rzdof>maxChi2rzdof_H) )
+	continue;
+
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_pt_primary_chi2rzdofCuts->Fill(trk_pt->at(it));
+	h_trk_bendchi2_primary->Fill(trk_bendchi2->at(it));
+      }
+      else{
+	h_trk_pt_np_chi2rzdofCuts->Fill(trk_pt->at(it));
+	h_trk_bendchi2_np->Fill(trk_bendchi2->at(it));
+      }
+
+      h_trk_bendchi2->Fill(trk_bendchi2->at(it));
+      if(trk_bendchi2->at(it) > maxBendchi2)
+	continue;
+
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_pt_primary_bendchi2Cuts->Fill(trk_pt->at(it));
+	h_trk_chi2rphidof_primary->Fill(chi2rphidof);
+      }
+      else{
+	h_trk_pt_np_bendchi2Cuts->Fill(trk_pt->at(it));
+	h_trk_chi2rphidof_np->Fill(chi2rphidof);
+      }
+
+      h_trk_chi2rphidof->Fill(chi2rphidof);
+#if 0
+      if(trk_pt->at(it)>10 && chi2rphidof>maxChi2rphidof_H)
+	continue;
+#endif
+      //Kinematic Cuts
+      h_trk_eta->Fill(trk_eta->at(it));
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_pt_primary_chi2rphidofCuts->Fill(trk_pt->at(it));
+	h_trk_eta_primary->Fill(trk_eta->at(it));
+	h_trk_eta_primary_qualCuts->Fill(trk_eta->at(it));
+	h_trk_pt_primary_qualCuts->Fill(trk_pt->at(it));
+	h_trk_d0_primary_qualCuts->Fill(trk_d0->at(it));
+	h_trk_ptWeightedD0_primary_qualCuts->Fill(trk_d0->at(it)*trk_pt->at(it));
+	h_trk_z0_primary_qualCuts->Fill(trk_z0->at(it));
+	h_trk_phi_primary_qualCuts->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_primary_qualCuts->Fill(sectorphi);
+	h_trk_chi2rphidof_primary_qualCuts->Fill(chi2rphidof);
+	h_trk_MVA1_primary_qualCuts->Fill(trk_MVA1->at(it));
+	h_trk_chi2rzdof_primary_qualCuts->Fill(chi2rzdof);
+	h_trk_bendchi2_primary_qualCuts->Fill(trk_bendchi2->at(it));
+	h_trk_pt_vs_d0_primary_qualCuts->Fill(trk_d0->at(it),trk_pt->at(it));
+	h_trk_pt_vs_eta_primary_qualCuts->Fill(trk_eta->at(it),trk_pt->at(it));
+	h_trk_eta_vs_d0_primary_qualCuts->Fill(trk_d0->at(it),trk_eta->at(it));
+      }
+      else{
+	h_trk_pt_np_chi2rphidofCuts->Fill(trk_pt->at(it));
+	h_trk_eta_np->Fill(trk_eta->at(it));
+	h_trk_eta_np_qualCuts->Fill(trk_eta->at(it));
+	h_trk_pt_np_qualCuts->Fill(trk_pt->at(it));
+	h_trk_d0_np_qualCuts->Fill(trk_d0->at(it));
+	h_trk_ptWeightedD0_np_qualCuts->Fill(trk_d0->at(it)*trk_pt->at(it));
+	h_trk_z0_np_qualCuts->Fill(trk_z0->at(it));
+	h_trk_phi_np_qualCuts->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_np_qualCuts->Fill(sectorphi);
+	h_trk_chi2rphidof_np_qualCuts->Fill(chi2rphidof);
+	h_trk_MVA1_np_qualCuts->Fill(trk_MVA1->at(it));
+	h_trk_chi2rzdof_np_qualCuts->Fill(chi2rzdof);
+	h_trk_bendchi2_np_qualCuts->Fill(trk_bendchi2->at(it));
+	h_trk_pt_vs_d0_np_qualCuts->Fill(trk_d0->at(it),trk_pt->at(it));
+	h_trk_pt_vs_eta_np_qualCuts->Fill(trk_eta->at(it),trk_pt->at(it));
+	h_trk_eta_vs_d0_np_qualCuts->Fill(trk_d0->at(it),trk_eta->at(it));
+	if(trk_fake->at(it)==0){
+	  h_trk_eta_fake_qualCuts->Fill(trk_eta->at(it));
+	  h_trk_pt_fake_qualCuts->Fill(trk_pt->at(it));
+	  h_trk_d0_fake_qualCuts->Fill(trk_d0->at(it));
+	  h_trk_z0_fake_qualCuts->Fill(trk_z0->at(it));
+	  h_trk_phi_fake_qualCuts->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_fake_qualCuts->Fill(sectorphi);
+	  h_trk_chi2rphidof_fake_qualCuts->Fill(chi2rphidof);
+	  h_trk_MVA1_fake_qualCuts->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_fake_qualCuts->Fill(chi2rzdof);
+	  h_trk_bendchi2_fake_qualCuts->Fill(trk_bendchi2->at(it));
+	}
+	if(trk_fake->at(it)==2){
+	  h_trk_eta_PU_qualCuts->Fill(trk_eta->at(it));
+	  h_trk_pt_PU_qualCuts->Fill(trk_pt->at(it));
+	  h_trk_d0_PU_qualCuts->Fill(trk_d0->at(it));
+	  h_trk_z0_PU_qualCuts->Fill(trk_z0->at(it));
+	  h_trk_phi_PU_qualCuts->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_PU_qualCuts->Fill(sectorphi);
+	  h_trk_chi2rphidof_PU_qualCuts->Fill(chi2rphidof);
+	  h_trk_MVA1_PU_qualCuts->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_PU_qualCuts->Fill(chi2rzdof);
+	  h_trk_bendchi2_PU_qualCuts->Fill(trk_bendchi2->at(it));
+	}
+	if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)==false){
+	  h_trk_eta_notHiggs_qualCuts->Fill(trk_eta->at(it));
+	  h_trk_pt_notHiggs_qualCuts->Fill(trk_pt->at(it));
+	  h_trk_d0_notHiggs_qualCuts->Fill(trk_d0->at(it));
+	  h_trk_z0_notHiggs_qualCuts->Fill(trk_z0->at(it));
+	  h_trk_phi_notHiggs_qualCuts->Fill(trk_phi->at(it));
+	  h_trk_sectorPhi_notHiggs_qualCuts->Fill(sectorphi);
+	  h_trk_chi2rphidof_notHiggs_qualCuts->Fill(chi2rphidof);
+	  h_trk_MVA1_notHiggs_qualCuts->Fill(trk_MVA1->at(it));
+	  h_trk_chi2rzdof_notHiggs_qualCuts->Fill(chi2rzdof);
+	  h_trk_bendchi2_notHiggs_qualCuts->Fill(trk_bendchi2->at(it));
+	}
+      }
+      if (fabs(trk_eta->at(it)) > TP_maxEta)
+	continue;
+      h_trk_pt->Fill(trk_pt->at(it));
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_pt_primary->Fill(trk_pt->at(it));
+      }
+      else{
+	h_trk_pt_np->Fill(trk_pt->at(it));
+      }
+      if (trk_pt->at(it) < TP_minPt)
+	continue;
+#if 0
+      if (trk_pt->at(it) > TP_maxPt)
+	continue;
+#endif
+      h_trk_d0->Fill(trk_d0->at(it));
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_d0_primary->Fill(trk_d0->at(it));
+	h_trk_pt_primary_ptCuts->Fill(trk_pt->at(it));
+      }
+      else{
+	h_trk_d0_np->Fill(trk_d0->at(it));
+	h_trk_pt_np_ptCuts->Fill(trk_pt->at(it));
+      }
+#if 0
+      if (std::fabs(trk_d0->at(it))>TP_maxD0)
+	continue;
+#endif
+
+      if ( (trk_pt->at(it)<=10 && std::fabs(pow(trk_pt->at(it),1.8)*trk_d0->at(it))<TP_minD0_L) || (trk_pt->at(it)>10 && std::fabs(pow(trk_pt->at(it),1.8)*trk_d0->at(it))<TP_minD0_H) )
+	continue;
+
+      if(trk_matchtp_pt->at(it)!= -999 && trk_fake->at(it)==1 && find(matchtp_pt_oldCuts_vec.begin(),matchtp_pt_oldCuts_vec.end(),trk_matchtp_pt->at(it))==matchtp_pt_oldCuts_vec.end() ){
+	matchtp_pt_oldCuts_vec.push_back(trk_matchtp_pt->at(it));
+      }
+      h_trk_pt_oldCuts->Fill(trk_pt->at(it));
+      h_trk_z0->Fill(trk_z0->at(it));
+      h_trk_phi->Fill(trk_phi->at(it));
+      h_trk_sectorPhi->Fill(sectorphi);
+
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_z0_primary->Fill(trk_z0->at(it));
+	h_trk_pt_primary_d0Cuts->Fill(trk_pt->at(it));
+	h_trk_phi_primary->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_primary->Fill(sectorphi);
+      }
+      else{
+	h_trk_z0_np->Fill(trk_z0->at(it));
+	h_trk_pt_np_d0Cuts->Fill(trk_pt->at(it));
+	h_trk_phi_np->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_np->Fill(sectorphi);
+      }	     	 
+	 
+      if(trk_pt->at(it) > 8){   
+	h_trk_chi2rphidof_H->Fill(chi2rphidof);
+	h_trk_chi2rzdof_H->Fill(chi2rzdof);
+	h_trk_bendchi2_H->Fill(trk_bendchi2 ->at(it));
+      }
+      else{
+	h_trk_chi2rphidof_L->Fill(chi2rphidof);
+	h_trk_chi2rzdof_L->Fill(chi2rzdof);
+	h_trk_bendchi2_L->Fill(trk_bendchi2 ->at(it));
+      }
+      if(fabs(trk_eta->at(it)) < 0.8){
+	h_trk_chi2rphidof_C->Fill(chi2rphidof);
+	h_trk_chi2rzdof_C->Fill(chi2rzdof);
+	h_trk_bendchi2_C->Fill(trk_bendchi2 ->at(it));
+      }
+      else if(fabs(trk_eta->at(it)) <= 1.6){
+	h_trk_chi2rphidof_I->Fill(chi2rphidof);
+	h_trk_chi2rzdof_I->Fill(chi2rzdof);
+	h_trk_bendchi2_I->Fill(trk_bendchi2 ->at(it));
+      }
+      else{
+	h_trk_chi2rphidof_F->Fill(chi2rphidof);
+	h_trk_chi2rzdof_F->Fill(chi2rzdof);
+	h_trk_bendchi2_F->Fill(trk_bendchi2 ->at(it));
+      }
+      if(fabs(trk_d0->at(it)) <= 1){   
+	h_trk_chi2rphidof_P->Fill(chi2rphidof);
+	h_trk_chi2rzdof_P->Fill(chi2rzdof);
+	h_trk_bendchi2_P->Fill(trk_bendchi2 ->at(it));
+      }
+      else{   
+	h_trk_chi2rphidof_D->Fill(chi2rphidof);
+	h_trk_chi2rzdof_D->Fill(chi2rzdof);
+	h_trk_bendchi2_D->Fill(trk_bendchi2 ->at(it));
+      }
+
+      if( (trk_pt->at(it)<=10 && trk_z0->at(it)>TP_maxZ0_L) || (trk_pt->at(it)>10 && trk_z0->at(it)>TP_maxZ0_H) )
+	continue;
+      
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_pt_primary_z0Cuts->Fill(trk_pt->at(it));
+      }
+      else{
+	h_trk_pt_np_z0Cuts->Fill(trk_pt->at(it));
+      }
+
+      if(trk_matchtp_pt->at(it)!= -999 && trk_fake->at(it)==1 && find(matchtp_pt_allCuts_vec.begin(),matchtp_pt_allCuts_vec.end(),trk_matchtp_pt->at(it))==matchtp_pt_allCuts_vec.end() ){
+	matchtp_pt_allCuts_vec.push_back(trk_matchtp_pt->at(it));
+      }
+      h_trk_pt_allCuts->Fill(trk_pt->at(it));
+
+      if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
+	h_trk_pt_primary_allCuts->Fill(trk_pt->at(it));
+	h_trk_eta_primary_allCuts->Fill(trk_eta->at(it));
+      }
+      else{
+	h_trk_pt_np_allCuts->Fill(trk_pt->at(it));
+	h_trk_eta_np_allCuts->Fill(trk_eta->at(it));
+      }
+
+      for(uint i=0; i<track_bins.size(); i++){
+	float trkVariable = 0.0;
+	if(binVariable=="phi") trkVariable = trk_phi->at(it);
+	if (binVariable=="z0") trkVariable = fabs(trk_z0->at(it));
+	if(trkVariable<track_bins[i][1] && trkVariable>track_bins[i][0] ){
+	  binnedSelectedTracks[i].push_back(Track_Parameters(trk_pt->at(it), trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -trk_rinv->at(it), it, -99999, trk_matchtp_pt->at(it) ));
+	}
+      }
+      selectedTracks.push_back(Track_Parameters(trk_pt->at(it), trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -trk_rinv->at(it), it, -99999, trk_matchtp_pt->at(it) ));
+      trkH_T += trk_pt->at(it);
+      std::valarray<float> trackPtVec = {trk_pt->at(it)*cos(trk_phi->at(it)),trk_pt->at(it)*sin(trk_phi->at(it))};
+      trkMET -= trackPtVec;
+    }
+    h_numSelectedTrks->Fill(selectedTracks.size());
+    h_trk_H_T->Fill(trkH_T);
+    h_trk_MET->Fill(TMath::Sqrt(pow(trkMET[0],2)+pow(trkMET[1],2)));
+    int pt_check[5] = {0,0,0,0,0};
+    int d0_check[5] = {0,0,0,0,0};
+    int pt_d0_check[5][5];
+    for (int k=0; k < 5; k++){
+      for (int l=0; l < 5; l++){
+	pt_d0_check[k][l] = 0;
+      }
+    }
+       
+    if ((selectedTracks.size() >= 2)){ 
+      for (uint j = 0; j < selectedTracks.size(); j++){
+	if (selectedTracks[j].pt   >   pt_cuts[0]){ pt_check[0]++; }
+	if (selectedTracks[j].pt   >   pt_cuts[1]){ pt_check[1]++; }
+	if (selectedTracks[j].pt   >   pt_cuts[2]){ pt_check[2]++; }
+	if (selectedTracks[j].pt   >   pt_cuts[3]){ pt_check[3]++; }
+	if (selectedTracks[j].pt   >   pt_cuts[4]){ pt_check[4]++; }
+	   
+	if (fabs(selectedTracks[j].d0)>d0_cuts[0]){ d0_check[0]++;}
+	if (fabs(selectedTracks[j].d0)>d0_cuts[1]){ d0_check[1]++;}
+	if (fabs(selectedTracks[j].d0)>d0_cuts[2]){ d0_check[2]++;}
+	if (fabs(selectedTracks[j].d0)>d0_cuts[3]){ d0_check[3]++;}
+	if (fabs(selectedTracks[j].d0)>d0_cuts[4]){ d0_check[4]++;}
+	for (int l=0; l < 5; l++){
+	  if (selectedTracks[j].pt   >   pt_cuts[0] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[0][l]++;}
+	  if (selectedTracks[j].pt   >   pt_cuts[1] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[1][l]++;}
+	  if (selectedTracks[j].pt   >   pt_cuts[2] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[2][l]++;}
+	  if (selectedTracks[j].pt   >   pt_cuts[3] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[3][l]++;}
+	  if (selectedTracks[j].pt   >   pt_cuts[4] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[4][l]++;}
+	}
+      }
+	 
+      for(int k=0;k<5;k++){
+	pt_check[k] = 0;
+	d0_check[k] = 0;
+	for (int l=0; l < 5; l++){
+	  if(pt_d0_check[k][l]>=2){
+	    h_Count_trk_pt_d0->SetBinContent(l+1,k+1,(h_Count_trk_pt_d0->GetBinContent(l+1,k+1) + 1));
+	  }
+	  pt_d0_check[k][l] = 0;
+	}
+      }
+    }
+    
+    // ----------------------------------------------------------------------------------------------------------------
+    // tracking particle loop
+    float tpH_T = 0.0;
+    std::valarray<float> tpMET = {0.0,0.0};
+    for (int it = 0; it < (int)tp_pt->size(); it++){
+	 
+      float tmp_d0 = -tp_d0->at(it);	// Sign difference in the NTupleMaker
+      float tmp_z0 = tp_z0->at(it);
+	
+      h_tp_pt_noCuts->Fill(tp_pt->at(it));
+      h_tp_eta_noCuts->Fill(tp_eta->at(it));
+      h_tp_d0_noCuts->Fill(tp_d0->at(it));
+      h_tp_z0_noCuts->Fill(tp_z0->at(it));
+      h_tp_dxy_noCuts->Fill(tp_dxy->at(it));
+	
+      if(tp_eventid->at(it)>0 || tp_isHToB->at(it)==false){
+	h_tp_pt_noCuts_PU->Fill(tp_pt->at(it));
+	h_tp_eta_noCuts_PU->Fill(tp_eta->at(it));
+	h_tp_d0_noCuts_PU->Fill(tp_d0->at(it));
+	h_tp_z0_noCuts_PU->Fill(tp_z0->at(it));
+      }
+      else{
+	h_tp_pt_noCuts_primary->Fill(tp_pt->at(it));
+	tp_pt_noCuts_primary_vec.push_back(tp_pt->at(it));
+	h_tp_eta_noCuts_primary->Fill(tp_eta->at(it));
+	h_tp_d0_noCuts_primary->Fill(tp_d0->at(it));
+	h_tp_z0_noCuts_primary->Fill(tp_z0->at(it));
+      }
+      
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_noCuts->Fill(tp_pt->at(it));
+	h_match_tp_eta_noCuts->Fill(tp_eta->at(it));
+	h_match_tp_d0_noCuts->Fill(tp_d0->at(it));
+      }
+
+      if (tp_eventid->at(it)>0 || tp_isHToB->at(it)==false)
+	continue;
+
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_noCuts_primary->Fill(tp_pt->at(it));
+      }
+	 
+      h_tp_d0->Fill(tp_d0->at(it));
+#if 0
+      if (std::fabs(tmp_d0) > TP_maxD0)
+	continue;
+#endif	 
+      h_tp_pt_maxD0Cut->Fill(tp_pt->at(it));
+      h_tp_eta_maxD0Cut->Fill(tp_eta->at(it));
+      h_tp_d0_maxD0Cut->Fill(tp_d0->at(it));
+	 
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_maxD0Cut->Fill(tp_pt->at(it));
+	h_match_tp_eta_maxD0Cut->Fill(tp_eta->at(it));
+	h_match_tp_d0_maxD0Cut->Fill(tp_d0->at(it));
+      }
+
+      if ( (tp_pt->at(it)<=10 && std::fabs(pow(tp_pt->at(it),1.8)*tmp_d0)<TP_minD0_L) || (tp_pt->at(it)>10 && std::fabs(pow(tp_pt->at(it),1.8)*tmp_d0)<TP_minD0_H) ) 
+	continue;
+
+      h_tp_pt_minD0Cut->Fill(tp_pt->at(it));
+      h_tp_eta_minD0Cut->Fill(tp_eta->at(it));
+      h_tp_d0_minD0Cut->Fill(tp_d0->at(it));
+	 
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_minD0Cut->Fill(tp_pt->at(it));
+	h_match_tp_eta_minD0Cut->Fill(tp_eta->at(it));
+	h_match_tp_d0_minD0Cut->Fill(tp_d0->at(it));
+      }
+      h_tp_pt->Fill(tp_pt->at(it));
+      if (tp_pt->at(it) < TP_minPt)
+	continue;
+	 
+      h_tp_pt_minPtCut->Fill(tp_pt->at(it));
+      h_tp_eta_minPtCut->Fill(tp_eta->at(it));
+      h_tp_d0_minPtCut->Fill(tp_d0->at(it));
+	
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_minPtCut->Fill(tp_pt->at(it));
+	h_match_tp_eta_minPtCut->Fill(tp_eta->at(it));
+	h_match_tp_d0_minPtCut->Fill(tp_d0->at(it));
+      }
+#if 0
+      if (tp_pt->at(it) > TP_maxPt)
+	continue;
+#endif
+      h_tp_pt_maxPtCut->Fill(tp_pt->at(it));
+      h_tp_eta_maxPtCut->Fill(tp_eta->at(it));
+      h_tp_d0_maxPtCut->Fill(tp_d0->at(it));
+	
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_maxPtCut->Fill(tp_pt->at(it));
+	h_match_tp_eta_maxPtCut->Fill(tp_eta->at(it));
+	h_match_tp_d0_maxPtCut->Fill(tp_d0->at(it));
+      }
+      h_tp_eta->Fill(tp_eta->at(it));
+      if (std::fabs(tp_eta->at(it)) > TP_maxEta)
+	continue;
+
+      h_tp_pt_maxEtaCut->Fill(tp_pt->at(it));
+      h_tp_eta_maxEtaCut->Fill(tp_eta->at(it));
+      h_tp_d0_maxEtaCut->Fill(tp_d0->at(it));
+      h_tp_dxy_oldCuts->Fill(tp_dxy->at(it));
+      tp_pt_oldCuts_vec.push_back(tp_pt->at(it));
+
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_maxEtaCut->Fill(tp_pt->at(it));
+	h_match_tp_eta_maxEtaCut->Fill(tp_eta->at(it));
+	h_match_tp_d0_maxEtaCut->Fill(tp_d0->at(it));
+      }
+
+      if( (tp_pt->at(it)<=10 && tp_z0->at(it)>TP_maxZ0_L) || (tp_pt->at(it)>10 && tp_z0->at(it)>TP_maxZ0_H) )
+	continue;
+      
+      h_tp_pt_allCuts->Fill(tp_pt->at(it));
+      h_tp_eta_allCuts->Fill(tp_eta->at(it));
+      h_tp_d0_allCuts->Fill(tp_d0->at(it));
+      h_tp_dxy_allCuts->Fill(tp_dxy->at(it));
+      tp_pt_allCuts_vec.push_back(tp_pt->at(it));
+
+      if (tp_nmatch->at(it) >= 1){
+	h_match_tp_pt_allCuts->Fill(tp_pt->at(it));
+	h_match_tp_eta_allCuts->Fill(tp_eta->at(it));
+	h_match_tp_d0_allCuts->Fill(tp_d0->at(it));
+	int ndof = 2 * matchtrk_nstub->at(it) - 5;
+	float chi2rzdof = (float)matchtrk_chi2rz->at(it) / ndof;
+	if(matchtrk_bendchi2->at(it)<maxBendchi2 && ( (tp_pt->at(it)<=10 && chi2rzdof<maxChi2rzdof_L) || (tp_pt->at(it)>10 && chi2rzdof<maxChi2rzdof_H) ) ){
+	  h_match_tp_pt_allCuts_trkCuts->Fill(tp_pt->at(it));
+	}
+      }
+
+      selectedTPs.push_back(Track_Parameters(tp_pt->at(it), tmp_d0, tmp_z0, tp_eta->at(it), tp_phi->at(it), tp_charge->at(it), it, abs(tp_pdgid->at(it))));
+      tpH_T += tp_pt->at(it);
+      std::valarray<float> tpPtVec = {tp_pt->at(it)*cos(tp_phi->at(it)),tp_pt->at(it)*sin(tp_phi->at(it))};
+      tpMET -= tpPtVec;
+    }
+    h_tp_H_T->Fill(tpH_T);
+    h_tp_MET->Fill(TMath::Sqrt(pow(tpMET[0],2)+pow(tpMET[1],2)));
+    for(uint i=0; i<matchtp_pt_noCuts_vec.size();){
+      if(find(tp_pt_noCuts_primary_vec.begin(),tp_pt_noCuts_primary_vec.end(),matchtp_pt_noCuts_vec[i])==tp_pt_noCuts_primary_vec.end()){
+	matchtp_pt_noCuts_vec.erase(matchtp_pt_noCuts_vec.begin()+i);
+      }
+      else{
+	++i;
+      }
+    }
+    for(uint i=0; i<matchtp_pt_oldCuts_vec.size();){
+      if(find(tp_pt_oldCuts_vec.begin(),tp_pt_oldCuts_vec.end(),matchtp_pt_oldCuts_vec[i])==tp_pt_oldCuts_vec.end()){
+	matchtp_pt_oldCuts_vec.erase(matchtp_pt_oldCuts_vec.begin()+i);
+      }
+      else{
+	++i;
+      }
+    }
+    for(uint i=0; i<matchtp_pt_allCuts_vec.size();){
+      if(find(tp_pt_allCuts_vec.begin(),tp_pt_allCuts_vec.end(),matchtp_pt_allCuts_vec[i])==tp_pt_allCuts_vec.end()){
+	matchtp_pt_allCuts_vec.erase(matchtp_pt_allCuts_vec.begin()+i);
+      }
+      else{
+	++i;
+      }
+    }
+    for(uint i=0; i<matchtp_pt_noCuts_vec.size();i++){
+      h_trk_matchtp_pt_noCuts->Fill(matchtp_pt_noCuts_vec[i]);
+    }
+    for(uint i=0; i<matchtp_pt_oldCuts_vec.size();i++){
+      h_trk_matchtp_pt_oldCuts->Fill(matchtp_pt_oldCuts_vec[i]);
+    }
+    for(uint i=0; i<matchtp_pt_allCuts_vec.size();i++){
+      h_trk_matchtp_pt_allCuts->Fill(matchtp_pt_allCuts_vec[i]);
+    }
+  
+    // --------------------------------------------------------------------------------------------
+    //         Vertex finding in Tracking Particles
+    // --------------------------------------------------------------------------------------------
+    if (!(selectedTracks.size() >= 2)) continue;
+    bool true_DV = false;
+    if(VERBOSE[0])
+      std::cout<<"End of z-vertex Finding"<<endl;
+      
+    double_t x_dv = -9999.0;// (tp_x->at((*selectedTPs)[0]->index));//+tp_x->at((*selectedTPs)[1]->index))/2.0;
+    double_t y_dv = -9999.0;// (tp_y->at((*selectedTPs)[0]->index));//+tp_y->at((*selectedTPs)[1]->index))/2.0;
+    double_t z_dv = -9999.0;// (tp_z->at((*selectedTPs)[0]->index));//+tp_z->at((*selectedTPs)[1]->index))/2.0;
+            
+    int selected_track_j0 = -1;
+    int selected_track_j1 = -1;
+    std::vector<int> selected_tps_j;
+
+    double_t x_tmp = x_dv;
+    double_t y_tmp = y_dv;
+    double_t z_tmp = z_dv;
+    Int_t Vertex_check_tmp = -1;
+    int noCuts_trueVertices = 0;
+    
+    if(selectedTPs.size()>=2){
+      //std::cout<<"selectedTPs size: "<<selectedTPs.size()<<std::endl;
+      sort(selectedTPs.begin(), selectedTPs.end(), [&](Track_Parameters a, Track_Parameters b) {
+	  return tp_x->at(a.index) > tp_x->at(b.index);
+	});
+	
+      for( uint i=0; i<(selectedTPs.size() - 1); i++ ){
+	int index0 = selectedTPs[i].index;
+	int index1 = selectedTPs[i+1].index;
+	if( fabs(tp_x->at(index0)-tp_x->at(index1))<d0_res && fabs(tp_y->at(index0)-tp_y->at(index1))<d0_res && fabs(tp_z->at(index0)-tp_z->at(index1))<z0_res ){
+	  //std::cout<<"tp1 pos: "<<tp_x->at(index0)<<" "<<tp_y->at(index0)<<" "<<tp_z->at(index0)<<" tp2 pos: "<<tp_x->at(index1)<<" "<<tp_y->at(index1)<<" "<<tp_z->at(index1)<<std::endl;
+	  x_dv = (tp_x->at(index0) + tp_x->at(index1))/2;
+	  y_dv = (tp_y->at(index0) + tp_y->at(index1))/2;
+	  z_dv = (tp_z->at(index0) + tp_z->at(index1))/2;
+	  h_trueVertex_x->Fill(x_dv);
+	  h_trueVertex_y->Fill(y_dv);
+	  h_trueVertex_z->Fill(z_dv);
+	  h_trueVertex_sumPt->Fill(selectedTPs[i].pt+selectedTPs[i+1].pt);
+	  if(selectedTPs[i].pt>selectedTPs[i+1].pt){
+	    h_trueVertex_lowPt->Fill(selectedTPs[i+1].pt);
+	    h_trueVertex_highPt->Fill(selectedTPs[i].pt);
+	  }
+	  else{
+	    h_trueVertex_lowPt->Fill(selectedTPs[i].pt);
+	    h_trueVertex_highPt->Fill(selectedTPs[i+1].pt);
+	  }
+	  noCuts_trueVertices++;
+	  if(dist(x_dv,y_dv)>d0_res && dist(x_dv,y_dv)<20){
+	    //std::cout<<"true vertex: "<<x_dv<<" "<<y_dv<<" "<<z_dv<<" tp_pt: "<<selectedTPs[i].pt<<" "<<selectedTPs[i+1].pt<<" eventid's: "<<tp_eventid->at(selectedTPs[i].index)<<" "<<tp_eventid->at(selectedTPs[i+1].index)<<std::endl;
+	    if(selectedTPs[i].pt>selectedTPs[i+1].pt){
+	      trueVertices.push_back(Vertex_Parameters(x_dv, y_dv, z_dv, selectedTPs[i], selectedTPs[i+1]) );
+	    }
+	    else{
+	      trueVertices.push_back(Vertex_Parameters(x_dv, y_dv, z_dv, selectedTPs[i+1], selectedTPs[i]) );
+	    }
+	    selected_tps_j.push_back(i);
+	    i++;
+	  }
+	}
+      }
+
+      h_trueVertex_numNoCuts->Fill(noCuts_trueVertices);
+      h_trueVertex_numAllCuts->Fill(trueVertices.size());
+      true_vertices += trueVertices.size();
+      float maxPT = 0.0;
+      sort(selectedTPs.begin(), selectedTPs.end(), ComparePtTrack);
+      for(uint i=0; i<trueVertices.size(); i++){
+	if(trueVertices[i].a.pt>maxPT){
+	  maxPT = trueVertices[i].a.pt;
+	  maxPT_i = i;
+	}
+
+	std::valarray<float> p_trk_1 = calcPVec(trueVertices[i].a,trueVertices[i].x_dv,trueVertices[i].y_dv);
+	std::valarray<float> p_trk_2 = calcPVec(trueVertices[i].b,trueVertices[i].x_dv,trueVertices[i].y_dv);
+	std::valarray<float> p_tot = p_trk_1+p_trk_2;
+	float p_mag = TMath::Sqrt(pow(p_tot[0],2)+pow(p_tot[1],2));
+	float openingAngle = (p_trk_1[0]*p_trk_2[0]+p_trk_1[1]*p_trk_2[1]) / (TMath::Sqrt(pow(p_trk_1[0],2)+pow(p_trk_1[1],2))*TMath::Sqrt(pow(p_trk_2[0],2)+pow(p_trk_2[1],2)));
+	float R_T = TMath::Sqrt(pow(trueVertices[i].x_dv,2)+pow(trueVertices[i].y_dv,2));
+	float cos_T = (p_tot[0]*trueVertices[i].x_dv+p_tot[1]*trueVertices[i].y_dv)/(R_T*TMath::Sqrt(pow(p_tot[0],2)+pow(p_tot[1],2)));
+	float alpha_T = acos(cos_T);
+	float theta = atan2(p_tot[1],p_tot[0]);
+	float d_T = std::abs(cos(theta)*trueVertices[i].y_dv-sin(theta)*trueVertices[i].x_dv);
+	
+	h_trueVertex_d_T->Fill(d_T);
+	h_trueVertex_cos_T->Fill(cos_T);
+	h_trueVertex_alpha_T->Fill(alpha_T);
+	h_trueVertex_R_T->Fill(R_T);
+	h_trueVertex_openingAngle->Fill(openingAngle);
+	h_trueVertex_parentPt->Fill(p_mag);
+
+	int i_pt = 9999;
+	int j_pt = 9999;
+	for( uint j=0; j<selectedTPs.size();j++ ){
+	  if(trueVertices[i].a.index == selectedTPs[j].index){
+	    i_pt = j;
+	  }
+	  if(trueVertices[i].b.index == selectedTPs[j].index){
+	    j_pt = j;
+	  }
+	}	
+	
+	h_trueVertexCuts_indexPt->Fill(i_pt);
+	h_trueVertexCuts_indexPt->Fill(j_pt);
+	h_delta_dist_xy->Fill(dist(tp_x->at(trueVertices[i].a.index), tp_y->at(trueVertices[i].a.index), tp_x->at(trueVertices[i].b.index), tp_y->at(trueVertices[i].b.index) ));
+	h_delta_dist_z->Fill(fabs(tp_z->at(trueVertices[i].a.index) - tp_z->at(trueVertices[i].b.index) ));
+	h_trueVertex_delta_dist_z0->Fill(fabs(tp_z0->at(trueVertices[i].a.index)-tp_z0->at(trueVertices[i].b.index)));
+	h_trueVertex_delta_dist_d0->Fill(fabs(tp_d0->at(trueVertices[i].a.index)-tp_d0->at(trueVertices[i].b.index)));
+	h_trueVertex_delta_dist_eta->Fill(fabs(tp_eta->at(trueVertices[i].a.index)-tp_eta->at(trueVertices[i].b.index)));
+	h_trueVertex_delta_dist_phi->Fill(fabs(tp_phi->at(trueVertices[i].a.index)-tp_phi->at(trueVertices[i].b.index)));
+	h_trueVertex_delta_dist_indexPt->Fill(abs(i_pt-j_pt));
+
+	if(trueVertices[i].x_dv!=-9999.0){
+	  h_trueVertexCuts_x->Fill(trueVertices[i].x_dv);
+	  h_trueVertexCuts_y->Fill(trueVertices[i].y_dv);
+	  h_trueVertexCuts_z->Fill(trueVertices[i].z_dv);
+	  h_trueVertexCuts_sumPt->Fill(trueVertices[i].a.pt+trueVertices[i].b.pt);
+	}
+
+	h_delta_x->Fill(fabs((tp_x->at(trueVertices[i].a.index) - (tp_x->at(trueVertices[i].b.index)))));
+	true_DV = true;
+	   
+	h_all_trueVertex_pt->Fill(trueVertices[i].a.pt);
+	if(fabs(trueVertices[i].a.d0) < fabs(trueVertices[i].b.d0)){
+	  h_all_trueVertex_minD0->Fill(trueVertices[i].a.d0);
+	}
+	else{
+	  h_all_trueVertex_minD0->Fill(trueVertices[i].b.d0);
+	}
+	h_all_trueVertex_lowPt->Fill(trueVertices[i].b.pt);
+	h_all_trueVertex_eta->Fill(trueVertices[i].a.eta);
+	h_all_trueVertex_dxy->Fill(dist(trueVertices[i].x_dv,trueVertices[i].y_dv));
+      }
+      if(trueVertices.size()>0){
+	h_all_oneMatch_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
+	h_all_oneMatch_trueVertex_lowPt->Fill(trueVertices[maxPT_i].b.pt);
+	h_all_oneMatch_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
+	h_all_oneMatch_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
+      }
+    }
+    
+    // --------------------------------------------------------------------------------------------
+    //                Vertex finding in Tracks
+    // --------------------------------------------------------------------------------------------
+    sort(selectedTracks.begin(), selectedTracks.end(), ComparePtTrack);
+    std::vector<Track_Parameters> copyTracks;
+    for (uint i=0; i<selectedTracks.size(); i++){
+      copyTracks.push_back(selectedTracks[i]);
+    }
+    int noCuts_trackVertices = 0;
+    for(auto trackBin : binnedSelectedTracks){
+      sort(trackBin.begin(), trackBin.end(), ComparePtTrack);
+      Double_t x_dv_trk = -9999.0;
+      Double_t y_dv_trk = -9999.0;
+      Double_t z_dv_trk = -9999.0;
+      int i_sel = 0;
+      
+      if(trackBin.size()>20){
+	trackBin.erase(trackBin.begin()+20,trackBin.end());
+      }
+    
+      while ( i_sel<(int(trackBin.size())-1) ){
+	for( uint j=i_sel+1; j<trackBin.size(); j++){
+	  int k_match = -1;
+	  for( uint k=0; k<trueVertices.size(); k++ ){
+	    if( (trackBin[i_sel].tp_pt == trueVertices[k].a.pt) && (trackBin[j].tp_pt == trueVertices[k].b.pt) ){
+	      k_match = k;
+	      trueVertices[k_match].errorCode = 2;
+	    }
+	  }
+	  //std::cout<<"trying tp_pt pair: "<<trackBin[i_sel].tp_pt<<" "<<trackBin[j].tp_pt<<std::endl;
+	  if( dist_TPs( trackBin[i_sel], trackBin[j] ) == 0 ){
+	    if(k_match != -1){
+	      trueVertices[k_match].errorCode = 1;
+	    }
+	    
+	    Vertex(trackBin[i_sel],trackBin[j],x_dv_trk,y_dv_trk,z_dv_trk);
+	    //std::cout<<"no cut track vertex: "<<x_dv_trk<<" "<<y_dv_trk<<" "<<z_dv_trk<<" indices: "<<trackBin[i_sel].index<<" "<<trackBin[j].index<<std::endl;
+	    h_trackVertex_x->Fill(x_dv_trk);
+	    h_trackVertex_y->Fill(y_dv_trk);
+	    h_trackVertex_z->Fill(z_dv_trk);
+	    h_trackVertex_sumPt->Fill(trackBin[i_sel].pt+trackBin[j].pt);
+	    noCuts_trackVertices++;
+
+	    std::valarray<float> p_trk_1 = calcPVec(trackBin[i_sel],x_dv_trk,y_dv_trk);
+	    std::valarray<float> p_trk_2 = calcPVec(trackBin[j],x_dv_trk,y_dv_trk);
+	    std::valarray<float> p_tot = p_trk_1+p_trk_2;
+	    float p_mag = TMath::Sqrt(pow(p_tot[0],2)+pow(p_tot[1],2));
+	    float openingAngle = (p_trk_1[0]*p_trk_2[0]+p_trk_1[1]*p_trk_2[1]) / (TMath::Sqrt(pow(p_trk_1[0],2)+pow(p_trk_1[1],2))*TMath::Sqrt(pow(p_trk_2[0],2)+pow(p_trk_2[1],2)));
+	    float R_T = TMath::Sqrt(pow(x_dv_trk,2)+pow(y_dv_trk,2));
+	    float cos_T = (p_tot[0]*x_dv_trk+p_tot[1]*y_dv_trk)/(R_T*TMath::Sqrt(pow(p_tot[0],2)+pow(p_tot[1],2)));
+	    float alpha_T = acos(cos_T);
+	    float theta = atan2(p_tot[1],p_tot[0]);
+	    float d_T = std::abs(cos(theta)*y_dv_trk-sin(theta)*x_dv_trk);
+	    
+	    int ndof_1 = 2 * trk_nstub->at(trackBin[i_sel].index) - 5;
+	    float chi2rphidof_1 = (float)trk_chi2rphi->at(trackBin[i_sel].index) / ndof_1;
+	    float chi2rzdof_1 = (float)trk_chi2rz->at(trackBin[i_sel].index) / ndof_1;
+	    float bendchi2_1 = trk_bendchi2->at(trackBin[i_sel].index);
+	    int ndof_2 = 2 * trk_nstub->at(trackBin[j].index) - 5;
+	    float chi2rphidof_2 = (float)trk_chi2rphi->at(trackBin[j].index) / ndof_2;
+	    float chi2rzdof_2 = (float)trk_chi2rz->at(trackBin[j].index) / ndof_2;
+	    float bendchi2_2 = trk_bendchi2->at(trackBin[j].index);
+	    float chi2rphidofSum = chi2rphidof_1 + chi2rphidof_2;
+	    float chi2rzdofSum = chi2rzdof_1 + chi2rzdof_2;
+	    float bendchi2Sum = bendchi2_1 + bendchi2_2;
+	    int numStubsSum = trk_nstub->at(trackBin[i_sel].index) + trk_nstub->at(trackBin[j].index);
+	    
+	    if(fabs(trackBin[i_sel].z(x_dv_trk,y_dv_trk)-trackBin[j].z(x_dv_trk,y_dv_trk))>= 1.25 && k_match != -1){
+	      trueVertices[k_match].errorCode = 3;
+	    }
+	    else if(dist(x_dv_trk,y_dv_trk)<=d0_res && k_match != -1){
+	      trueVertices[k_match].errorCode = 4;
+	    }
+	    else if(dist(x_dv_trk,y_dv_trk)>=20 && k_match != -1){
+	      trueVertices[k_match].errorCode = 5;
+	    }
+	    else if(trackVertices.size()>=2 && k_match != -1){
+	      trueVertices[k_match].errorCode = 6;
+	    }
+	    else if(cos_T<=0.995 && k_match != -1){
+	      trueVertices[k_match].errorCode = 7;
+	    }
+	    else if(d_T>=.05 && k_match != -1){
+	      trueVertices[k_match].errorCode = 8;
+	    }
+	    else if((trackBin[i_sel].charge+trackBin[j].charge)!=0 && k_match != -1){
+	      trueVertices[k_match].errorCode = 9;
+	    }
+	    else if(chi2rzdofSum>=5 && k_match != -1){
+	      trueVertices[k_match].errorCode = 10;
+	    }
+	    else if(numStubsSum<=8 && k_match != -1){
+	      trueVertices[k_match].errorCode = 11;
+	    }
+	    else if((fabs(trackBin[i_sel].d0)<=0.05 && fabs(trackBin[j].d0)<=0.05) && k_match != -1){
+	      trueVertices[k_match].errorCode = 12;
+	    }
+	    
+	    float delta_z = fabs(trackBin[i_sel].z(x_dv_trk,y_dv_trk)-trackBin[j].z(x_dv_trk,y_dv_trk));
+	    float sumPt = trackBin[i_sel].pt+trackBin[j].pt;
+	    float minD0;
+	    if(trackBin[i_sel].d0<trackBin[j].d0){
+	      minD0 = trackBin[i_sel].d0;
+	    }
+	    else{
+	      minD0 = trackBin[j].d0;
+	    }
+	    
+	    float score = -1;
+#if 0
+	    for (int i_vert = 0; i_vert < (int)vert_score->size(); i_vert++){
+	      if(vert_chi2rzdofSum->at(i_vert)==chi2rzdofSum && vert_chi2rphidofSum->at(i_vert)==chi2rphidofSum && vert_sumPt->at(i_vert)==sumPt){
+		score = vert_score->at(i_vert);
+	      }
+	    }
+#endif
+	  //if(fabs(trackBin[i_sel].z(x_dv_trk,y_dv_trk)-trackBin[j].z(x_dv_trk,y_dv_trk))< 1.25 && dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackVertices.size()<2 && cos_T > 0.995 && d_T < .05 && (trackBin[i_sel].charge+trackBin[j].charge)==0 && chi2rzdofSum<5 && numStubsSum>8 && chi2rphidofSum<20 && (fabs(trackBin[i_sel].d0)>0.05 || fabs(trackBin[j].d0)>0.05) && (trackBin[i_sel].pt+trackBin[j].pt)>20 && TMath::Sqrt(pow(trkMET[0],2)+pow(trkMET[1],2))>20 && trkH_T>160){ //vertex cuts go here (chi2rphi, MET, sumPT, and H_T cuts are not from 0 PU case)
+	  //if(fabs(trackBin[i_sel].z(x_dv_trk,y_dv_trk)-trackBin[j].z(x_dv_trk,y_dv_trk))< 1.05 && dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackVertices.size()<2 && cos_T > 0.97 && d_T < .02 && R_T > 0.5 && (trackBin[i_sel].charge+trackBin[j].charge)==0 && chi2rzdofSum<4 && numStubsSum>9 && (fabs(trackBin[i_sel].d0)>0.2 || fabs(trackBin[j].d0)>0.2) ){ //vertex cuts from grid search
+	    if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && (trackBin[i_sel].charge+trackBin[j].charge)==0 ){ //vertex cuts go here
+	      trackVertices.push_back(Vertex_Parameters(x_dv_trk, y_dv_trk, z_dv_trk, trackBin[i_sel], trackBin[j], score) );
+	      //std::cout<<"track vertex: "<<x_dv_trk<<" "<<y_dv_trk<<" "<<z_dv_trk<<" tp_pt: "<<trackBin[i_sel].tp_pt<<" "<<trackBin[j].tp_pt<<std::endl;
+	    }
+	  }
+	}
+	trackBin.pop_front();
+      }
+    }
+    h_trackVertex_numNoCuts->Fill(noCuts_trackVertices);
+    h_trackVertex_numAllCuts->Fill(trackVertices.size());
+    std::vector<bool> check_dz(dz_cuts.size(),true);
+    std::vector<bool> check_cos_T(cos_T_cuts.size(),true);
+    std::vector<bool> check_d_T(d_T_cuts.size(),true);
+    std::vector<bool> check_R_T(R_T_cuts.size(),true);
+    std::vector<bool> check_chi2rz(chi2rz_cuts.size(),true);
+    std::vector<bool> check_minD0(minD0_cuts.size(),true);
+    std::vector<bool> check_stubSum(stubSum_cuts.size(),true);
+    bool check_array[dz_cuts.size()][cos_T_cuts.size()][d_T_cuts.size()][R_T_cuts.size()][chi2rz_cuts.size()][minD0_cuts.size()][stubSum_cuts.size()];
+    for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+      for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+	for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	  for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+	    for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+	      for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+		for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		  check_array[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = true;
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+	 
+    for( uint i=0; i<trackVertices.size(); i++ ){
+      int i_pt = 9999;
+      int j_pt = 9999;
+      for( uint j=0; j<copyTracks.size();j++ ){
+	if(trackVertices[i].a.index == copyTracks[j].index){
+	  i_pt = j;
+	}
+	if(trackVertices[i].b.index == copyTracks[j].index){
+	  j_pt = j;
+	}
+      }
+      h_trackVertexCuts_indexPt->Fill(i_pt);
+      h_trackVertexCuts_indexPt->Fill(j_pt);
+
+      h_trk_delta_dist_xy->Fill(dist_TPs(trackVertices[i].a,trackVertices[i].b));
+      
+      float z_dv_trk_1 = trackVertices[i].a.z(trackVertices[i].x_dv,trackVertices[i].y_dv);
+      float z_dv_trk_2 = trackVertices[i].b.z(trackVertices[i].x_dv,trackVertices[i].y_dv);
+      
+      std::valarray<float> p_trk_1 = calcPVec(trackVertices[i].a,trackVertices[i].x_dv,trackVertices[i].y_dv);
+      std::valarray<float> p_trk_2 = calcPVec(trackVertices[i].b,trackVertices[i].x_dv,trackVertices[i].y_dv);
+      std::valarray<float> p_tot = p_trk_1+p_trk_2;
+      float p_mag = TMath::Sqrt(pow(p_tot[0],2)+pow(p_tot[1],2));
+      float openingAngle = (p_trk_1[0]*p_trk_2[0]+p_trk_1[1]*p_trk_2[1]) / (TMath::Sqrt(pow(p_trk_1[0],2)+pow(p_trk_1[1],2))*TMath::Sqrt(pow(p_trk_2[0],2)+pow(p_trk_2[1],2)));
+      float R_T = TMath::Sqrt(pow(trackVertices[i].x_dv,2)+pow(trackVertices[i].y_dv,2));
+      float cos_T = (p_tot[0]*trackVertices[i].x_dv+p_tot[1]*trackVertices[i].y_dv)/(R_T*TMath::Sqrt(pow(p_tot[0],2)+pow(p_tot[1],2)));
+      float alpha_T = acos(cos_T);
+      float theta = atan2(p_tot[1],p_tot[0]);
+      float d_T = std::abs(cos(theta)*trackVertices[i].y_dv-sin(theta)*trackVertices[i].x_dv);
+	
+      int ndof_1 = 2 * trk_nstub->at(trackVertices[i].a.index) - 5;
+      float chi2rphidof_1 = (float)trk_chi2rphi->at(trackVertices[i].a.index) / ndof_1;
+      float chi2rzdof_1 = (float)trk_chi2rz->at(trackVertices[i].a.index) / ndof_1;
+      float bendchi2_1 = trk_bendchi2->at(trackVertices[i].a.index);
+      int ndof_2 = 2 * trk_nstub->at(trackVertices[i].b.index) - 5;
+      float chi2rphidof_2 = (float)trk_chi2rphi->at(trackVertices[i].b.index) / ndof_2;
+      float chi2rzdof_2 = (float)trk_chi2rz->at(trackVertices[i].b.index) / ndof_2;
+      float bendchi2_2 = trk_bendchi2->at(trackVertices[i].b.index);
+      float chi2rphidofSum = chi2rphidof_1 + chi2rphidof_2;
+      float chi2rzdofSum = chi2rzdof_1 + chi2rzdof_2;
+      float bendchi2Sum = bendchi2_1 + bendchi2_2;
+      int numStubsSum = trk_nstub->at(trackVertices[i].a.index) + trk_nstub->at(trackVertices[i].b.index);
+
+      h_trk_delta_dist_z->Fill(fabs(z_dv_trk_1-z_dv_trk_2)); //* Use this condition
+      h_trackVertex_d_T->Fill(d_T);
+      h_trackVertex_cos_T->Fill(cos_T);
+      h_trackVertex_alpha_T->Fill(alpha_T);
+      h_trackVertex_R_T->Fill(R_T);
+      h_trackVertex_openingAngle->Fill(openingAngle);
+      h_trackVertex_parentPt->Fill(p_mag);
+
+      if(trackVertices[i].x_dv!=-9999.0){
+	h_trackVertexCuts_x->Fill(trackVertices[i].x_dv);
+	h_trackVertexCuts_y->Fill(trackVertices[i].y_dv);
+	h_trackVertexCuts_z->Fill(trackVertices[i].z_dv);
+	h_trackVertexCuts_sumPt->Fill(trackVertices[i].a.pt+trackVertices[i].b.pt);
+
+
+	h_all_trackVertex_pt->Fill(trackVertices[i].a.pt);
+	if(fabs(trackVertices[i].a.d0) < fabs(trackVertices[i].b.d0)){
+	  h_all_trackVertex_minD0->Fill(trackVertices[i].a.d0);
+	}
+	else{
+	  h_all_trackVertex_minD0->Fill(trackVertices[i].b.d0);
+	}
+	h_all_trackVertex_lowPt->Fill(trackVertices[i].b.pt);
+	h_all_trackVertex_eta->Fill(trackVertices[i].a.eta);
+	h_all_trackVertex_dxy->Fill(dist(trackVertices[i].x_dv,trackVertices[i].y_dv));
+	h_all_trackVertex_numStubs->Fill(trk_nstub->at(trackVertices[i].a.index));
+	h_all_trackVertex_numStubs->Fill(trk_nstub->at(trackVertices[i].b.index));
+
+	for(uint k=0;k<dxy_cuts.size();k++){
+	  if(dist_TPs(trackVertices[i].a,trackVertices[i].b) < dxy_cuts[k]){
+	    all_vert_dxy_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<dz_cuts.size();k++){
+	  if(fabs(z_dv_trk_1-z_dv_trk_2) < dz_cuts[k] && check_dz[k]==true){
+	    all_vert_dz_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<cos_T_cuts.size();k++){
+	  if(cos_T > cos_T_cuts[k] && check_cos_T[k]==true){
+	    all_vert_cos_T_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<d_T_cuts.size();k++){
+	  if(d_T < d_T_cuts[k] && check_d_T[k]==true){
+	    all_vert_d_T_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<R_T_cuts.size();k++){
+	  if(R_T > R_T_cuts[k] && check_R_T[k]==true){
+	    all_vert_R_T_cut[k]++;
+	  }
+	}
+	  
+	for(uint k=0;k<chi2rz_cuts.size();k++){
+	  if(chi2rzdofSum < chi2rz_cuts[k] && check_chi2rz[k]==true){
+	    all_vert_chi2rz_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<minD0_cuts.size();k++){
+	  if( ((fabs(trackVertices[i].a.d0) > minD0_cuts[k]) || (fabs(trackVertices[i].b.d0) > minD0_cuts[k])) && check_minD0[k]==true){
+	    all_vert_minD0_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<stubSum_cuts.size();k++){
+	  if(numStubsSum > stubSum_cuts[k] && check_stubSum[k]==true){
+	    all_vert_stubSum_cut[k]++;
+	  }
+	}
+	for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+	  for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+	    for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	      for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+		for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+		  for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+		    for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		      if( (fabs(z_dv_trk_1-z_dv_trk_2) < dz_cuts[k_a]) && (cos_T > cos_T_cuts[k_b]) && (d_T < d_T_cuts[k_c]) && (R_T > R_T_cuts[k_d]) && (chi2rzdofSum < chi2rz_cuts[k_e]) && ((fabs(trackVertices[i].a.d0) > minD0_cuts[k_f]) || (fabs(trackVertices[i].b.d0) > minD0_cuts[k_f])) && (numStubsSum > stubSum_cuts[k_g]) && check_array[k_a][k_b][k_c][k_d][k_e][k_f][k_g]==true ){
+			all_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]++;
+		      }
+		    }
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+	
+      }
+      
+      
+      uint matched_j = 0;
+      bool foundMatch = false;
+      for(uint j=0; j<trueVertices.size(); j++){
+	if( (trackVertices[i].a.tp_pt == trueVertices[j].a.pt) && (trackVertices[i].b.tp_pt == trueVertices[j].b.pt) && trueVertices[j].matched==false){
+	  trueVertices[j].matched = true;
+	  matched_j = j;
+	  foundMatch = true;
+	  if(oneMatch==false){
+	    oneMatch = true;
+	    firstMatch_j = j;
+	  }
+	    
+	  break;
+	}
+      }
+      
+      if(true_DV && foundMatch){
+	h_correct_trueVertex_pt->Fill(trueVertices[matched_j].a.pt);
+	h_correct_trueVertex_lowPt->Fill(trueVertices[matched_j].b.pt);
+	h_correct_trueVertex_eta->Fill(trueVertices[matched_j].a.eta);
+	h_correct_trueVertex_dxy->Fill(dist(trueVertices[matched_j].x_dv,trueVertices[matched_j].y_dv));
+	h_correct_trackVertex_numStubs->Fill(trk_nstub->at(trackVertices[i].a.index));
+	h_correct_trackVertex_numStubs->Fill(trk_nstub->at(trackVertices[i].b.index));
+	h_correct_trackVertex_numStubsSum->Fill(trk_nstub->at(trackVertices[i].a.index)+trk_nstub->at(trackVertices[i].b.index));
+	h_correct_trackVertex_chi2rphidofSum->Fill(chi2rphidofSum);
+	h_correct_trackVertex_chi2rzdofSum->Fill(chi2rzdofSum);
+	h_correct_trackVertex_bendchi2Sum->Fill(bendchi2Sum);
+	h_correct_trackVertex_score->Fill(trackVertices[i].score);
+	h_correct_trackVertex_delta_dist_z->Fill(fabs(z_dv_trk_1-z_dv_trk_2));
+	h_correct_trackVertex_delta_dist_z0->Fill(fabs(trk_z0->at(trackVertices[i].a.index)-trk_z0->at(trackVertices[i].b.index)));
+	h_correct_trackVertex_delta_dist_d0->Fill(fabs(trk_d0->at(trackVertices[i].a.index)-trk_d0->at(trackVertices[i].b.index)));
+	h_correct_trackVertex_delta_dist_eta->Fill(fabs(trk_eta->at(trackVertices[i].a.index)-trk_eta->at(trackVertices[i].b.index)));
+	h_correct_trackVertex_delta_dist_phi->Fill(fabs(trk_phi->at(trackVertices[i].a.index)-trk_phi->at(trackVertices[i].b.index)));
+	h_correct_trackVertex_delta_dist_indexPt->Fill(abs(i_pt-j_pt));
+	h_correct_trackVertex_indexPt->Fill(i_pt);
+	h_correct_trackVertex_indexPt->Fill(j_pt);
+
+	for(uint k=0;k<dxy_cuts.size();k++){
+	  if(dist_TPs(trackVertices[i].a,trackVertices[i].b) < dxy_cuts[k]){
+	    correct_vert_dxy_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<dz_cuts.size();k++){
+	  if(fabs(z_dv_trk_1-z_dv_trk_2) < dz_cuts[k] && check_dz[k]==true){
+	    correct_vert_dz_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<cos_T_cuts.size();k++){
+	  if(cos_T > cos_T_cuts[k] && check_cos_T[k]==true){
+	    correct_vert_cos_T_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<d_T_cuts.size();k++){
+	  if(d_T < d_T_cuts[k] && check_d_T[k]==true){
+	    correct_vert_d_T_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<R_T_cuts.size();k++){
+	  if(R_T > R_T_cuts[k] && check_R_T[k]==true){
+	    correct_vert_R_T_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<chi2rz_cuts.size();k++){
+	  if(chi2rzdofSum < chi2rz_cuts[k] && check_chi2rz[k]==true){
+	    correct_vert_chi2rz_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<minD0_cuts.size();k++){
+	  if( ((fabs(trackVertices[i].a.d0) > minD0_cuts[k]) || (fabs(trackVertices[i].b.d0) > minD0_cuts[k])) && check_minD0[k]==true){
+	    correct_vert_minD0_cut[k]++;
+	  }
+	}
+	for(uint k=0;k<stubSum_cuts.size();k++){
+	  if(numStubsSum > stubSum_cuts[k] && check_stubSum[k]==true){
+	    correct_vert_stubSum_cut[k]++;
+	  }
+	}
+	  
+	for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+	  for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+	    for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	      for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+		for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+		  for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+		    for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		      if( (fabs(z_dv_trk_1-z_dv_trk_2) < dz_cuts[k_a]) && (cos_T > cos_T_cuts[k_b]) && (d_T < d_T_cuts[k_c]) && (R_T > R_T_cuts[k_d]) && (chi2rzdofSum < chi2rz_cuts[k_e]) && ((fabs(trackVertices[i].a.d0) > minD0_cuts[k_f]) || (fabs(trackVertices[i].b.d0) > minD0_cuts[k_f])) && (numStubsSum > stubSum_cuts[k_g]) && check_array[k_a][k_b][k_c][k_d][k_e][k_f][k_g]==true ){
+			correct_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]++;
+		      }
+		    }
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+
+	h_res_tp_trk_x->Fill(trueVertices[matched_j].x_dv-trackVertices[i].x_dv);
+	h_res_tp_trk_y->Fill(trueVertices[matched_j].y_dv-trackVertices[i].y_dv);
+	h_res_tp_trk_z->Fill(trueVertices[matched_j].z_dv-trackVertices[i].z_dv);
+	float r_j = dist(trueVertices[matched_j].x_dv,trueVertices[matched_j].y_dv);
+	float r_i = dist(trackVertices[i].x_dv,trackVertices[i].y_dv);
+	float phi_j = atan2(trueVertices[matched_j].y_dv,trueVertices[matched_j].x_dv);
+	float phi_i = atan2(trackVertices[i].y_dv,trackVertices[i].x_dv);
+	h_res_tp_trk_r->Fill(r_j-r_i);
+	h_res_tp_trk_phi->Fill(phi_j-phi_i);
+       
+	if (trackVertices[i].a.pt   >   pt_cuts[0]){ pt_check[0]++; }
+	if (trackVertices[i].a.pt   >   pt_cuts[1]){ pt_check[1]++; }
+	if (trackVertices[i].a.pt   >   pt_cuts[2]){ pt_check[2]++; }
+	if (trackVertices[i].a.pt   >   pt_cuts[3]){ pt_check[3]++; }
+	if (trackVertices[i].a.pt   >   pt_cuts[4]){ pt_check[4]++; }
+	  
+	if (fabs(trackVertices[i].a.d0)>d0_cuts[0]){ d0_check[0]++;}
+	if (fabs(trackVertices[i].a.d0)>d0_cuts[1]){ d0_check[1]++;}
+	if (fabs(trackVertices[i].a.d0)>d0_cuts[2]){ d0_check[2]++;}
+	if (fabs(trackVertices[i].a.d0)>d0_cuts[3]){ d0_check[3]++;}
+	if (fabs(trackVertices[i].a.d0)>d0_cuts[4]){ d0_check[4]++;}
+	for (int l=0; l < 5; l++){
+	  if (trackVertices[i].a.pt   >   pt_cuts[0] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[0][l]++;}
+	  if (trackVertices[i].a.pt   >   pt_cuts[1] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[1][l]++;}
+	  if (trackVertices[i].a.pt   >   pt_cuts[2] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[2][l]++;}
+	  if (trackVertices[i].a.pt   >   pt_cuts[3] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[3][l]++;}
+	  if (trackVertices[i].a.pt   >   pt_cuts[4] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[4][l]++;}
+	}
+
+	if (trackVertices[i].b.pt   >   pt_cuts[0]){ pt_check[0]++; }
+	if (trackVertices[i].b.pt   >   pt_cuts[1]){ pt_check[1]++; }
+	if (trackVertices[i].b.pt   >   pt_cuts[2]){ pt_check[2]++; }
+	if (trackVertices[i].b.pt   >   pt_cuts[3]){ pt_check[3]++; }
+	if (trackVertices[i].b.pt   >   pt_cuts[4]){ pt_check[4]++; }
+	  
+	if (fabs(trackVertices[i].b.d0)>d0_cuts[0]){ d0_check[0]++;}
+	if (fabs(trackVertices[i].b.d0)>d0_cuts[1]){ d0_check[1]++;}
+	if (fabs(trackVertices[i].b.d0)>d0_cuts[2]){ d0_check[2]++;}
+	if (fabs(trackVertices[i].b.d0)>d0_cuts[3]){ d0_check[3]++;}
+	if (fabs(trackVertices[i].b.d0)>d0_cuts[4]){ d0_check[4]++;}
+	for (int l=0; l < 5; l++){
+	  if (trackVertices[i].b.pt   >   pt_cuts[0] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[0][l]++;}
+	  if (trackVertices[i].b.pt   >   pt_cuts[1] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[1][l]++;}
+	  if (trackVertices[i].b.pt   >   pt_cuts[2] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[2][l]++;}
+	  if (trackVertices[i].b.pt   >   pt_cuts[3] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[3][l]++;}
+	  if (trackVertices[i].b.pt   >   pt_cuts[4] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[4][l]++;}
+	}
+		    
+	for(int k=0;k<5;k++){
+	  pt_check[k] = 0;
+	  d0_check[k] = 0;
+	  for (int l=0; l < 5; l++){
+	    if(pt_d0_check[k][l]>=2){
+	      h_Count_trk_pt_d0_dv->SetBinContent(l+1,k+1,(h_Count_trk_pt_d0_dv->GetBinContent(l+1,k+1) + 1));
+	    }
+	    pt_d0_check[k][l] = 0;
+	  }
+	}
+      }
+      else{
+	if(trackVertices[i].x_dv!=-9999.0){
+	  h_false_trackVertex_pt->Fill(trackVertices[i].a.pt);
+	  h_false_trackVertex_eta->Fill(trackVertices[i].a.eta);
+	  h_false_trackVertex_dxy->Fill(dist(trackVertices[i].x_dv,trackVertices[i].y_dv));
+	  h_false_trackVertex_delta_dist_z->Fill(fabs(z_dv_trk_1-z_dv_trk_2));
+	  h_false_trackVertex_numStubs->Fill(trk_nstub->at(trackVertices[i].a.index));
+	  h_false_trackVertex_numStubs->Fill(trk_nstub->at(trackVertices[i].b.index));
+	  h_false_trackVertex_numStubsSum->Fill(trk_nstub->at(trackVertices[i].a.index)+trk_nstub->at(trackVertices[i].b.index));
+	  h_false_trackVertex_chi2rphidofSum->Fill(chi2rphidofSum);
+	  h_false_trackVertex_chi2rzdofSum->Fill(chi2rzdofSum);
+	  h_false_trackVertex_bendchi2Sum->Fill(bendchi2Sum);
+	  h_false_trackVertex_score->Fill(trackVertices[i].score);
+	  h_false_trackVertex_d0->Fill(trackVertices[i].a.d0);
+	  h_false_trackVertex_d0->Fill(trackVertices[i].b.d0);
+	  h_false_trackVertex_d_T->Fill(d_T);
+
+	  for(uint k=0;k<dxy_cuts.size();k++){
+	    if(dist_TPs(trackVertices[i].a,trackVertices[i].b) < dxy_cuts[k]){
+	      false_vert_dxy_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<dz_cuts.size();k++){
+	    if(fabs(z_dv_trk_1-z_dv_trk_2) < dz_cuts[k] && check_dz[k]==true){
+	      false_vert_dz_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<cos_T_cuts.size();k++){
+	    if(cos_T > cos_T_cuts[k] && check_cos_T[k]==true){
+	      false_vert_cos_T_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<d_T_cuts.size();k++){
+	    if(d_T < d_T_cuts[k] && check_d_T[k]==true){
+	      false_vert_d_T_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<R_T_cuts.size();k++){
+	    if(R_T > R_T_cuts[k] && check_R_T[k]==true){
+	      false_vert_R_T_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<chi2rz_cuts.size();k++){
+	    if(chi2rzdofSum < chi2rz_cuts[k] && check_chi2rz[k]==true){
+	      false_vert_chi2rz_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<minD0_cuts.size();k++){
+	    if( ((fabs(trackVertices[i].a.d0) > minD0_cuts[k]) || (fabs(trackVertices[i].b.d0) > minD0_cuts[k])) && check_minD0[k]==true){
+	      false_vert_minD0_cut[k]++;
+	    }
+	  }
+	  for(uint k=0;k<stubSum_cuts.size();k++){
+	    if(numStubsSum > stubSum_cuts[k] && check_stubSum[k]==true){
+	      false_vert_stubSum_cut[k]++;
+	    }
+	  }
+	    
+	  for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+	    for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+	      for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+		for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+		  for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+		    for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+		      for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+			if( (fabs(z_dv_trk_1-z_dv_trk_2) < dz_cuts[k_a]) && (cos_T > cos_T_cuts[k_b]) && (d_T < d_T_cuts[k_c]) && (R_T > R_T_cuts[k_d]) && (chi2rzdofSum < chi2rz_cuts[k_e]) && ((fabs(trackVertices[i].a.d0) > minD0_cuts[k_f]) || (fabs(trackVertices[i].b.d0) > minD0_cuts[k_f])) && (numStubsSum > stubSum_cuts[k_g]) && check_array[k_a][k_b][k_c][k_d][k_e][k_f][k_g]==true ){
+			  false_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]++;
+			}
+		      }
+		    }
+		  }
+		}
+	      }
+	    }
+	  }
+
+	}
+      }
+      for(uint k=0;k<dz_cuts.size();k++){
+	if(all_vert_dz_cut[k]==prev_dz_cut[k]+2){
+	  //check_dz[k] = false;
+	}
+      }
+      for(uint k=0;k<cos_T_cuts.size();k++){
+	if(all_vert_cos_T_cut[k]==prev_cos_T_cut[k]+2){
+	  //check_cos_T[k] = false;
+	}
+      }
+      for(uint k=0;k<d_T_cuts.size();k++){
+	if(all_vert_d_T_cut[k]==prev_d_T_cut[k]+2){
+	  //check_d_T[k] = false;
+	}
+      }
+      for(uint k=0;k<R_T_cuts.size();k++){
+	if(all_vert_R_T_cut[k]==prev_R_T_cut[k]+2){
+	  //check_R_T[k] = false;
+	}
+      }
+      for(uint k=0;k<chi2rz_cuts.size();k++){
+	if(all_vert_chi2rz_cut[k]==prev_chi2rz_cut[k]+2){
+	  //check_chi2rz[k] = false;
+	}
+      }
+      for(uint k=0;k<minD0_cuts.size();k++){
+	if(all_vert_minD0_cut[k]==prev_minD0_cut[k]+2){
+	  //check_minD0[k] = false;
+	}
+      }
+      for(uint k=0;k<stubSum_cuts.size();k++){
+	if(all_vert_stubSum_cut[k]==prev_stubSum_cut[k]+2){
+	  //check_stubSum[k] = false;
+	}
+      }
+      for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+	for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+	  for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	    for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+	      for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+		for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+		  for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		    if( all_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]==prev_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]+2){
+		      check_array[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = false;
+		    }
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+      }
+
+    } // End of Loop of TrackVertices
+    prev_dz_cut = all_vert_dz_cut;
+    prev_cos_T_cut = all_vert_cos_T_cut;
+    prev_d_T_cut = all_vert_d_T_cut;
+    prev_R_T_cut = all_vert_R_T_cut;
+    prev_chi2rz_cut = all_vert_chi2rz_cut;
+    prev_minD0_cut = all_vert_minD0_cut;
+    prev_stubSum_cut = all_vert_stubSum_cut;
+      
+    for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+      for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+	for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	  for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+	    for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+	      for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+		for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		  prev_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g] = all_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g];
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+   
+    if(trackVertices.size()>0){
+      h_trk_oneVert_MET->Fill(TMath::Sqrt(pow(trkMET[0],2)+pow(trkMET[1],2)));
+      h_trk_oneVert_H_T->Fill(trkH_T);
+    }
+      
+    if(oneMatch){
+      h_correct_oneMatch_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
+      h_correct_oneMatch_trueVertex_lowPt->Fill(trueVertices[maxPT_i].b.pt);
+      h_correct_oneMatch_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
+      h_correct_oneMatch_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
+      h_correct_oneMatchAlt_trueVertex_pt->Fill(trueVertices[firstMatch_j].a.pt);
+      h_correct_oneMatchAlt_trueVertex_eta->Fill(trueVertices[firstMatch_j].a.eta);
+      h_correct_oneMatchAlt_trueVertex_dxy->Fill(dist(trueVertices[firstMatch_j].x_dv,trueVertices[firstMatch_j].y_dv));
+      h_all_oneMatchAlt_trueVertex_pt->Fill(trueVertices[firstMatch_j].a.pt);
+      h_all_oneMatchAlt_trueVertex_eta->Fill(trueVertices[firstMatch_j].a.eta);
+      h_all_oneMatchAlt_trueVertex_dxy->Fill(dist(trueVertices[firstMatch_j].x_dv,trueVertices[firstMatch_j].y_dv));
+      h_trk_oneMatch_MET->Fill(TMath::Sqrt(pow(trkMET[0],2)+pow(trkMET[1],2)));
+      h_trk_oneMatch_H_T->Fill(trkH_T);
+    }
+    else{
+      if(trueVertices.size()>0){
+	h_all_oneMatchAlt_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
+	h_all_oneMatchAlt_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
+	h_all_oneMatchAlt_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
+      }
+    }
+    for(uint i=0; i<trueVertices.size(); i++){
+      int ai = trueVertices[i].a.index;
+      int bi = trueVertices[i].b.index;
+      h_trueVertex_errorCode->Fill(trueVertices[i].errorCode);
+    }
+  } // End of Event Loop
+
+  // ---------------------------------------------------------------------------------------------------------
+  //some Histograms
+
+  char ctxt[500];
+  if(inputFile.Contains("DarkPhoton")){
+    if(inputFile.Contains("cT0")){
+      sprintf(ctxt, "Dark Photon, PU=0, #tau=0mm");
+    }
+    else if(inputFile.Contains("cT10000")){
+      sprintf(ctxt, "Dark Photon, PU=0, #tau=10000mm");
+    }
+    else if(inputFile.Contains("cT5000")){
+      sprintf(ctxt, "Dark Photon, PU=0, #tau=5000mm");
+    }   
+    else if(inputFile.Contains("cT100")){
+      sprintf(ctxt, "Dark Photon, PU=0, #tau=100mm");
+    }
+    else if(inputFile.Contains("cT10")){
+      if(inputFile.Contains("PU200")){
+	sprintf(ctxt, "Dark Photon, PU=200, #tau=10mm");
+      }
+      else{
+	sprintf(ctxt, "Dark Photon, PU=0, #tau=10mm");
+      }
+    }
+  }
+  else if(inputFile.Contains("DisplacedTrackJet")){
+    if(inputFile.Contains("cT10")){
+      if(inputFile.Contains("PU200")){
+	sprintf(ctxt, "DispTrkJet, PU=200, #tau=10mm");
+      }
+      else{
+	sprintf(ctxt, "DispTrkJet, PU=200, #tau=10mm");
+      }
+    }
+  }
+  else if(inputFile.Contains("NeutrinoGun")){
+    sprintf(ctxt, "Neutrino Gun, PU=200");
+  }
+  else if(inputFile.Contains("DisplacedMu")){
+    if(inputFile.Contains("PU200")){
+      sprintf(ctxt, "Displaced Mu, PU=200");
+    }
+    else{
+      sprintf(ctxt, "Displaced Mu, PU=0");
+    }
+  }
+  else if(inputFile.Contains("TTbar")){
+    if(inputFile.Contains("PU200")){
+      sprintf(ctxt, "TTbar, PU=200");
+    }
+    else{
+      sprintf(ctxt, "TTbar, PU=0");
+    }
+  }
+  else{
+    sprintf(ctxt, " ");
+  }
+  TCanvas c;
+
+  TString DIR = outputDir + "AnalyzerTrkPlots/";
+  TString makedir = "mkdir -p " + DIR;
+  const char *mkDIR = makedir.Data();
+  gSystem->Exec(mkDIR);
+
+  TFile *fout;
+  fout = new TFile(outputDir + "output_" + inputFile + ".root", "recreate");
+
+  h_trk_d0->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0->GetXaxis()->SetRange(1, h_trk_d0->GetNbinsX() + 2);
+  h_trk_d0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_d0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_d0->GetName() + ".jpeg");
+  delete h_trk_d0;
+
+  h_trk_d0_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_primary->GetXaxis()->SetRange(1, h_trk_d0_primary->GetNbinsX() + 2);
+  h_trk_d0_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_d0_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_d0_primary->GetName() + ".jpeg");
+  delete h_trk_d0_primary;
+
+  h_trk_d0_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_primary_noCuts->GetXaxis()->SetRange(1, h_trk_d0_primary_noCuts->GetNbinsX() + 2);
+  h_trk_d0_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_d0_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_d0_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_d0_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_np->GetXaxis()->SetRange(1, h_trk_d0_np->GetNbinsX() + 2);
+  h_trk_d0_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_d0_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_d0_np->GetName() + ".jpeg");
+  delete h_trk_d0_np;
+
+  h_trk_d0_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_np_noCuts->GetXaxis()->SetRange(1, h_trk_d0_np_noCuts->GetNbinsX() + 2);
+  h_trk_d0_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_d0_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_d0_np_noCuts->GetName() + ".jpeg");
+  
+  h_trk_d0_primary_noCuts->Scale(1./h_trk_d0_primary_noCuts->Integral());
+  h_trk_d0_primary_noCuts->SetLineColor(1);
+  h_trk_d0_primary_noCuts->SetMarkerColor(1);
+  TH1F *h_trk_d0_np_noCutsNorm = (TH1F*)h_trk_d0_np_noCuts->Clone(); 
+  h_trk_d0_np_noCutsNorm->Scale(1./h_trk_d0_np_noCutsNorm->Integral());
+  h_trk_d0_np_noCutsNorm->SetLineColor(2);
+  h_trk_d0_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_d0_np_noCutsNorm->Draw("HIST");
+  h_trk_d0_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  TLegend* l = new TLegend(0.88,0.35,0.98,0.7);
+  l->SetFillColor(0);
+  l->SetLineColor(0);
+  l->SetTextSize(0.04);
+  l->AddEntry(h_trk_d0_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_np_noCutsNorm,"NP","l");
+  l->SetTextFont(42);
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts.jpeg");
+  delete h_trk_d0_np_noCutsNorm;
+
+  TH1F *h_trk_d0_fake_noCutsNorm = (TH1F*)h_trk_d0_fake_noCuts->Clone(); 
+  h_trk_d0_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_d0_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_d0_PU_noCutsNorm = (TH1F*)h_trk_d0_PU_noCuts->Clone(); 
+  h_trk_d0_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_d0_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_d0_notHiggs_noCutsNorm = (TH1F*)h_trk_d0_notHiggs_noCuts->Clone(); 
+  h_trk_d0_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_d0_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_d0_fake_noCutsNorm->Scale(1./h_trk_d0_np_noCuts->Integral());
+  h_trk_d0_fake_noCutsNorm->SetLineColor(2);
+  h_trk_d0_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_d0_PU_noCutsNorm->Scale(1./h_trk_d0_np_noCuts->Integral());
+  h_trk_d0_PU_noCutsNorm->SetLineColor(3);
+  h_trk_d0_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_d0_notHiggs_noCutsNorm->Scale(1./h_trk_d0_np_noCuts->Integral());
+  h_trk_d0_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_d0_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_d0_noCuts = new THStack("hs_d0_noCuts","Stacked BG histograms");
+  hs_d0_noCuts->Add(h_trk_d0_fake_noCutsNorm);
+  hs_d0_noCuts->Add(h_trk_d0_PU_noCutsNorm);
+  hs_d0_noCuts->Add(h_trk_d0_notHiggs_noCutsNorm);
+  hs_d0_noCuts->Draw("HIST");
+  h_trk_d0_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_d0_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_d0_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_noCutsNorm.jpeg");
+  delete h_trk_d0_fake_noCutsNorm;
+  delete h_trk_d0_PU_noCutsNorm;
+  delete h_trk_d0_notHiggs_noCutsNorm;
+  delete h_trk_d0_np_noCuts;
+  delete hs_d0_noCuts;
+
+  h_trk_d0_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_fake_noCuts->GetXaxis()->SetRange(1, h_trk_d0_fake_noCuts->GetNbinsX() + 2);
+  h_trk_d0_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_PU_noCuts->GetXaxis()->SetRange(1, h_trk_d0_PU_noCuts->GetNbinsX() + 2);
+  h_trk_d0_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_d0_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_d0_fake_noCuts->Scale(1./h_trk_d0_fake_noCuts->Integral());
+  h_trk_d0_fake_noCuts->SetLineColor(2);
+  h_trk_d0_fake_noCuts->SetMarkerColor(2);
+  h_trk_d0_PU_noCuts->Scale(1./h_trk_d0_PU_noCuts->Integral());
+  h_trk_d0_PU_noCuts->SetLineColor(3);
+  h_trk_d0_PU_noCuts->SetMarkerColor(3);
+  h_trk_d0_notHiggs_noCuts->Scale(1./h_trk_d0_notHiggs_noCuts->Integral());
+  h_trk_d0_notHiggs_noCuts->SetLineColor(4);
+  h_trk_d0_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_d0_fake_noCuts->Draw("HIST");
+  h_trk_d0_primary_noCuts->Draw("HIST,SAME");
+  h_trk_d0_PU_noCuts->Draw("HIST,SAME");
+  h_trk_d0_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_d0_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_d0_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_noCuts.jpeg");
+  delete h_trk_d0_primary_noCuts;
+  delete h_trk_d0_fake_noCuts;
+  delete h_trk_d0_PU_noCuts;
+  delete h_trk_d0_notHiggs_noCuts;
+
+  h_trk_d0_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_d0_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_d0_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_d0_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_d0_primary_noCuts_H->Scale(1./h_trk_d0_primary_noCuts_H->Integral());
+  h_trk_d0_primary_noCuts_H->SetLineColor(1);
+  h_trk_d0_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_d0_np_noCuts_H->Scale(1./h_trk_d0_np_noCuts_H->Integral());
+  h_trk_d0_np_noCuts_H->SetLineColor(2);
+  h_trk_d0_np_noCuts_H->SetMarkerColor(2);
+  h_trk_d0_np_noCuts_H->Draw("HIST");
+  h_trk_d0_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_d0_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_H.jpeg");
+  delete h_trk_d0_primary_noCuts_H;
+  delete h_trk_d0_np_noCuts_H;
+
+  h_trk_d0_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_d0_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_d0_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_d0_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_d0_primary_noCuts_L->Scale(1./h_trk_d0_primary_noCuts_L->Integral());
+  h_trk_d0_primary_noCuts_L->SetLineColor(1);
+  h_trk_d0_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_d0_np_noCuts_L->Scale(1./h_trk_d0_np_noCuts_L->Integral());
+  h_trk_d0_np_noCuts_L->SetLineColor(2);
+  h_trk_d0_np_noCuts_L->SetMarkerColor(2);
+  h_trk_d0_np_noCuts_L->Draw("HIST");
+  h_trk_d0_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_d0_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_L.jpeg");
+  delete h_trk_d0_primary_noCuts_L;
+  delete h_trk_d0_np_noCuts_L;
+
+  h_trk_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_d0_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_np_qualCuts->GetXaxis()->SetRange(1, h_trk_d0_np_qualCuts->GetNbinsX() + 2);
+  h_trk_d0_primary_qualCuts->Scale(1./h_trk_d0_primary_qualCuts->Integral());
+  h_trk_d0_primary_qualCuts->SetLineColor(1);
+  h_trk_d0_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_d0_np_qualCutsNorm = (TH1F*)h_trk_d0_np_qualCuts->Clone(); 
+  h_trk_d0_np_qualCutsNorm->Scale(1./h_trk_d0_np_qualCutsNorm->Integral());
+  h_trk_d0_np_qualCutsNorm->SetLineColor(2);
+  h_trk_d0_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_d0_np_qualCutsNorm->Draw("HIST");
+  h_trk_d0_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_d0_qualCuts.jpeg");
+  delete h_trk_d0_np_qualCutsNorm;
+
+  h_trk_pt_vs_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_d0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_d0_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_d0_np_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_d0_np_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_d0_primary_qualCuts->SetLineColor(1);
+  h_trk_pt_vs_d0_primary_qualCuts->SetMarkerColor(1);
+  h_trk_pt_vs_d0_np_qualCuts->SetLineColor(2);
+  h_trk_pt_vs_d0_np_qualCuts->SetMarkerColor(2);
+  h_trk_pt_vs_d0_np_qualCuts->Draw("COLZ");
+  auto func = new TF2("fit func","abs(x*pow(y,1.8))<0.7",-2,2,0,30);
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_d0_np_qualCuts.jpeg");
+  func->Draw("SAME");
+  c.SaveAs(DIR + "/h_trk_pt_vs_d0_np_qualCutsFit.jpeg");
+  h_trk_pt_vs_d0_primary_qualCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_d0_primary_qualCuts.jpeg");
+  func->Draw("SAME");
+  c.SaveAs(DIR + "/h_trk_pt_vs_d0_primary_qualCutsFit.jpeg");
+  delete h_trk_pt_vs_d0_primary_qualCuts;
+  delete h_trk_pt_vs_d0_np_qualCuts;
+
+  h_trk_pt_vs_eta_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_eta_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_eta_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_eta_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_eta_np_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_eta_np_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_eta_primary_qualCuts->SetLineColor(1);
+  h_trk_pt_vs_eta_primary_qualCuts->SetMarkerColor(1);
+  h_trk_pt_vs_eta_np_qualCuts->SetLineColor(2);
+  h_trk_pt_vs_eta_np_qualCuts->SetMarkerColor(2);
+  h_trk_pt_vs_eta_np_qualCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_eta_np_qualCuts.jpeg");
+  h_trk_pt_vs_eta_primary_qualCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_eta_primary_qualCuts.jpeg");
+  delete h_trk_pt_vs_eta_primary_qualCuts;
+  delete h_trk_pt_vs_eta_np_qualCuts;
+
+  h_trk_eta_vs_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_vs_d0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_vs_d0_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_vs_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_vs_d0_np_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_vs_d0_np_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_vs_d0_primary_qualCuts->SetLineColor(1);
+  h_trk_eta_vs_d0_primary_qualCuts->SetMarkerColor(1);
+  h_trk_eta_vs_d0_np_qualCuts->SetLineColor(2);
+  h_trk_eta_vs_d0_np_qualCuts->SetMarkerColor(2);
+  h_trk_eta_vs_d0_np_qualCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_eta_vs_d0_np_qualCuts.jpeg");
+  h_trk_eta_vs_d0_primary_qualCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_eta_vs_d0_primary_qualCuts.jpeg");
+  delete h_trk_eta_vs_d0_primary_qualCuts;
+  delete h_trk_eta_vs_d0_np_qualCuts;
+
+  h_trk_ptWeightedD0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_ptWeightedD0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_ptWeightedD0_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_ptWeightedD0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_ptWeightedD0_np_qualCuts->GetXaxis()->SetRange(1, h_trk_ptWeightedD0_np_qualCuts->GetNbinsX() + 2);
+  h_trk_ptWeightedD0_primary_qualCuts->Scale(1./h_trk_ptWeightedD0_primary_qualCuts->Integral());
+  h_trk_ptWeightedD0_primary_qualCuts->SetLineColor(1);
+  h_trk_ptWeightedD0_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_ptWeightedD0_np_qualCutsNorm = (TH1F*)h_trk_ptWeightedD0_np_qualCuts->Clone(); 
+  h_trk_ptWeightedD0_np_qualCutsNorm->Scale(1./h_trk_ptWeightedD0_np_qualCutsNorm->Integral());
+  h_trk_ptWeightedD0_np_qualCutsNorm->SetLineColor(2);
+  h_trk_ptWeightedD0_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_ptWeightedD0_np_qualCutsNorm->Draw("HIST");
+  h_trk_ptWeightedD0_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_ptWeightedD0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_ptWeightedD0_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_ptWeightedD0_qualCuts.jpeg");
+  delete h_trk_ptWeightedD0_np_qualCutsNorm;
+
+  TH1F *h_trk_d0_fake_qualCutsNorm = (TH1F*)h_trk_d0_fake_qualCuts->Clone(); 
+  h_trk_d0_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_d0_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_d0_PU_qualCutsNorm = (TH1F*)h_trk_d0_PU_qualCuts->Clone(); 
+  h_trk_d0_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_d0_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_d0_notHiggs_qualCutsNorm = (TH1F*)h_trk_d0_notHiggs_qualCuts->Clone(); 
+  h_trk_d0_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_d0_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_d0_fake_qualCutsNorm->Scale(1./h_trk_d0_np_qualCuts->Integral());
+  h_trk_d0_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_d0_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_d0_PU_qualCutsNorm->Scale(1./h_trk_d0_np_qualCuts->Integral());
+  h_trk_d0_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_d0_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_d0_notHiggs_qualCutsNorm->Scale(1./h_trk_d0_np_qualCuts->Integral());
+  h_trk_d0_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_d0_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_d0_qualCuts = new THStack("hs_d0_qualCuts","Stacked BG histograms");
+  hs_d0_qualCuts->Add(h_trk_d0_fake_qualCutsNorm);
+  hs_d0_qualCuts->Add(h_trk_d0_PU_qualCutsNorm);
+  hs_d0_qualCuts->Add(h_trk_d0_notHiggs_qualCutsNorm);
+  hs_d0_qualCuts->Draw("HIST");
+  h_trk_d0_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_d0_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_d0_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_qualCutsNorm.jpeg");
+  delete h_trk_d0_fake_qualCutsNorm;
+  delete h_trk_d0_PU_qualCutsNorm;
+  delete h_trk_d0_notHiggs_qualCutsNorm;
+  delete h_trk_d0_np_qualCuts;
+  delete hs_d0_qualCuts;
+
+  h_trk_d0_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_d0_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_d0_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_d0_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_d0_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_d0_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_d0_fake_qualCuts->Scale(1./h_trk_d0_fake_qualCuts->Integral());
+  h_trk_d0_fake_qualCuts->SetLineColor(2);
+  h_trk_d0_fake_qualCuts->SetMarkerColor(2);
+  h_trk_d0_PU_qualCuts->Scale(1./h_trk_d0_PU_qualCuts->Integral());
+  h_trk_d0_PU_qualCuts->SetLineColor(3);
+  h_trk_d0_PU_qualCuts->SetMarkerColor(3);
+  h_trk_d0_notHiggs_qualCuts->Scale(1./h_trk_d0_notHiggs_qualCuts->Integral());
+  h_trk_d0_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_d0_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_d0_fake_qualCuts->Draw("HIST");
+  h_trk_d0_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_d0_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_d0_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_d0_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_d0_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_qualCuts.jpeg");
+  delete h_trk_d0_primary_qualCuts;
+  delete h_trk_d0_fake_qualCuts;
+  delete h_trk_d0_PU_qualCuts;
+  delete h_trk_d0_notHiggs_qualCuts;
+
+  h_tp_d0->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_d0->GetXaxis()->SetRange(1, h_tp_d0->GetNbinsX() + 2);
+  h_tp_d0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_d0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_d0->GetName() + ".jpeg");
+  delete h_tp_d0;
+   
+  h_tp_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_pt_noCuts->GetXaxis()->SetRange(1, h_tp_pt_noCuts->GetNbinsX() + 2);
+  h_tp_pt_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_pt_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_pt_noCuts->GetName() + ".jpeg");
+  //delete h_tp_pt_noCuts;
+
+  h_tp_eta_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_eta_noCuts->GetXaxis()->SetRange(1, h_tp_eta_noCuts->GetNbinsX() + 2);
+  h_tp_eta_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_eta_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_eta_noCuts->GetName() + ".jpeg");
+  //delete h_tp_eta_noCuts;
+
+  h_tp_d0_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_d0_noCuts->GetXaxis()->SetRange(1, h_tp_d0_noCuts->GetNbinsX() + 2);
+  h_tp_d0_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_d0_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_d0_noCuts->GetName() + ".jpeg");
+  //delete h_tp_d0_noCuts;
+
+  h_trk_z0->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0->GetXaxis()->SetRange(1, h_trk_z0->GetNbinsX() + 2);
+  h_trk_z0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_z0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_z0->GetName() + ".jpeg");
+  delete h_trk_z0;
+
+  h_trk_z0_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_primary->GetXaxis()->SetRange(1, h_trk_z0_primary->GetNbinsX() + 2);
+  h_trk_z0_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_z0_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_z0_primary->GetName() + ".jpeg");
+  delete h_trk_z0_primary;
+
+  h_trk_z0_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_primary_noCuts->GetXaxis()->SetRange(1, h_trk_z0_primary_noCuts->GetNbinsX() + 2);
+  h_trk_z0_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_z0_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_z0_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_z0_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_np->GetXaxis()->SetRange(1, h_trk_z0_np->GetNbinsX() + 2);
+  h_trk_z0_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_z0_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_z0_np->GetName() + ".jpeg");
+  delete h_trk_z0_np;
+
+  h_trk_z0_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_np_noCuts->GetXaxis()->SetRange(1, h_trk_z0_np_noCuts->GetNbinsX() + 2);
+  h_trk_z0_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_z0_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_z0_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_z0_primary_noCuts->Scale(1./h_trk_z0_primary_noCuts->Integral());
+  h_trk_z0_primary_noCuts->SetLineColor(1);
+  h_trk_z0_primary_noCuts->SetMarkerColor(1);
+  TH1F *h_trk_z0_np_noCutsNorm = (TH1F*)h_trk_z0_np_noCuts->Clone(); 
+  h_trk_z0_np_noCutsNorm->Scale(1./h_trk_z0_np_noCutsNorm->Integral());
+  h_trk_z0_np_noCutsNorm->SetLineColor(2);
+  h_trk_z0_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_z0_np_noCutsNorm->Draw("HIST");
+  h_trk_z0_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts.jpeg");
+  delete h_trk_z0_np_noCutsNorm;
+
+  TH1F *h_trk_z0_fake_noCutsNorm = (TH1F*)h_trk_z0_fake_noCuts->Clone(); 
+  h_trk_z0_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_z0_PU_noCutsNorm = (TH1F*)h_trk_z0_PU_noCuts->Clone(); 
+  h_trk_z0_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_z0_notHiggs_noCutsNorm = (TH1F*)h_trk_z0_notHiggs_noCuts->Clone(); 
+  h_trk_z0_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_z0_fake_noCutsNorm->Scale(1./h_trk_z0_np_noCuts->Integral());
+  h_trk_z0_fake_noCutsNorm->SetLineColor(2);
+  h_trk_z0_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_z0_PU_noCutsNorm->Scale(1./h_trk_z0_np_noCuts->Integral());
+  h_trk_z0_PU_noCutsNorm->SetLineColor(3);
+  h_trk_z0_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_z0_notHiggs_noCutsNorm->Scale(1./h_trk_z0_np_noCuts->Integral());
+  h_trk_z0_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_z0_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_z0_noCuts = new THStack("hs_z0_noCuts","Stacked BG histograms");
+  hs_z0_noCuts->Add(h_trk_z0_fake_noCutsNorm);
+  hs_z0_noCuts->Add(h_trk_z0_PU_noCutsNorm);
+  hs_z0_noCuts->Add(h_trk_z0_notHiggs_noCutsNorm);
+  hs_z0_noCuts->Draw("HIST");
+  h_trk_z0_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_z0_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_z0_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_noCutsNorm.jpeg");
+  delete h_trk_z0_fake_noCutsNorm;
+  delete h_trk_z0_PU_noCutsNorm;
+  delete h_trk_z0_notHiggs_noCutsNorm;
+  delete h_trk_z0_np_noCuts;
+  delete hs_z0_noCuts;
+
+  h_trk_z0_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_fake_noCuts->GetXaxis()->SetRange(1, h_trk_z0_fake_noCuts->GetNbinsX() + 2);
+  h_trk_z0_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_PU_noCuts->GetXaxis()->SetRange(1, h_trk_z0_PU_noCuts->GetNbinsX() + 2);
+  h_trk_z0_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_z0_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_z0_fake_noCuts->Scale(1./h_trk_z0_fake_noCuts->Integral());
+  h_trk_z0_fake_noCuts->SetLineColor(2);
+  h_trk_z0_fake_noCuts->SetMarkerColor(2);
+  h_trk_z0_PU_noCuts->Scale(1./h_trk_z0_PU_noCuts->Integral());
+  h_trk_z0_PU_noCuts->SetLineColor(3);
+  h_trk_z0_PU_noCuts->SetMarkerColor(3);
+  h_trk_z0_notHiggs_noCuts->Scale(1./h_trk_z0_notHiggs_noCuts->Integral());
+  h_trk_z0_notHiggs_noCuts->SetLineColor(4);
+  h_trk_z0_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_z0_fake_noCuts->Draw("HIST");
+  h_trk_z0_primary_noCuts->Draw("HIST,SAME");
+  h_trk_z0_PU_noCuts->Draw("HIST,SAME");
+  h_trk_z0_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_z0_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_z0_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_noCuts.jpeg");
+  delete h_trk_z0_primary_noCuts;
+  delete h_trk_z0_fake_noCuts;
+  delete h_trk_z0_PU_noCuts;
+  delete h_trk_z0_notHiggs_noCuts;
+
+  h_trk_z0_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_z0_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_z0_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_z0_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_z0_primary_noCuts_H->Scale(1./h_trk_z0_primary_noCuts_H->Integral());
+  h_trk_z0_primary_noCuts_H->SetLineColor(1);
+  h_trk_z0_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_z0_np_noCuts_H->Scale(1./h_trk_z0_np_noCuts_H->Integral());
+  h_trk_z0_np_noCuts_H->SetLineColor(2);
+  h_trk_z0_np_noCuts_H->SetMarkerColor(2);
+  h_trk_z0_np_noCuts_H->Draw("HIST");
+  h_trk_z0_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_z0_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_H.jpeg");
+  delete h_trk_z0_primary_noCuts_H;
+  delete h_trk_z0_np_noCuts_H;
+
+  h_trk_z0_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_z0_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_z0_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_z0_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_z0_primary_noCuts_L->Scale(1./h_trk_z0_primary_noCuts_L->Integral());
+  h_trk_z0_primary_noCuts_L->SetLineColor(1);
+  h_trk_z0_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_z0_np_noCuts_L->Scale(1./h_trk_z0_np_noCuts_L->Integral());
+  h_trk_z0_np_noCuts_L->SetLineColor(2);
+  h_trk_z0_np_noCuts_L->SetMarkerColor(2);
+  h_trk_z0_np_noCuts_L->Draw("HIST");
+  h_trk_z0_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_z0_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_L.jpeg");
+  delete h_trk_z0_primary_noCuts_L;
+  delete h_trk_z0_np_noCuts_L;
+
+  h_trk_z0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_z0_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_z0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_np_qualCuts->GetXaxis()->SetRange(1, h_trk_z0_np_qualCuts->GetNbinsX() + 2);
+  h_trk_z0_primary_qualCuts->Scale(1./h_trk_z0_primary_qualCuts->Integral());
+  h_trk_z0_primary_qualCuts->SetLineColor(1);
+  h_trk_z0_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_z0_np_qualCutsNorm = (TH1F*)h_trk_z0_np_qualCuts->Clone(); 
+  h_trk_z0_np_qualCutsNorm->Scale(1./h_trk_z0_np_qualCutsNorm->Integral());
+  h_trk_z0_np_qualCutsNorm->SetLineColor(2);
+  h_trk_z0_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_z0_np_qualCutsNorm->Draw("HIST");
+  h_trk_z0_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_z0_qualCuts.jpeg");
+  delete h_trk_z0_np_qualCutsNorm;
+
+  TH1F *h_trk_z0_fake_qualCutsNorm = (TH1F*)h_trk_z0_fake_qualCuts->Clone(); 
+  h_trk_z0_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_z0_PU_qualCutsNorm = (TH1F*)h_trk_z0_PU_qualCuts->Clone(); 
+  h_trk_z0_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_z0_notHiggs_qualCutsNorm = (TH1F*)h_trk_z0_notHiggs_qualCuts->Clone(); 
+  h_trk_z0_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_z0_fake_qualCutsNorm->Scale(1./h_trk_z0_np_qualCuts->Integral());
+  h_trk_z0_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_z0_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_z0_PU_qualCutsNorm->Scale(1./h_trk_z0_np_qualCuts->Integral());
+  h_trk_z0_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_z0_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_z0_notHiggs_qualCutsNorm->Scale(1./h_trk_z0_np_qualCuts->Integral());
+  h_trk_z0_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_z0_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_z0_qualCuts = new THStack("hs_z0_qualCuts","Stacked BG histograms");
+  hs_z0_qualCuts->Add(h_trk_z0_fake_qualCutsNorm);
+  hs_z0_qualCuts->Add(h_trk_z0_PU_qualCutsNorm);
+  hs_z0_qualCuts->Add(h_trk_z0_notHiggs_qualCutsNorm);
+  hs_z0_qualCuts->Draw("HIST");
+  h_trk_z0_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_z0_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_z0_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_qualCutsNorm.jpeg");
+  delete h_trk_z0_fake_qualCutsNorm;
+  delete h_trk_z0_PU_qualCutsNorm;
+  delete h_trk_z0_notHiggs_qualCutsNorm;
+  delete h_trk_z0_np_qualCuts;
+  delete hs_z0_qualCuts;
+
+  h_trk_z0_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_z0_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_z0_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_z0_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_z0_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_z0_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_z0_fake_qualCuts->Scale(1./h_trk_z0_fake_qualCuts->Integral());
+  h_trk_z0_fake_qualCuts->SetLineColor(2);
+  h_trk_z0_fake_qualCuts->SetMarkerColor(2);
+  h_trk_z0_PU_qualCuts->Scale(1./h_trk_z0_PU_qualCuts->Integral());
+  h_trk_z0_PU_qualCuts->SetLineColor(3);
+  h_trk_z0_PU_qualCuts->SetMarkerColor(3);
+  h_trk_z0_notHiggs_qualCuts->Scale(1./h_trk_z0_notHiggs_qualCuts->Integral());
+  h_trk_z0_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_z0_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_z0_fake_qualCuts->Draw("HIST");
+  h_trk_z0_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_z0_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_z0_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_z0_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_z0_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_qualCuts.jpeg");
+  delete h_trk_z0_primary_qualCuts;
+  delete h_trk_z0_fake_qualCuts;
+  delete h_trk_z0_PU_qualCuts;
+  delete h_trk_z0_notHiggs_qualCuts;
+
+  h_trk_phi->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi->GetXaxis()->SetRange(1, h_trk_phi->GetNbinsX() + 2);
+  h_trk_phi->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_phi->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_phi->GetName() + ".jpeg");
+  delete h_trk_phi;
+
+  h_trk_phi_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_primary->GetXaxis()->SetRange(1, h_trk_phi_primary->GetNbinsX() + 2);
+  h_trk_phi_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_phi_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_phi_primary->GetName() + ".jpeg");
+  delete h_trk_phi_primary;
+
+  h_trk_phi_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_primary_noCuts->GetXaxis()->SetRange(1, h_trk_phi_primary_noCuts->GetNbinsX() + 2);
+  h_trk_phi_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_phi_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_phi_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_phi_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_np->GetXaxis()->SetRange(1, h_trk_phi_np->GetNbinsX() + 2);
+  h_trk_phi_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_phi_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_phi_np->GetName() + ".jpeg");
+  delete h_trk_phi_np;
+
+  h_trk_phi_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_np_noCuts->GetXaxis()->SetRange(1, h_trk_phi_np_noCuts->GetNbinsX() + 2);
+  h_trk_phi_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_phi_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_phi_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_phi_primary_noCuts->Scale(1./h_trk_phi_primary_noCuts->Integral());
+  h_trk_phi_primary_noCuts->SetLineColor(1);
+  h_trk_phi_primary_noCuts->SetMarkerColor(1);
+  h_trk_phi_primary_noCuts->Draw("HIST");
+  TH1F *h_trk_phi_np_noCutsNorm = (TH1F*)h_trk_phi_np_noCuts->Clone(); 
+  h_trk_phi_np_noCutsNorm->Scale(1./h_trk_phi_np_noCutsNorm->Integral());
+  h_trk_phi_np_noCutsNorm->SetLineColor(2);
+  h_trk_phi_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_phi_np_noCutsNorm->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts.jpeg");
+  delete h_trk_phi_np_noCutsNorm;
+
+  TH1F *h_trk_phi_fake_noCutsNorm = (TH1F*)h_trk_phi_fake_noCuts->Clone(); 
+  h_trk_phi_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_phi_PU_noCutsNorm = (TH1F*)h_trk_phi_PU_noCuts->Clone(); 
+  h_trk_phi_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_phi_notHiggs_noCutsNorm = (TH1F*)h_trk_phi_notHiggs_noCuts->Clone(); 
+  h_trk_phi_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_phi_fake_noCutsNorm->Scale(1./h_trk_phi_np_noCuts->Integral());
+  h_trk_phi_fake_noCutsNorm->SetLineColor(2);
+  h_trk_phi_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_phi_PU_noCutsNorm->Scale(1./h_trk_phi_np_noCuts->Integral());
+  h_trk_phi_PU_noCutsNorm->SetLineColor(3);
+  h_trk_phi_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_phi_notHiggs_noCutsNorm->Scale(1./h_trk_phi_np_noCuts->Integral());
+  h_trk_phi_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_phi_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_phi_noCuts = new THStack("hs_phi_noCuts","Stacked BG histograms");
+  hs_phi_noCuts->Add(h_trk_phi_fake_noCutsNorm);
+  hs_phi_noCuts->Add(h_trk_phi_PU_noCutsNorm);
+  hs_phi_noCuts->Add(h_trk_phi_notHiggs_noCutsNorm);
+  hs_phi_noCuts->Draw("HIST");
+  h_trk_phi_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_phi_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_phi_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_noCutsNorm.jpeg");
+  delete h_trk_phi_fake_noCutsNorm;
+  delete h_trk_phi_PU_noCutsNorm;
+  delete h_trk_phi_notHiggs_noCutsNorm;
+  delete h_trk_phi_np_noCuts;
+  delete hs_phi_noCuts;
+
+  h_trk_phi_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_fake_noCuts->GetXaxis()->SetRange(1, h_trk_phi_fake_noCuts->GetNbinsX() + 2);
+  h_trk_phi_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_PU_noCuts->GetXaxis()->SetRange(1, h_trk_phi_PU_noCuts->GetNbinsX() + 2);
+  h_trk_phi_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_phi_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_phi_fake_noCuts->Scale(1./h_trk_phi_fake_noCuts->Integral());
+  h_trk_phi_fake_noCuts->SetLineColor(2);
+  h_trk_phi_fake_noCuts->SetMarkerColor(2);
+  h_trk_phi_PU_noCuts->Scale(1./h_trk_phi_PU_noCuts->Integral());
+  h_trk_phi_PU_noCuts->SetLineColor(3);
+  h_trk_phi_PU_noCuts->SetMarkerColor(3);
+  h_trk_phi_notHiggs_noCuts->Scale(1./h_trk_phi_notHiggs_noCuts->Integral());
+  h_trk_phi_notHiggs_noCuts->SetLineColor(4);
+  h_trk_phi_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_phi_fake_noCuts->Draw("HIST");
+  h_trk_phi_primary_noCuts->Draw("HIST,SAME");
+  h_trk_phi_PU_noCuts->Draw("HIST,SAME");
+  h_trk_phi_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_phi_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_phi_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_noCuts.jpeg");
+  delete h_trk_phi_primary_noCuts;
+  delete h_trk_phi_fake_noCuts;
+  delete h_trk_phi_PU_noCuts;
+  delete h_trk_phi_notHiggs_noCuts;
+
+  h_trk_phi_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_phi_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_phi_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_phi_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_phi_primary_noCuts_H->Scale(1./h_trk_phi_primary_noCuts_H->Integral());
+  h_trk_phi_primary_noCuts_H->SetLineColor(1);
+  h_trk_phi_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_phi_np_noCuts_H->Scale(1./h_trk_phi_np_noCuts_H->Integral());
+  h_trk_phi_np_noCuts_H->SetLineColor(2);
+  h_trk_phi_np_noCuts_H->SetMarkerColor(2);
+  h_trk_phi_np_noCuts_H->Draw("HIST");
+  h_trk_phi_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_phi_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts_H.jpeg");
+  delete h_trk_phi_primary_noCuts_H;
+  delete h_trk_phi_np_noCuts_H;
+
+  h_trk_phi_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_phi_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_phi_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_phi_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_phi_primary_noCuts_L->Scale(1./h_trk_phi_primary_noCuts_L->Integral());
+  h_trk_phi_primary_noCuts_L->SetLineColor(1);
+  h_trk_phi_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_phi_np_noCuts_L->Scale(1./h_trk_phi_np_noCuts_L->Integral());
+  h_trk_phi_np_noCuts_L->SetLineColor(2);
+  h_trk_phi_np_noCuts_L->SetMarkerColor(2);
+  h_trk_phi_np_noCuts_L->Draw("HIST");
+  h_trk_phi_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_phi_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts_L.jpeg");
+  delete h_trk_phi_primary_noCuts_L;
+  delete h_trk_phi_np_noCuts_L;
+
+  h_trk_phi_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_phi_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_phi_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_np_qualCuts->GetXaxis()->SetRange(1, h_trk_phi_np_qualCuts->GetNbinsX() + 2);
+  h_trk_phi_primary_qualCuts->Scale(1./h_trk_phi_primary_qualCuts->Integral());
+  h_trk_phi_primary_qualCuts->SetLineColor(1);
+  h_trk_phi_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_phi_np_qualCutsNorm = (TH1F*)h_trk_phi_np_qualCuts->Clone(); 
+  h_trk_phi_np_qualCutsNorm->Scale(1./h_trk_phi_np_qualCutsNorm->Integral());
+  h_trk_phi_np_qualCutsNorm->SetLineColor(2);
+  h_trk_phi_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_phi_np_qualCutsNorm->Draw("HIST");
+  h_trk_phi_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_phi_qualCuts.jpeg");
+  delete h_trk_phi_np_qualCutsNorm;
+
+  TH1F *h_trk_phi_fake_qualCutsNorm = (TH1F*)h_trk_phi_fake_qualCuts->Clone(); 
+  h_trk_phi_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_phi_PU_qualCutsNorm = (TH1F*)h_trk_phi_PU_qualCuts->Clone(); 
+  h_trk_phi_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_phi_notHiggs_qualCutsNorm = (TH1F*)h_trk_phi_notHiggs_qualCuts->Clone(); 
+  h_trk_phi_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_phi_fake_qualCutsNorm->Scale(1./h_trk_phi_np_qualCuts->Integral());
+  h_trk_phi_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_phi_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_phi_PU_qualCutsNorm->Scale(1./h_trk_phi_np_qualCuts->Integral());
+  h_trk_phi_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_phi_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_phi_notHiggs_qualCutsNorm->Scale(1./h_trk_phi_np_qualCuts->Integral());
+  h_trk_phi_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_phi_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_phi_qualCuts = new THStack("hs_phi_qualCuts","Stacked BG histograms");
+  hs_phi_qualCuts->Add(h_trk_phi_fake_qualCutsNorm);
+  hs_phi_qualCuts->Add(h_trk_phi_PU_qualCutsNorm);
+  hs_phi_qualCuts->Add(h_trk_phi_notHiggs_qualCutsNorm);
+  hs_phi_qualCuts->Draw("HIST");
+  h_trk_phi_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_phi_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_phi_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_qualCutsNorm.jpeg");
+  delete h_trk_phi_fake_qualCutsNorm;
+  delete h_trk_phi_PU_qualCutsNorm;
+  delete h_trk_phi_notHiggs_qualCutsNorm;
+  delete h_trk_phi_np_qualCuts;
+  delete hs_phi_qualCuts;
+
+  h_trk_phi_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_phi_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_phi_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_phi_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_phi_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_phi_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_phi_fake_qualCuts->Scale(1./h_trk_phi_fake_qualCuts->Integral());
+  h_trk_phi_fake_qualCuts->SetLineColor(2);
+  h_trk_phi_fake_qualCuts->SetMarkerColor(2);
+  h_trk_phi_PU_qualCuts->Scale(1./h_trk_phi_PU_qualCuts->Integral());
+  h_trk_phi_PU_qualCuts->SetLineColor(3);
+  h_trk_phi_PU_qualCuts->SetMarkerColor(3);
+  h_trk_phi_notHiggs_qualCuts->Scale(1./h_trk_phi_notHiggs_qualCuts->Integral());
+  h_trk_phi_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_phi_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_phi_fake_qualCuts->Draw("HIST");
+  h_trk_phi_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_phi_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_phi_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_phi_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_phi_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_qualCuts.jpeg");
+  delete h_trk_phi_primary_qualCuts;
+  delete h_trk_phi_fake_qualCuts;
+  delete h_trk_phi_PU_qualCuts;
+  delete h_trk_phi_notHiggs_qualCuts;
+
+  h_trk_sectorPhi->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi->GetXaxis()->SetRange(1, h_trk_sectorPhi->GetNbinsX() + 2);
+  h_trk_sectorPhi->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_sectorPhi->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_sectorPhi->GetName() + ".jpeg");
+  delete h_trk_sectorPhi;
+
+  h_trk_sectorPhi_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_primary->GetXaxis()->SetRange(1, h_trk_sectorPhi_primary->GetNbinsX() + 2);
+  h_trk_sectorPhi_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_sectorPhi_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_primary->GetName() + ".jpeg");
+  delete h_trk_sectorPhi_primary;
+
+  h_trk_sectorPhi_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_primary_noCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_primary_noCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_sectorPhi_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_sectorPhi_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_np->GetXaxis()->SetRange(1, h_trk_sectorPhi_np->GetNbinsX() + 2);
+  h_trk_sectorPhi_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_sectorPhi_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_np->GetName() + ".jpeg");
+  delete h_trk_sectorPhi_np;
+
+  h_trk_sectorPhi_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_np_noCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_np_noCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_sectorPhi_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_sectorPhi_primary_noCuts->Scale(1./h_trk_sectorPhi_primary_noCuts->Integral());
+  h_trk_sectorPhi_primary_noCuts->SetLineColor(1);
+  h_trk_sectorPhi_primary_noCuts->SetMarkerColor(1);
+  h_trk_sectorPhi_primary_noCuts->Draw("HIST");
+  TH1F *h_trk_sectorPhi_np_noCutsNorm = (TH1F*)h_trk_sectorPhi_np_noCuts->Clone();
+  h_trk_sectorPhi_np_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCutsNorm->Integral());
+  h_trk_sectorPhi_np_noCutsNorm->SetLineColor(2);
+  h_trk_sectorPhi_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_sectorPhi_np_noCutsNorm->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts.jpeg");
+  delete h_trk_sectorPhi_np_noCutsNorm;
+
+  TH1F *h_trk_sectorPhi_fake_noCutsNorm = (TH1F*)h_trk_sectorPhi_fake_noCuts->Clone(); 
+  h_trk_sectorPhi_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_sectorPhi_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_sectorPhi_PU_noCutsNorm = (TH1F*)h_trk_sectorPhi_PU_noCuts->Clone(); 
+  h_trk_sectorPhi_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_sectorPhi_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_sectorPhi_notHiggs_noCutsNorm = (TH1F*)h_trk_sectorPhi_notHiggs_noCuts->Clone(); 
+  h_trk_sectorPhi_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_sectorPhi_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_sectorPhi_fake_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCuts->Integral());
+  h_trk_sectorPhi_fake_noCutsNorm->SetLineColor(2);
+  h_trk_sectorPhi_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_sectorPhi_PU_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCuts->Integral());
+  h_trk_sectorPhi_PU_noCutsNorm->SetLineColor(3);
+  h_trk_sectorPhi_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_sectorPhi_notHiggs_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCuts->Integral());
+  h_trk_sectorPhi_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_sectorPhi_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_sectorPhi_noCuts = new THStack("hs_sectorPhi_noCuts","Stacked BG histograms");
+  hs_sectorPhi_noCuts->Add(h_trk_sectorPhi_fake_noCutsNorm);
+  hs_sectorPhi_noCuts->Add(h_trk_sectorPhi_PU_noCutsNorm);
+  hs_sectorPhi_noCuts->Add(h_trk_sectorPhi_notHiggs_noCutsNorm);
+  hs_sectorPhi_noCuts->Draw("HIST");
+  h_trk_sectorPhi_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_sectorPhi_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_sectorPhi_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_noCutsNorm.jpeg");
+  delete h_trk_sectorPhi_fake_noCutsNorm;
+  delete h_trk_sectorPhi_PU_noCutsNorm;
+  delete h_trk_sectorPhi_notHiggs_noCutsNorm;
+  delete h_trk_sectorPhi_np_noCuts;
+  delete hs_sectorPhi_noCuts;
+
+  h_trk_sectorPhi_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_fake_noCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_fake_noCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_PU_noCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_PU_noCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_fake_noCuts->Scale(1./h_trk_sectorPhi_fake_noCuts->Integral());
+  h_trk_sectorPhi_fake_noCuts->SetLineColor(2);
+  h_trk_sectorPhi_fake_noCuts->SetMarkerColor(2);
+  h_trk_sectorPhi_PU_noCuts->Scale(1./h_trk_sectorPhi_PU_noCuts->Integral());
+  h_trk_sectorPhi_PU_noCuts->SetLineColor(3);
+  h_trk_sectorPhi_PU_noCuts->SetMarkerColor(3);
+  h_trk_sectorPhi_notHiggs_noCuts->Scale(1./h_trk_sectorPhi_notHiggs_noCuts->Integral());
+  h_trk_sectorPhi_notHiggs_noCuts->SetLineColor(4);
+  h_trk_sectorPhi_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_sectorPhi_fake_noCuts->Draw("HIST");
+  h_trk_sectorPhi_primary_noCuts->Draw("HIST,SAME");
+  h_trk_sectorPhi_PU_noCuts->Draw("HIST,SAME");
+  h_trk_sectorPhi_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_sectorPhi_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_sectorPhi_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_noCuts.jpeg");
+  delete h_trk_sectorPhi_primary_noCuts;
+  delete h_trk_sectorPhi_fake_noCuts;
+  delete h_trk_sectorPhi_PU_noCuts;
+  delete h_trk_sectorPhi_notHiggs_noCuts;
+
+  h_trk_sectorPhi_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_sectorPhi_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_sectorPhi_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_sectorPhi_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_sectorPhi_primary_noCuts_H->Scale(1./h_trk_sectorPhi_primary_noCuts_H->Integral());
+  h_trk_sectorPhi_primary_noCuts_H->SetLineColor(1);
+  h_trk_sectorPhi_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_sectorPhi_np_noCuts_H->Scale(1./h_trk_sectorPhi_np_noCuts_H->Integral());
+  h_trk_sectorPhi_np_noCuts_H->SetLineColor(2);
+  h_trk_sectorPhi_np_noCuts_H->SetMarkerColor(2);
+  h_trk_sectorPhi_np_noCuts_H->Draw("HIST");
+  h_trk_sectorPhi_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts_H.jpeg");
+  delete h_trk_sectorPhi_primary_noCuts_H;
+  delete h_trk_sectorPhi_np_noCuts_H;
+
+  h_trk_sectorPhi_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_sectorPhi_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_sectorPhi_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_sectorPhi_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_sectorPhi_primary_noCuts_L->Scale(1./h_trk_sectorPhi_primary_noCuts_L->Integral());
+  h_trk_sectorPhi_primary_noCuts_L->SetLineColor(1);
+  h_trk_sectorPhi_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_sectorPhi_np_noCuts_L->Scale(1./h_trk_sectorPhi_np_noCuts_L->Integral());
+  h_trk_sectorPhi_np_noCuts_L->SetLineColor(2);
+  h_trk_sectorPhi_np_noCuts_L->SetMarkerColor(2);
+  h_trk_sectorPhi_np_noCuts_L->Draw("HIST");
+  h_trk_sectorPhi_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts_L.jpeg");
+  delete h_trk_sectorPhi_primary_noCuts_L;
+  delete h_trk_sectorPhi_np_noCuts_L;
+
+  h_trk_sectorPhi_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_np_qualCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_np_qualCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_primary_qualCuts->Scale(1./h_trk_sectorPhi_primary_qualCuts->Integral());
+  h_trk_sectorPhi_primary_qualCuts->SetLineColor(1);
+  h_trk_sectorPhi_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_sectorPhi_np_qualCutsNorm = (TH1F*)h_trk_sectorPhi_np_qualCuts->Clone(); 
+  h_trk_sectorPhi_np_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCutsNorm->Integral());
+  h_trk_sectorPhi_np_qualCutsNorm->SetLineColor(2);
+  h_trk_sectorPhi_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_sectorPhi_np_qualCutsNorm->Draw("HIST");
+  h_trk_sectorPhi_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_qualCuts.jpeg");
+  delete h_trk_sectorPhi_np_qualCutsNorm;
+
+  TH1F *h_trk_sectorPhi_fake_qualCutsNorm = (TH1F*)h_trk_sectorPhi_fake_qualCuts->Clone(); 
+  h_trk_sectorPhi_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_sectorPhi_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_sectorPhi_PU_qualCutsNorm = (TH1F*)h_trk_sectorPhi_PU_qualCuts->Clone(); 
+  h_trk_sectorPhi_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_sectorPhi_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_sectorPhi_notHiggs_qualCutsNorm = (TH1F*)h_trk_sectorPhi_notHiggs_qualCuts->Clone(); 
+  h_trk_sectorPhi_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_sectorPhi_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_sectorPhi_fake_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCuts->Integral());
+  h_trk_sectorPhi_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_sectorPhi_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_sectorPhi_PU_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCuts->Integral());
+  h_trk_sectorPhi_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_sectorPhi_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_sectorPhi_notHiggs_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCuts->Integral());
+  h_trk_sectorPhi_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_sectorPhi_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_sectorPhi_qualCuts = new THStack("hs_sectorPhi_qualCuts","Stacked BG histograms");
+  hs_sectorPhi_qualCuts->Add(h_trk_sectorPhi_fake_qualCutsNorm);
+  hs_sectorPhi_qualCuts->Add(h_trk_sectorPhi_PU_qualCutsNorm);
+  hs_sectorPhi_qualCuts->Add(h_trk_sectorPhi_notHiggs_qualCutsNorm);
+  hs_sectorPhi_qualCuts->Draw("HIST");
+  h_trk_sectorPhi_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_sectorPhi_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_sectorPhi_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_qualCutsNorm.jpeg");
+  delete h_trk_sectorPhi_fake_qualCutsNorm;
+  delete h_trk_sectorPhi_PU_qualCutsNorm;
+  delete h_trk_sectorPhi_notHiggs_qualCutsNorm;
+  delete h_trk_sectorPhi_np_qualCuts;
+  delete hs_sectorPhi_qualCuts;
+
+  h_trk_sectorPhi_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_fake_qualCuts->Scale(1./h_trk_sectorPhi_fake_qualCuts->Integral());
+  h_trk_sectorPhi_fake_qualCuts->SetLineColor(2);
+  h_trk_sectorPhi_fake_qualCuts->SetMarkerColor(2);
+  h_trk_sectorPhi_PU_qualCuts->Scale(1./h_trk_sectorPhi_PU_qualCuts->Integral());
+  h_trk_sectorPhi_PU_qualCuts->SetLineColor(3);
+  h_trk_sectorPhi_PU_qualCuts->SetMarkerColor(3);
+  h_trk_sectorPhi_notHiggs_qualCuts->Scale(1./h_trk_sectorPhi_notHiggs_qualCuts->Integral());
+  h_trk_sectorPhi_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_sectorPhi_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_sectorPhi_fake_qualCuts->Draw("HIST");
+  h_trk_sectorPhi_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_sectorPhi_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_sectorPhi_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_sectorPhi_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_sectorPhi_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_qualCuts.jpeg");
+  delete h_trk_sectorPhi_primary_qualCuts;
+  delete h_trk_sectorPhi_fake_qualCuts;
+  delete h_trk_sectorPhi_PU_qualCuts;
+  delete h_trk_sectorPhi_notHiggs_qualCuts;
+
+  h_tp_z0_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_z0_noCuts->GetXaxis()->SetRange(1, h_tp_z0_noCuts->GetNbinsX() + 2);
+  h_tp_z0_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_z0_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_z0_noCuts->GetName() + ".jpeg");
+  delete h_tp_z0_noCuts;
+   
+  h_tp_pt_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_pt_noCuts_primary->GetXaxis()->SetRange(1, h_tp_pt_noCuts_primary->GetNbinsX() + 2);
+  h_tp_pt_noCuts_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_pt_noCuts_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_pt_noCuts_primary->GetName() + ".jpeg");
+  //delete h_tp_pt_noCuts_primary;
+
+  h_tp_eta_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_eta_noCuts_primary->GetXaxis()->SetRange(1, h_tp_eta_noCuts_primary->GetNbinsX() + 2);
+  h_tp_eta_noCuts_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_eta_noCuts_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_eta_noCuts_primary->GetName() + ".jpeg");
+  delete h_tp_eta_noCuts_primary;
+
+  h_tp_d0_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_d0_noCuts_primary->GetXaxis()->SetRange(1, h_tp_d0_noCuts_primary->GetNbinsX() + 2);
+  h_tp_d0_noCuts_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_d0_noCuts_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_d0_noCuts_primary->GetName() + ".jpeg");
+  delete h_tp_d0_noCuts_primary;
+
+  h_tp_z0_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_z0_noCuts_primary->GetXaxis()->SetRange(1, h_tp_z0_noCuts_primary->GetNbinsX() + 2);
+  h_tp_z0_noCuts_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_z0_noCuts_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_z0_noCuts_primary->GetName() + ".jpeg");
+  delete h_tp_z0_noCuts_primary;
+   
+  h_tp_pt_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_pt_noCuts_PU->GetXaxis()->SetRange(1, h_tp_pt_noCuts_PU->GetNbinsX() + 2);
+  h_tp_pt_noCuts_PU->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_pt_noCuts_PU->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_pt_noCuts_PU->GetName() + ".jpeg");
+  delete h_tp_pt_noCuts_PU;
+
+  h_tp_eta_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_eta_noCuts_PU->GetXaxis()->SetRange(1, h_tp_eta_noCuts_PU->GetNbinsX() + 2);
+  h_tp_eta_noCuts_PU->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_eta_noCuts_PU->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_eta_noCuts_PU->GetName() + ".jpeg");
+  delete h_tp_eta_noCuts_PU;
+
+  h_tp_d0_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_d0_noCuts_PU->GetXaxis()->SetRange(1, h_tp_d0_noCuts_PU->GetNbinsX() + 2);
+  h_tp_d0_noCuts_PU->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_d0_noCuts_PU->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_d0_noCuts_PU->GetName() + ".jpeg");
+  delete h_tp_d0_noCuts_PU;
+
+  h_tp_z0_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_z0_noCuts_PU->GetXaxis()->SetRange(1, h_tp_z0_noCuts_PU->GetNbinsX() + 2);
+  h_tp_z0_noCuts_PU->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_z0_noCuts_PU->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_z0_noCuts_PU->GetName() + ".jpeg");
+  delete h_tp_z0_noCuts_PU;
+   
+  h_numSelectedTrks->GetYaxis()->SetNoExponent(kTRUE);
+  h_numSelectedTrks->GetXaxis()->SetRange(1, h_numSelectedTrks->GetNbinsX() + 2);
+  h_numSelectedTrks->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_numSelectedTrks->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_numSelectedTrks->GetName() + ".jpeg");
+  delete h_numSelectedTrks;
+
+  h_trk_H_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_H_T->GetXaxis()->SetRange(1, h_trk_H_T->GetNbinsX() + 2);
+  h_trk_H_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_H_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_H_T->GetName() + ".jpeg");
+  delete h_trk_H_T;
+
+  h_trk_oneMatch_H_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_oneMatch_H_T->GetXaxis()->SetRange(1, h_trk_oneMatch_H_T->GetNbinsX() + 2);
+  h_trk_oneMatch_H_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_oneMatch_H_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_oneMatch_H_T->GetName() + ".jpeg");
+  delete h_trk_oneMatch_H_T;
+
+  h_trk_oneVert_H_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_oneVert_H_T->GetXaxis()->SetRange(1, h_trk_oneVert_H_T->GetNbinsX() + 2);
+  h_trk_oneVert_H_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_oneVert_H_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_oneVert_H_T->GetName() + ".jpeg");
+  delete h_trk_oneVert_H_T;
+
+  h_trk_MET->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MET->GetXaxis()->SetRange(1, h_trk_MET->GetNbinsX() + 2);
+  h_trk_MET->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_MET->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_MET->GetName() + ".jpeg");
+  delete h_trk_MET;
+
+  h_trk_oneMatch_MET->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_oneMatch_MET->GetXaxis()->SetRange(1, h_trk_oneMatch_MET->GetNbinsX() + 2);
+  h_trk_oneMatch_MET->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_oneMatch_MET->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_oneMatch_MET->GetName() + ".jpeg");
+  delete h_trk_oneMatch_MET;
+
+  h_trk_oneVert_MET->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_oneVert_MET->GetXaxis()->SetRange(1, h_trk_oneVert_MET->GetNbinsX() + 2);
+  h_trk_oneVert_MET->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_oneVert_MET->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_oneVert_MET->GetName() + ".jpeg");
+  delete h_trk_oneVert_MET;
+
+  h_tp_H_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_H_T->GetXaxis()->SetRange(1, h_tp_H_T->GetNbinsX() + 2);
+  h_tp_H_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_H_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_H_T->GetName() + ".jpeg");
+  delete h_tp_H_T;
+
+  h_tp_MET->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_MET->GetXaxis()->SetRange(1, h_tp_MET->GetNbinsX() + 2);
+  h_tp_MET->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_MET->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_MET->GetName() + ".jpeg");
+  delete h_tp_MET;
+
+  h_trk_pt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt->GetXaxis()->SetRange(1, h_trk_pt->GetNbinsX() + 2);
+  h_trk_pt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt->GetName() + ".jpeg");
+  delete h_trk_pt;
+
+  h_trk_pt_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary->GetXaxis()->SetRange(1, h_trk_pt_primary->GetNbinsX() + 2);
+  h_trk_pt_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt_primary->GetName() + ".jpeg");
+
+  h_trk_pt_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_noCuts->GetXaxis()->SetRange(1, h_trk_pt_primary_noCuts->GetNbinsX() + 2);
+  h_trk_pt_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_pt_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_allCuts->GetXaxis()->SetRange(1, h_trk_pt_primary_allCuts->GetNbinsX() + 2);
+  h_trk_pt_primary_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt_primary_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt_primary_allCuts->GetName() + ".jpeg");
+
+  h_trk_pt_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np->GetXaxis()->SetRange(1, h_trk_pt_np->GetNbinsX() + 2);
+  h_trk_pt_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt_np->GetName() + ".jpeg");
+
+  h_trk_pt_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_noCuts->GetXaxis()->SetRange(1, h_trk_pt_np_noCuts->GetNbinsX() + 2);
+  h_trk_pt_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_pt_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_allCuts->GetXaxis()->SetRange(1, h_trk_pt_np_allCuts->GetNbinsX() + 2);
+  h_trk_pt_np_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_pt_np_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_pt_np_allCuts->GetName() + ".jpeg");
+
+  TH1F *h_trk_pt_primary_noCutsNorm = (TH1F*)h_trk_pt_primary_noCuts->Clone(); 
+  h_trk_pt_primary_noCutsNorm->Scale(1./h_trk_pt_primary_noCutsNorm->Integral());
+  h_trk_pt_primary_noCutsNorm->SetLineColor(1);
+  h_trk_pt_primary_noCutsNorm->SetMarkerColor(1);
+  TH1F *h_trk_pt_np_noCutsNorm = (TH1F*)h_trk_pt_np_noCuts->Clone(); 
+  h_trk_pt_np_noCutsNorm->Scale(1./h_trk_pt_np_noCutsNorm->Integral());
+  h_trk_pt_np_noCutsNorm->SetLineColor(2);
+  h_trk_pt_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_pt_np_noCutsNorm->Draw("HIST");
+  h_trk_pt_primary_noCutsNorm->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_noCutsNorm,"Primary","l");
+  l->AddEntry(h_trk_pt_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_pt_noCuts.jpeg");
+  delete h_trk_pt_np_noCutsNorm;
+
+  TH1F *h_trk_pt_fake_noCutsNorm = (TH1F*)h_trk_pt_fake_noCuts->Clone(); 
+  h_trk_pt_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_pt_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_pt_PU_noCutsNorm = (TH1F*)h_trk_pt_PU_noCuts->Clone(); 
+  h_trk_pt_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_pt_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_pt_notHiggs_noCutsNorm = (TH1F*)h_trk_pt_notHiggs_noCuts->Clone(); 
+  h_trk_pt_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_pt_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_pt_fake_noCutsNorm->Scale(1./h_trk_pt_np_noCuts->Integral());
+  h_trk_pt_fake_noCutsNorm->SetLineColor(2);
+  h_trk_pt_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_pt_PU_noCutsNorm->Scale(1./h_trk_pt_np_noCuts->Integral());
+  h_trk_pt_PU_noCutsNorm->SetLineColor(3);
+  h_trk_pt_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_pt_notHiggs_noCutsNorm->Scale(1./h_trk_pt_np_noCuts->Integral());
+  h_trk_pt_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_pt_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_pt_noCuts = new THStack("hs_pt_noCuts","Stacked BG histograms");
+  hs_pt_noCuts->Add(h_trk_pt_fake_noCutsNorm);
+  hs_pt_noCuts->Add(h_trk_pt_PU_noCutsNorm);
+  hs_pt_noCuts->Add(h_trk_pt_notHiggs_noCutsNorm);
+  hs_pt_noCuts->Draw("HIST");
+  h_trk_pt_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_pt_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_pt_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_pt_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_noCutsNorm.jpeg");
+  delete h_trk_pt_fake_noCutsNorm;
+  delete h_trk_pt_PU_noCutsNorm;
+  delete h_trk_pt_notHiggs_noCutsNorm;
+  delete hs_pt_noCuts;
+
+  h_trk_pt_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_fake_noCuts->GetXaxis()->SetRange(1, h_trk_pt_fake_noCuts->GetNbinsX() + 2);
+  h_trk_pt_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_PU_noCuts->GetXaxis()->SetRange(1, h_trk_pt_PU_noCuts->GetNbinsX() + 2);
+  h_trk_pt_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_pt_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_pt_fake_noCuts->Scale(1./h_trk_pt_fake_noCuts->Integral());
+  h_trk_pt_fake_noCuts->SetLineColor(2);
+  h_trk_pt_fake_noCuts->SetMarkerColor(2);
+  h_trk_pt_PU_noCuts->Scale(1./h_trk_pt_PU_noCuts->Integral());
+  h_trk_pt_PU_noCuts->SetLineColor(3);
+  h_trk_pt_PU_noCuts->SetMarkerColor(3);
+  h_trk_pt_notHiggs_noCuts->Scale(1./h_trk_pt_notHiggs_noCuts->Integral());
+  h_trk_pt_notHiggs_noCuts->SetLineColor(4);
+  h_trk_pt_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_pt_fake_noCuts->Draw("HIST");
+  h_trk_pt_primary_noCuts->Draw("HIST,SAME");
+  h_trk_pt_PU_noCuts->Draw("HIST,SAME");
+  h_trk_pt_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_pt_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_pt_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_pt_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_noCuts.jpeg");
+  delete h_trk_pt_fake_noCuts;
+  delete h_trk_pt_PU_noCuts;
+  delete h_trk_pt_notHiggs_noCuts;
+
+  h_trk_pt_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_np_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_primary_qualCuts->Scale(1./h_trk_pt_primary_qualCuts->Integral());
+  h_trk_pt_primary_qualCuts->SetLineColor(1);
+  h_trk_pt_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_pt_np_qualCutsNorm = (TH1F*)h_trk_pt_np_qualCuts->Clone(); 
+  h_trk_pt_np_qualCutsNorm->Scale(1./h_trk_pt_np_qualCutsNorm->Integral());
+  h_trk_pt_np_qualCutsNorm->SetLineColor(2);
+  h_trk_pt_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_pt_np_qualCutsNorm->Draw("HIST");
+  h_trk_pt_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_pt_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_pt_qualCuts.jpeg");
+  delete h_trk_pt_np_qualCutsNorm;
+
+  TH1F *h_trk_pt_fake_qualCutsNorm = (TH1F*)h_trk_pt_fake_qualCuts->Clone(); 
+  h_trk_pt_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_pt_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_pt_PU_qualCutsNorm = (TH1F*)h_trk_pt_PU_qualCuts->Clone(); 
+  h_trk_pt_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_pt_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_pt_notHiggs_qualCutsNorm = (TH1F*)h_trk_pt_notHiggs_qualCuts->Clone(); 
+  h_trk_pt_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_pt_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_pt_fake_qualCutsNorm->Scale(1./h_trk_pt_np_qualCuts->Integral());
+  h_trk_pt_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_pt_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_pt_PU_qualCutsNorm->Scale(1./h_trk_pt_np_qualCuts->Integral());
+  h_trk_pt_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_pt_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_pt_notHiggs_qualCutsNorm->Scale(1./h_trk_pt_np_qualCuts->Integral());
+  h_trk_pt_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_pt_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_pt_qualCuts = new THStack("hs_pt_qualCuts","Stacked BG histograms");
+  hs_pt_qualCuts->Add(h_trk_pt_fake_qualCutsNorm);
+  hs_pt_qualCuts->Add(h_trk_pt_PU_qualCutsNorm);
+  hs_pt_qualCuts->Add(h_trk_pt_notHiggs_qualCutsNorm);
+  hs_pt_qualCuts->Draw("HIST");
+  h_trk_pt_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_pt_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_pt_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_pt_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_qualCutsNorm.jpeg");
+  delete h_trk_pt_fake_qualCutsNorm;
+  delete h_trk_pt_PU_qualCutsNorm;
+  delete h_trk_pt_notHiggs_qualCutsNorm;
+  delete h_trk_pt_np_qualCuts;
+  delete hs_pt_qualCuts;
+
+  h_trk_pt_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_pt_fake_qualCuts->Scale(1./h_trk_pt_fake_qualCuts->Integral());
+  h_trk_pt_fake_qualCuts->SetLineColor(2);
+  h_trk_pt_fake_qualCuts->SetMarkerColor(2);
+  h_trk_pt_PU_qualCuts->Scale(1./h_trk_pt_PU_qualCuts->Integral());
+  h_trk_pt_PU_qualCuts->SetLineColor(3);
+  h_trk_pt_PU_qualCuts->SetMarkerColor(3);
+  h_trk_pt_notHiggs_qualCuts->Scale(1./h_trk_pt_notHiggs_qualCuts->Integral());
+  h_trk_pt_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_pt_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_pt_fake_qualCuts->Draw("HIST");
+  h_trk_pt_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_pt_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_pt_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_pt_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_pt_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_pt_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_qualCuts.jpeg");
+  delete h_trk_pt_primary_qualCuts;
+  delete h_trk_pt_fake_qualCuts;
+  delete h_trk_pt_PU_qualCuts;
+  delete h_trk_pt_notHiggs_qualCuts;
+  
+  h_trk_pt_primary_ptCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_ptCuts->GetXaxis()->SetRange(1, h_trk_pt_primary_ptCuts->GetNbinsX() + 2);
+  h_trk_pt_primary_d0Cuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_d0Cuts->GetXaxis()->SetRange(1, h_trk_pt_primary_d0Cuts->GetNbinsX() + 2);
+  h_trk_pt_primary_chi2rzdofCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_chi2rzdofCuts->GetXaxis()->SetRange(1, h_trk_pt_primary_chi2rzdofCuts->GetNbinsX() + 2);
+  h_trk_pt_primary_bendchi2Cuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_bendchi2Cuts->GetXaxis()->SetRange(1, h_trk_pt_primary_bendchi2Cuts->GetNbinsX() + 2);
+  h_trk_pt_primary_chi2rphidofCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_chi2rphidofCuts->GetXaxis()->SetRange(1, h_trk_pt_primary_chi2rphidofCuts->GetNbinsX() + 2);
+  h_trk_pt_primary_z0Cuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_primary_z0Cuts->GetXaxis()->SetRange(1, h_trk_pt_primary_z0Cuts->GetNbinsX() + 2);
+  h_trk_pt_primary->SetName("trkEff_pt_primary");
+  h_trk_pt_primary->GetXaxis()->SetTitle("Track p_{T} (GeV)");
+  h_trk_pt_primary->GetYaxis()->SetTitle("Cut Efficiency");
+  h_trk_pt_primary->Divide(h_trk_pt_primary,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary->SetLineColor(1);
+  h_trk_pt_primary->SetMarkerColor(1);
+  h_trk_pt_primary->Draw();
+  h_trk_pt_primary_ptCuts->Divide(h_trk_pt_primary_ptCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_ptCuts->SetLineColor(2);
+  h_trk_pt_primary_ptCuts->SetMarkerColor(2);
+  h_trk_pt_primary_ptCuts->Draw("SAME");
+  h_trk_pt_primary_d0Cuts->Divide(h_trk_pt_primary_d0Cuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_d0Cuts->SetLineColor(3);
+  h_trk_pt_primary_d0Cuts->SetMarkerColor(3);
+  h_trk_pt_primary_d0Cuts->Draw("SAME");
+  h_trk_pt_primary_chi2rzdofCuts->Divide(h_trk_pt_primary_chi2rzdofCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_chi2rzdofCuts->SetLineColor(4);
+  h_trk_pt_primary_chi2rzdofCuts->SetMarkerColor(4);
+  h_trk_pt_primary_chi2rzdofCuts->Draw("SAME");
+  h_trk_pt_primary_bendchi2Cuts->Divide(h_trk_pt_primary_bendchi2Cuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_bendchi2Cuts->SetLineColor(5);
+  h_trk_pt_primary_bendchi2Cuts->SetMarkerColor(5);
+  h_trk_pt_primary_bendchi2Cuts->Draw("SAME");
+  h_trk_pt_primary_chi2rphidofCuts->Divide(h_trk_pt_primary_chi2rphidofCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_chi2rphidofCuts->SetLineColor(6);
+  h_trk_pt_primary_chi2rphidofCuts->SetMarkerColor(6);
+  h_trk_pt_primary_chi2rphidofCuts->Draw("SAME");
+  h_trk_pt_primary_z0Cuts->Divide(h_trk_pt_primary_z0Cuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_z0Cuts->SetLineColor(7);
+  h_trk_pt_primary_z0Cuts->SetMarkerColor(7);
+  h_trk_pt_primary_z0Cuts->Draw("SAME");
+  TH1F *h_trk_pt_primary_allCutsEff = (TH1F*)h_trk_pt_primary_allCuts->Clone(); 
+  h_trk_pt_primary_allCutsEff->Divide(h_trk_pt_primary_allCutsEff,h_trk_pt_primary_noCuts,1.0,1.0,"B");
+  h_trk_pt_primary_allCutsEff->SetLineColor(8);
+  h_trk_pt_primary_allCutsEff->SetMarkerColor(8);
+  h_trk_pt_primary_allCutsEff->Draw("SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary,"#eta Cut","lp");
+  l->AddEntry(h_trk_pt_primary_ptCuts,"p_{T} Cut","lp");
+  l->AddEntry(h_trk_pt_primary_d0Cuts,"d_{0} Cut","lp");
+  l->AddEntry(h_trk_pt_primary_chi2rzdofCuts,"#chi^{2}_{rz}/d.o.f Cut","lp");
+  l->AddEntry(h_trk_pt_primary_bendchi2Cuts,"#chi^{2}_{bend} Cut","lp");
+  l->AddEntry(h_trk_pt_primary_chi2rphidofCuts,"#chi^{2}_{r#phi}/d.o.f Cut","lp");
+  l->AddEntry(h_trk_pt_primary_z0Cuts,"z_{0} Cut","lp");
+  l->AddEntry(h_trk_pt_primary_allCutsEff,"All Cuts","lp");
+  l->Draw();
+  c.SaveAs(DIR + "/h_trkEffOverlay_pt_primary.jpeg");
+  delete h_trk_pt_primary;
+  delete h_trk_pt_primary_noCuts;
+  delete h_trk_pt_primary_ptCuts;
+  delete h_trk_pt_primary_d0Cuts;
+  delete h_trk_pt_primary_chi2rzdofCuts;
+  delete h_trk_pt_primary_bendchi2Cuts;
+  delete h_trk_pt_primary_chi2rphidofCuts;
+  delete h_trk_pt_primary_z0Cuts;
+  delete h_trk_pt_primary_allCutsEff;
+  
+  h_trk_pt_np_ptCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_ptCuts->GetXaxis()->SetRange(1, h_trk_pt_np_ptCuts->GetNbinsX() + 2);
+  h_trk_pt_np_d0Cuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_d0Cuts->GetXaxis()->SetRange(1, h_trk_pt_np_d0Cuts->GetNbinsX() + 2);
+  h_trk_pt_np_chi2rzdofCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_chi2rzdofCuts->GetXaxis()->SetRange(1, h_trk_pt_np_chi2rzdofCuts->GetNbinsX() + 2);
+  h_trk_pt_np_bendchi2Cuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_bendchi2Cuts->GetXaxis()->SetRange(1, h_trk_pt_np_bendchi2Cuts->GetNbinsX() + 2);
+  h_trk_pt_np_z0Cuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_np_z0Cuts->GetXaxis()->SetRange(1, h_trk_pt_np_z0Cuts->GetNbinsX() + 2);
+  h_trk_pt_np->SetName("trkEff_pt_np");
+  h_trk_pt_np->GetXaxis()->SetTitle("Track p_{T} (GeV)");
+  h_trk_pt_np->GetYaxis()->SetTitle("Cut Efficiency");
+  h_trk_pt_np->Divide(h_trk_pt_np,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np->SetLineColor(1);
+  h_trk_pt_np->SetMarkerColor(1);
+  h_trk_pt_np->Draw();
+  h_trk_pt_np_ptCuts->Divide(h_trk_pt_np_ptCuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np_ptCuts->SetLineColor(2);
+  h_trk_pt_np_ptCuts->SetMarkerColor(2);
+  h_trk_pt_np_ptCuts->Draw("SAME");
+  h_trk_pt_np_d0Cuts->Divide(h_trk_pt_np_d0Cuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np_d0Cuts->SetLineColor(3);
+  h_trk_pt_np_d0Cuts->SetMarkerColor(3);
+  h_trk_pt_np_d0Cuts->Draw("SAME");
+  h_trk_pt_np_chi2rzdofCuts->Divide(h_trk_pt_np_chi2rzdofCuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np_chi2rzdofCuts->SetLineColor(4);
+  h_trk_pt_np_chi2rzdofCuts->SetMarkerColor(4);
+  h_trk_pt_np_chi2rzdofCuts->Draw("SAME");
+  h_trk_pt_np_bendchi2Cuts->Divide(h_trk_pt_np_bendchi2Cuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np_bendchi2Cuts->SetLineColor(5);
+  h_trk_pt_np_bendchi2Cuts->SetMarkerColor(5);
+  h_trk_pt_np_bendchi2Cuts->Draw("SAME");
+  h_trk_pt_np_z0Cuts->Divide(h_trk_pt_np_z0Cuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np_z0Cuts->SetLineColor(6);
+  h_trk_pt_np_z0Cuts->SetMarkerColor(6);
+  h_trk_pt_np_z0Cuts->Draw("SAME");
+  TH1F *h_trk_pt_np_allCutsEff = (TH1F*)h_trk_pt_np_allCuts->Clone(); 
+  h_trk_pt_np_allCutsEff->Divide(h_trk_pt_np_allCutsEff,h_trk_pt_np_noCuts,1.0,1.0,"B");
+  h_trk_pt_np_allCutsEff->SetLineColor(7);
+  h_trk_pt_np_allCutsEff->SetMarkerColor(7);
+  h_trk_pt_np_allCutsEff->Draw("SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_np,"#eta Cut","lp");
+  l->AddEntry(h_trk_pt_np_ptCuts,"p_{T} Cut","lp");
+  l->AddEntry(h_trk_pt_np_d0Cuts,"d_{0} Cut","lp");
+  l->AddEntry(h_trk_pt_np_chi2rzdofCuts,"#chi^{2}_{rz}/d.o.f Cut","lp");
+  l->AddEntry(h_trk_pt_np_bendchi2Cuts,"#chi^{2}_{bend} Cut","lp");
+  l->AddEntry(h_trk_pt_np_chi2rphidofCuts,"#chi^{2}_{r#phi}/d.o.f Cut","lp");
+  l->AddEntry(h_trk_pt_np_z0Cuts,"z_{0} Cut","lp");
+  l->AddEntry(h_trk_pt_np_allCutsEff,"All Cuts","lp");
+  l->Draw();
+  c.SaveAs(DIR + "/h_trkEffOverlay_pt_np.jpeg");
+  delete h_trk_pt_np;
+  delete h_trk_pt_np_noCuts;
+  delete h_trk_pt_np_ptCuts;
+  delete h_trk_pt_np_d0Cuts;
+  delete h_trk_pt_np_chi2rzdofCuts;
+  delete h_trk_pt_np_bendchi2Cuts;
+  delete h_trk_pt_np_z0Cuts;
+  delete h_trk_pt_np_allCutsEff;
+  
+  h_trk_pt_primary_allCuts->Scale(1./h_trk_pt_primary_allCuts->Integral());
+  h_trk_pt_primary_allCuts->SetLineColor(1);
+  h_trk_pt_primary_allCuts->SetMarkerColor(1);
+  h_trk_pt_np_allCuts->Scale(1./h_trk_pt_np_allCuts->Integral());
+  h_trk_pt_np_allCuts->SetLineColor(2);
+  h_trk_pt_np_allCuts->SetMarkerColor(2);
+  h_trk_pt_np_allCuts->Draw("HIST");
+  h_trk_pt_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_pt_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_pt_np_allCuts,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_pt_allCuts.jpeg");
+  delete h_trk_pt_primary_allCuts;
+  delete h_trk_pt_np_allCuts;
+
+  h_tp_pt->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_pt->GetXaxis()->SetRange(1, h_tp_pt->GetNbinsX() + 2);
+  h_tp_pt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_pt->GetName() + ".jpeg");
+  delete h_tp_pt;
+
+  h_trk_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta->GetXaxis()->SetRange(1, h_trk_eta->GetNbinsX() + 2);
+  h_trk_eta->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta->GetName() + ".jpeg");
+  delete h_trk_eta;
+
+  h_trk_eta_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_primary->GetXaxis()->SetRange(1, h_trk_eta_primary->GetNbinsX() + 2);
+  h_trk_eta_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta_primary->GetName() + ".jpeg");
+  delete h_trk_eta_primary;
+
+  h_trk_eta_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_primary_noCuts->GetXaxis()->SetRange(1, h_trk_eta_primary_noCuts->GetNbinsX() + 2);
+  h_trk_eta_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_eta_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_primary_allCuts->GetXaxis()->SetRange(1, h_trk_eta_primary_allCuts->GetNbinsX() + 2);
+  h_trk_eta_primary_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta_primary_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta_primary_allCuts->GetName() + ".jpeg");
+
+  h_trk_eta_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_np->GetXaxis()->SetRange(1, h_trk_eta_np->GetNbinsX() + 2);
+  h_trk_eta_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta_np->GetName() + ".jpeg");
+  delete h_trk_eta_np;
+
+  h_trk_eta_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_np_noCuts->GetXaxis()->SetRange(1, h_trk_eta_np_noCuts->GetNbinsX() + 2);
+  h_trk_eta_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_eta_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_np_allCuts->GetXaxis()->SetRange(1, h_trk_eta_np_allCuts->GetNbinsX() + 2);
+  h_trk_eta_np_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_eta_np_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_eta_np_allCuts->GetName() + ".jpeg");
+
+  h_trk_eta_primary_noCuts->Scale(1./h_trk_eta_primary_noCuts->Integral());
+  h_trk_eta_primary_noCuts->SetLineColor(1);
+  h_trk_eta_primary_noCuts->SetMarkerColor(1);
+  TH1F *h_trk_eta_np_noCutsNorm = (TH1F*)h_trk_eta_np_noCuts->Clone(); 
+  h_trk_eta_np_noCutsNorm->Scale(1./h_trk_eta_np_noCutsNorm->Integral());
+  h_trk_eta_np_noCutsNorm->SetLineColor(2);
+  h_trk_eta_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_eta_np_noCutsNorm->Draw("HIST");
+  h_trk_eta_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_eta_noCuts.jpeg");
+  delete h_trk_eta_np_noCutsNorm;
+  
+  TH1F *h_trk_eta_fake_noCutsNorm = (TH1F*)h_trk_eta_fake_noCuts->Clone(); 
+  h_trk_eta_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_eta_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_eta_PU_noCutsNorm = (TH1F*)h_trk_eta_PU_noCuts->Clone(); 
+  h_trk_eta_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_eta_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_eta_notHiggs_noCutsNorm = (TH1F*)h_trk_eta_notHiggs_noCuts->Clone(); 
+  h_trk_eta_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_eta_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_eta_fake_noCutsNorm->Scale(1./h_trk_eta_np_noCuts->Integral());
+  h_trk_eta_fake_noCutsNorm->SetLineColor(2);
+  h_trk_eta_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_eta_PU_noCutsNorm->Scale(1./h_trk_eta_np_noCuts->Integral());
+  h_trk_eta_PU_noCutsNorm->SetLineColor(3);
+  h_trk_eta_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_eta_notHiggs_noCutsNorm->Scale(1./h_trk_eta_np_noCuts->Integral());
+  h_trk_eta_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_eta_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_eta_noCuts = new THStack("hs_eta_noCuts","Stacked BG histograms");
+  hs_eta_noCuts->Add(h_trk_eta_fake_noCutsNorm);
+  hs_eta_noCuts->Add(h_trk_eta_PU_noCutsNorm);
+  hs_eta_noCuts->Add(h_trk_eta_notHiggs_noCutsNorm);
+  hs_eta_noCuts->Draw("HIST");
+  h_trk_eta_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_eta_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_eta_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_noCutsNorm.jpeg");
+  delete h_trk_eta_fake_noCutsNorm;
+  delete h_trk_eta_PU_noCutsNorm;
+  delete h_trk_eta_notHiggs_noCutsNorm;
+  delete h_trk_eta_np_noCuts;
+  delete hs_eta_noCuts;
+
+  h_trk_eta_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_fake_noCuts->GetXaxis()->SetRange(1, h_trk_eta_fake_noCuts->GetNbinsX() + 2);
+  h_trk_eta_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_PU_noCuts->GetXaxis()->SetRange(1, h_trk_eta_PU_noCuts->GetNbinsX() + 2);
+  h_trk_eta_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_eta_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_eta_fake_noCuts->Scale(1./h_trk_eta_fake_noCuts->Integral());
+  h_trk_eta_fake_noCuts->SetLineColor(2);
+  h_trk_eta_fake_noCuts->SetMarkerColor(2);
+  h_trk_eta_PU_noCuts->Scale(1./h_trk_eta_PU_noCuts->Integral());
+  h_trk_eta_PU_noCuts->SetLineColor(3);
+  h_trk_eta_PU_noCuts->SetMarkerColor(3);
+  h_trk_eta_notHiggs_noCuts->Scale(1./h_trk_eta_notHiggs_noCuts->Integral());
+  h_trk_eta_notHiggs_noCuts->SetLineColor(4);
+  h_trk_eta_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_eta_fake_noCuts->Draw("HIST");
+  h_trk_eta_primary_noCuts->Draw("HIST,SAME");
+  h_trk_eta_PU_noCuts->Draw("HIST,SAME");
+  h_trk_eta_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_eta_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_eta_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_noCuts.jpeg");
+  delete h_trk_eta_primary_noCuts;
+  delete h_trk_eta_fake_noCuts;
+  delete h_trk_eta_PU_noCuts;
+  delete h_trk_eta_notHiggs_noCuts;
+
+  h_trk_eta_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_eta_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_eta_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_eta_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_eta_primary_noCuts_H->Scale(1./h_trk_eta_primary_noCuts_H->Integral());
+  h_trk_eta_primary_noCuts_H->SetLineColor(1);
+  h_trk_eta_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_eta_np_noCuts_H->Scale(1./h_trk_eta_np_noCuts_H->Integral());
+  h_trk_eta_np_noCuts_H->SetLineColor(2);
+  h_trk_eta_np_noCuts_H->SetMarkerColor(2);
+  h_trk_eta_np_noCuts_H->Draw("HIST");
+  h_trk_eta_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_eta_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_eta_noCuts_H.jpeg");
+  delete h_trk_eta_primary_noCuts_H;
+  delete h_trk_eta_np_noCuts_H;
+
+  h_trk_eta_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_eta_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_eta_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_eta_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_eta_primary_noCuts_L->Scale(1./h_trk_eta_primary_noCuts_L->Integral());
+  h_trk_eta_primary_noCuts_L->SetLineColor(1);
+  h_trk_eta_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_eta_np_noCuts_L->Scale(1./h_trk_eta_np_noCuts_L->Integral());
+  h_trk_eta_np_noCuts_L->SetLineColor(2);
+  h_trk_eta_np_noCuts_L->SetMarkerColor(2);
+  h_trk_eta_np_noCuts_L->Draw("HIST");
+  h_trk_eta_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_eta_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_eta_noCuts_L.jpeg");
+  delete h_trk_eta_primary_noCuts_L;
+  delete h_trk_eta_np_noCuts_L;
+
+  h_trk_eta_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_np_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_np_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_primary_qualCuts->Scale(1./h_trk_eta_primary_qualCuts->Integral());
+  h_trk_eta_primary_qualCuts->SetLineColor(1);
+  h_trk_eta_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_eta_np_qualCutsNorm = (TH1F*)h_trk_eta_np_qualCuts->Clone(); 
+  h_trk_eta_np_qualCutsNorm->Scale(1./h_trk_eta_np_qualCutsNorm->Integral());
+  h_trk_eta_np_qualCutsNorm->SetLineColor(2);
+  h_trk_eta_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_eta_np_qualCutsNorm->Draw("HIST");
+  h_trk_eta_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_eta_qualCuts.jpeg");
+  delete h_trk_eta_np_qualCutsNorm;
+
+  TH1F *h_trk_eta_fake_qualCutsNorm = (TH1F*)h_trk_eta_fake_qualCuts->Clone(); 
+  h_trk_eta_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_eta_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_eta_PU_qualCutsNorm = (TH1F*)h_trk_eta_PU_qualCuts->Clone(); 
+  h_trk_eta_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_eta_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_eta_notHiggs_qualCutsNorm = (TH1F*)h_trk_eta_notHiggs_qualCuts->Clone(); 
+  h_trk_eta_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_eta_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_eta_fake_qualCutsNorm->Scale(1./h_trk_eta_np_qualCuts->Integral());
+  h_trk_eta_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_eta_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_eta_PU_qualCutsNorm->Scale(1./h_trk_eta_np_qualCuts->Integral());
+  h_trk_eta_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_eta_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_eta_notHiggs_qualCutsNorm->Scale(1./h_trk_eta_np_qualCuts->Integral());
+  h_trk_eta_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_eta_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_eta_qualCuts = new THStack("hs_eta_qualCuts","Stacked BG histograms");
+  hs_eta_qualCuts->Add(h_trk_eta_fake_qualCutsNorm);
+  hs_eta_qualCuts->Add(h_trk_eta_PU_qualCutsNorm);
+  hs_eta_qualCuts->Add(h_trk_eta_notHiggs_qualCutsNorm);
+  hs_eta_qualCuts->Draw("HIST");
+  h_trk_eta_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_eta_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_eta_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_qualCutsNorm.jpeg");
+  delete h_trk_eta_fake_qualCutsNorm;
+  delete h_trk_eta_PU_qualCutsNorm;
+  delete h_trk_eta_notHiggs_qualCutsNorm;
+  delete h_trk_eta_np_qualCuts;
+  delete hs_eta_qualCuts;
+
+  h_trk_eta_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_eta_fake_qualCuts->Scale(1./h_trk_eta_fake_qualCuts->Integral());
+  h_trk_eta_fake_qualCuts->SetLineColor(2);
+  h_trk_eta_fake_qualCuts->SetMarkerColor(2);
+  h_trk_eta_PU_qualCuts->Scale(1./h_trk_eta_PU_qualCuts->Integral());
+  h_trk_eta_PU_qualCuts->SetLineColor(3);
+  h_trk_eta_PU_qualCuts->SetMarkerColor(3);
+  h_trk_eta_notHiggs_qualCuts->Scale(1./h_trk_eta_notHiggs_qualCuts->Integral());
+  h_trk_eta_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_eta_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_eta_fake_qualCuts->Draw("HIST");
+  h_trk_eta_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_eta_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_eta_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_eta_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_eta_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_qualCuts.jpeg");
+  delete h_trk_eta_primary_qualCuts;
+  delete h_trk_eta_fake_qualCuts;
+  delete h_trk_eta_PU_qualCuts;
+  delete h_trk_eta_notHiggs_qualCuts;
+
+  h_trk_eta_primary_allCuts->Scale(1./h_trk_eta_primary_allCuts->Integral());
+  h_trk_eta_primary_allCuts->SetLineColor(1);
+  h_trk_eta_primary_allCuts->SetMarkerColor(1);
+  h_trk_eta_np_allCuts->Scale(1./h_trk_eta_np_allCuts->Integral());
+  h_trk_eta_np_allCuts->SetLineColor(2);
+  h_trk_eta_np_allCuts->SetMarkerColor(2);
+  h_trk_eta_primary_allCuts->Draw("HIST");
+  h_trk_eta_np_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_eta_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_eta_np_allCuts,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_eta_allCuts.jpeg");
+  delete h_trk_eta_primary_allCuts;
+  delete h_trk_eta_np_allCuts;
+
+  h_tp_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_tp_eta->GetXaxis()->SetRange(1, h_tp_eta->GetNbinsX() + 2);
+  h_tp_eta->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_tp_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_tp_eta->GetName() + ".jpeg");
+  delete h_tp_eta;
+
+  h_trueVertex_errorCode->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_errorCode->GetXaxis()->SetRange(1, h_trueVertex_errorCode->GetNbinsX() + 2);
+  h_trueVertex_errorCode->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_errorCode->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_errorCode->GetName() + ".jpeg");
+  delete h_trueVertex_errorCode;
+
+  h_trueVertex_numAllCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_numAllCuts->GetXaxis()->SetRange(1, h_trueVertex_numAllCuts->GetNbinsX() + 2);
+  h_trueVertex_numAllCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_numAllCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_numAllCuts->GetName() + ".jpeg");
+  delete h_trueVertex_numAllCuts;
+   
+  h_trueVertex_numNoCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_numNoCuts->GetXaxis()->SetRange(1, h_trueVertex_numNoCuts->GetNbinsX() + 2);
+  h_trueVertex_numNoCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_numNoCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_numNoCuts->GetName() + ".jpeg");
+  delete h_trueVertex_numNoCuts;
+
+  h_trackVertex_numAllCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_numAllCuts->GetXaxis()->SetRange(1, h_trackVertex_numAllCuts->GetNbinsX() + 2);
+  c.SetLogy();
+  h_trackVertex_numAllCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_numAllCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_numAllCuts->GetName() + ".jpeg");
+  delete h_trackVertex_numAllCuts;
+  c.SetLogy(0);
+
+  h_trackVertex_numNoCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_numNoCuts->GetXaxis()->SetRange(1, h_trackVertex_numNoCuts->GetNbinsX() + 2);
+  h_trackVertex_numNoCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_numNoCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_numNoCuts->GetName() + ".jpeg");
+  delete h_trackVertex_numNoCuts;
+
+  h_trueVertex_x->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_x->GetXaxis()->SetRange(1, h_trueVertex_x->GetNbinsX() + 2);
+  h_trueVertex_x->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_x->GetName() + ".jpeg");
+  delete h_trueVertex_x;
+
+  h_trueVertex_y->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_y->GetXaxis()->SetRange(1, h_trueVertex_y->GetNbinsX() + 2);
+  h_trueVertex_y->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_y->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_y->GetName() + ".jpeg");
+  delete h_trueVertex_y;
+   
+  h_trueVertex_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_z->GetXaxis()->SetRange(1, h_trueVertex_z->GetNbinsX() + 2);
+  h_trueVertex_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_z->GetName() + ".jpeg");
+  delete h_trueVertex_z; 
+
+  h_trueVertex_sumPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_sumPt->GetXaxis()->SetRange(1, h_trueVertex_sumPt->GetNbinsX() + 2);
+  h_trueVertex_sumPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_sumPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_sumPt->GetName() + ".jpeg");
+  delete h_trueVertex_sumPt;
+
+  h_trueVertex_lowPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_lowPt->GetXaxis()->SetRange(1, h_trueVertex_lowPt->GetNbinsX() + 2);
+  h_trueVertex_lowPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_lowPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_lowPt->GetName() + ".jpeg");
+  delete h_trueVertex_lowPt;
+
+  h_trueVertex_highPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_highPt->GetXaxis()->SetRange(1, h_trueVertex_highPt->GetNbinsX() + 2);
+  h_trueVertex_highPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_highPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_highPt->GetName() + ".jpeg");
+  delete h_trueVertex_highPt;
+
+  h_false_trackVertex_delta_dist_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_delta_dist_z->GetXaxis()->SetRange(1, h_false_trackVertex_delta_dist_z->GetNbinsX() + 2);
+  h_false_trackVertex_delta_dist_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_delta_dist_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_delta_dist_z->GetName() + ".jpeg");
+  delete h_false_trackVertex_delta_dist_z;
+
+  h_correct_trackVertex_delta_dist_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_delta_dist_z->GetXaxis()->SetRange(1, h_correct_trackVertex_delta_dist_z->GetNbinsX() + 2);
+  h_correct_trackVertex_delta_dist_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_delta_dist_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_delta_dist_z->GetName() + ".jpeg");
+  delete h_correct_trackVertex_delta_dist_z;
+
+  h_correct_trackVertex_delta_dist_z0->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_delta_dist_z0->GetXaxis()->SetRange(1, h_correct_trackVertex_delta_dist_z0->GetNbinsX() + 2);
+  h_correct_trackVertex_delta_dist_z0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_delta_dist_z0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_delta_dist_z0->GetName() + ".jpeg");
+  delete h_correct_trackVertex_delta_dist_z0;
+
+  h_correct_trackVertex_delta_dist_d0->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_delta_dist_d0->GetXaxis()->SetRange(1, h_correct_trackVertex_delta_dist_d0->GetNbinsX() + 2);
+  h_correct_trackVertex_delta_dist_d0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_delta_dist_d0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_delta_dist_d0->GetName() + ".jpeg");
+  delete h_correct_trackVertex_delta_dist_d0;
+
+  h_correct_trackVertex_delta_dist_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_delta_dist_eta->GetXaxis()->SetRange(1, h_correct_trackVertex_delta_dist_eta->GetNbinsX() + 2);
+  h_correct_trackVertex_delta_dist_eta->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_delta_dist_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_delta_dist_eta->GetName() + ".jpeg");
+  delete h_correct_trackVertex_delta_dist_eta;
+
+  h_correct_trackVertex_delta_dist_phi->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_delta_dist_phi->GetXaxis()->SetRange(1, h_correct_trackVertex_delta_dist_phi->GetNbinsX() + 2);
+  h_correct_trackVertex_delta_dist_phi->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_delta_dist_phi->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_delta_dist_phi->GetName() + ".jpeg");
+  delete h_correct_trackVertex_delta_dist_phi;
+
+  h_correct_trackVertex_delta_dist_indexPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_delta_dist_indexPt->GetXaxis()->SetRange(1, h_correct_trackVertex_delta_dist_indexPt->GetNbinsX() + 2);
+  h_correct_trackVertex_delta_dist_indexPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_delta_dist_indexPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_delta_dist_indexPt->GetName() + ".jpeg");
+  delete h_correct_trackVertex_delta_dist_indexPt;
+   
+  h_false_trackVertex_numStubs->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_numStubs->GetXaxis()->SetRange(1, h_false_trackVertex_numStubs->GetNbinsX() + 2);
+  h_false_trackVertex_numStubs->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_numStubs->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_numStubs->GetName() + ".jpeg");
+  delete h_false_trackVertex_numStubs;
+
+  h_false_trackVertex_numStubsSum->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_numStubsSum->GetXaxis()->SetRange(1, h_false_trackVertex_numStubsSum->GetNbinsX() + 2);
+  h_false_trackVertex_numStubsSum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_numStubsSum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_numStubsSum->GetName() + ".jpeg");
+  delete h_false_trackVertex_numStubsSum;
+
+  h_false_trackVertex_chi2rphidofSum->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_chi2rphidofSum->GetXaxis()->SetRange(1, h_false_trackVertex_chi2rphidofSum->GetNbinsX() + 2);
+  h_false_trackVertex_chi2rphidofSum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_chi2rphidofSum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_chi2rphidofSum->GetName() + ".jpeg");
+  delete h_false_trackVertex_chi2rphidofSum;
+
+  h_false_trackVertex_chi2rzdofSum->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_chi2rzdofSum->GetXaxis()->SetRange(1, h_false_trackVertex_chi2rzdofSum->GetNbinsX() + 2);
+  h_false_trackVertex_chi2rzdofSum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_chi2rzdofSum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_chi2rzdofSum->GetName() + ".jpeg");
+  delete h_false_trackVertex_chi2rzdofSum;
+
+  h_false_trackVertex_bendchi2Sum->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_bendchi2Sum->GetXaxis()->SetRange(1, h_false_trackVertex_bendchi2Sum->GetNbinsX() + 2);
+  h_false_trackVertex_bendchi2Sum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_bendchi2Sum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_bendchi2Sum->GetName() + ".jpeg");
+  delete h_false_trackVertex_bendchi2Sum;
+
+  h_false_trackVertex_score->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_score->GetXaxis()->SetRange(1, h_false_trackVertex_score->GetNbinsX() + 2);
+  h_false_trackVertex_score->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_score->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_score->GetName() + ".jpeg");
+  delete h_false_trackVertex_score;
+
+  h_correct_trackVertex_chi2rphidofSum->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_chi2rphidofSum->GetXaxis()->SetRange(1, h_correct_trackVertex_chi2rphidofSum->GetNbinsX() + 2);
+  h_correct_trackVertex_chi2rphidofSum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_chi2rphidofSum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_chi2rphidofSum->GetName() + ".jpeg");
+  delete h_correct_trackVertex_chi2rphidofSum;
+
+  h_correct_trackVertex_chi2rzdofSum->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_chi2rzdofSum->GetXaxis()->SetRange(1, h_correct_trackVertex_chi2rzdofSum->GetNbinsX() + 2);
+  h_correct_trackVertex_chi2rzdofSum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_chi2rzdofSum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_chi2rzdofSum->GetName() + ".jpeg");
+  delete h_correct_trackVertex_chi2rzdofSum;
+   
+  h_correct_trackVertex_bendchi2Sum->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_bendchi2Sum->GetXaxis()->SetRange(1, h_correct_trackVertex_bendchi2Sum->GetNbinsX() + 2);
+  h_correct_trackVertex_bendchi2Sum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_bendchi2Sum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_bendchi2Sum->GetName() + ".jpeg");
+  delete h_correct_trackVertex_bendchi2Sum;
+
+  h_correct_trackVertex_score->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_score->GetXaxis()->SetRange(1, h_correct_trackVertex_score->GetNbinsX() + 2);
+  h_correct_trackVertex_score->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_score->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_score->GetName() + ".jpeg");
+  delete h_correct_trackVertex_score;
+
+  h_all_trackVertex_numStubs->GetYaxis()->SetNoExponent(kTRUE);
+  h_all_trackVertex_numStubs->GetXaxis()->SetRange(1, h_all_trackVertex_numStubs->GetNbinsX() + 2);
+  h_all_trackVertex_numStubs->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trackVertex_numStubs->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trackVertex_numStubs->GetName() + ".jpeg");
+  delete h_all_trackVertex_numStubs;
+
+  h_correct_trackVertex_numStubs->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_numStubs->GetXaxis()->SetRange(1, h_correct_trackVertex_numStubs->GetNbinsX() + 2);
+  h_correct_trackVertex_numStubs->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_numStubs->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_numStubs->GetName() + ".jpeg");
+  delete h_correct_trackVertex_numStubs;
+
+  h_correct_trackVertex_numStubsSum->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_numStubsSum->GetXaxis()->SetRange(1, h_correct_trackVertex_numStubsSum->GetNbinsX() + 2);
+  h_correct_trackVertex_numStubsSum->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_numStubsSum->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_numStubsSum->GetName() + ".jpeg");
+  delete h_correct_trackVertex_numStubsSum;
+
+  h_false_trackVertex_d0->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_d0->GetXaxis()->SetRange(1, h_false_trackVertex_d0->GetNbinsX() + 2);
+  h_false_trackVertex_d0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_d0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_d0->GetName() + ".jpeg");
+  delete h_false_trackVertex_d0;
+
+  h_false_trackVertex_d_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_false_trackVertex_d_T->GetXaxis()->SetRange(1, h_false_trackVertex_d_T->GetNbinsX() + 2);
+  h_false_trackVertex_d_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_false_trackVertex_d_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_false_trackVertex_d_T->GetName() + ".jpeg");
+  delete h_false_trackVertex_d_T;
+
+  h_trackVertex_x->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_x->GetXaxis()->SetRange(1, h_trackVertex_x->GetNbinsX() + 2);
+  h_trackVertex_x->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_x->GetName() + ".jpeg");
+  delete h_trackVertex_x;
+   
+  h_trackVertex_y->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_y->GetXaxis()->SetRange(1, h_trackVertex_y->GetNbinsX() + 2);
+  h_trackVertex_y->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_y->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_y->GetName() + ".jpeg");
+  delete h_trackVertex_y;
+
+  h_trackVertex_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_z->GetXaxis()->SetRange(1, h_trackVertex_z->GetNbinsX() + 2);
+  h_trackVertex_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_z->GetName() + ".jpeg");
+  delete h_trackVertex_z;
+
+  h_trackVertex_sumPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_sumPt->GetXaxis()->SetRange(1, h_trackVertex_sumPt->GetNbinsX() + 2);
+  h_trackVertex_sumPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_sumPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_sumPt->GetName() + ".jpeg");
+  delete h_trackVertex_sumPt;
+
+  h_trackVertexCuts_x->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertexCuts_x->GetXaxis()->SetRange(1, h_trackVertexCuts_x->GetNbinsX() + 2);
+  h_trackVertexCuts_x->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertexCuts_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertexCuts_x->GetName() + ".jpeg");
+  delete h_trackVertexCuts_x;
+
+  h_trackVertexCuts_y->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertexCuts_y->GetXaxis()->SetRange(1, h_trackVertexCuts_y->GetNbinsX() + 2);
+  h_trackVertexCuts_y->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertexCuts_y->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertexCuts_y->GetName() + ".jpeg");
+  delete h_trackVertexCuts_y;
+
+  h_trackVertexCuts_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertexCuts_z->GetXaxis()->SetRange(1, h_trackVertexCuts_z->GetNbinsX() + 2);
+  h_trackVertexCuts_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertexCuts_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertexCuts_z->GetName() + ".jpeg");
+  delete h_trackVertexCuts_z;
+
+  h_trackVertexCuts_sumPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertexCuts_sumPt->GetXaxis()->SetRange(1, h_trackVertexCuts_sumPt->GetNbinsX() + 2);
+  h_trackVertexCuts_sumPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertexCuts_sumPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertexCuts_sumPt->GetName() + ".jpeg");
+  delete h_trackVertexCuts_sumPt;
+
+  h_trackVertexCuts_indexPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertexCuts_indexPt->GetXaxis()->SetRange(1, h_trackVertexCuts_indexPt->GetNbinsX() + 2);
+  h_trackVertexCuts_indexPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertexCuts_indexPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertexCuts_indexPt->GetName() + ".jpeg");
+  delete h_trackVertexCuts_indexPt;
+
+  h_correct_trackVertex_indexPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_correct_trackVertex_indexPt->GetXaxis()->SetRange(1, h_correct_trackVertex_indexPt->GetNbinsX() + 2);
+  h_correct_trackVertex_indexPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trackVertex_indexPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trackVertex_indexPt->GetName() + ".jpeg");
+  delete h_correct_trackVertex_indexPt;
+
+  h_trueVertexCuts_x->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertexCuts_x->GetXaxis()->SetRange(1, h_trueVertexCuts_x->GetNbinsX() + 2);
+  h_trueVertexCuts_x->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertexCuts_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertexCuts_x->GetName() + ".jpeg");
+  delete h_trueVertexCuts_x;
+   
+  h_trueVertexCuts_y->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertexCuts_y->GetXaxis()->SetRange(1, h_trueVertexCuts_y->GetNbinsX() + 2);
+  h_trueVertexCuts_y->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertexCuts_y->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertexCuts_y->GetName() + ".jpeg");
+  delete h_trueVertexCuts_y;
+
+  h_trueVertexCuts_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertexCuts_z->GetXaxis()->SetRange(1, h_trueVertexCuts_z->GetNbinsX() + 2);
+  h_trueVertexCuts_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertexCuts_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertexCuts_z->GetName() + ".jpeg");
+  delete h_trueVertexCuts_z;
+
+  h_trueVertexCuts_sumPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertexCuts_sumPt->GetXaxis()->SetRange(1, h_trueVertexCuts_sumPt->GetNbinsX() + 2);
+  h_trueVertexCuts_sumPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertexCuts_sumPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertexCuts_sumPt->GetName() + ".jpeg");
+  delete h_trueVertexCuts_sumPt;
+
+  h_trueVertexCuts_indexPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertexCuts_indexPt->GetXaxis()->SetRange(1, h_trueVertexCuts_indexPt->GetNbinsX() + 2);
+  h_trueVertexCuts_indexPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertexCuts_indexPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertexCuts_indexPt->GetName() + ".jpeg");
+  delete h_trueVertexCuts_indexPt;
+
+  h_trk_chi2rphidof->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof->GetXaxis()->SetRange(1, h_trk_chi2rphidof->GetNbinsX() + 2);
+  h_trk_chi2rphidof->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof;
+
+  h_trk_chi2rphidof_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_primary->GetXaxis()->SetRange(1, h_trk_chi2rphidof_primary->GetNbinsX() + 2);
+  h_trk_chi2rphidof_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_primary->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_primary;
+
+  h_trk_chi2rphidof_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_primary_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_primary_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_MVA1_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_primary_noCuts->GetXaxis()->SetRange(1, h_trk_MVA1_primary_noCuts->GetNbinsX() + 2);
+  h_trk_MVA1_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_MVA1_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_MVA1_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_chi2rphidof_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_np->GetXaxis()->SetRange(1, h_trk_chi2rphidof_np->GetNbinsX() + 2);
+  h_trk_chi2rphidof_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_np->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_np;
+
+  h_trk_chi2rphidof_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_np_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_np_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_MVA1_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_np_noCuts->GetXaxis()->SetRange(1, h_trk_MVA1_np_noCuts->GetNbinsX() + 2);
+  h_trk_MVA1_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_MVA1_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_MVA1_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_chi2rphidof_primary_noCuts->Scale(1./h_trk_chi2rphidof_primary_noCuts->Integral());
+  h_trk_chi2rphidof_primary_noCuts->SetLineColor(1);
+  h_trk_chi2rphidof_primary_noCuts->SetMarkerColor(1);
+  TH1F *h_trk_chi2rphidof_np_noCutsNorm = (TH1F*)h_trk_chi2rphidof_np_noCuts->Clone(); 
+  h_trk_chi2rphidof_np_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCutsNorm->Integral());
+  h_trk_chi2rphidof_np_noCutsNorm->SetLineColor(2);
+  h_trk_chi2rphidof_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rphidof_np_noCutsNorm->Draw("HIST");
+  h_trk_chi2rphidof_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts.jpeg");
+  delete h_trk_chi2rphidof_np_noCutsNorm;
+
+  TH1F *h_trk_chi2rphidof_fake_noCutsNorm = (TH1F*)h_trk_chi2rphidof_fake_noCuts->Clone(); 
+  h_trk_chi2rphidof_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rphidof_PU_noCutsNorm = (TH1F*)h_trk_chi2rphidof_PU_noCuts->Clone(); 
+  h_trk_chi2rphidof_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rphidof_notHiggs_noCutsNorm = (TH1F*)h_trk_chi2rphidof_notHiggs_noCuts->Clone(); 
+  h_trk_chi2rphidof_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_chi2rphidof_fake_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCuts->Integral());
+  h_trk_chi2rphidof_fake_noCutsNorm->SetLineColor(2);
+  h_trk_chi2rphidof_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rphidof_PU_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCuts->Integral());
+  h_trk_chi2rphidof_PU_noCutsNorm->SetLineColor(3);
+  h_trk_chi2rphidof_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_chi2rphidof_notHiggs_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCuts->Integral());
+  h_trk_chi2rphidof_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_chi2rphidof_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_chi2rphidof_noCuts = new THStack("hs_chi2rphidof_noCuts","Stacked BG histograms");
+  hs_chi2rphidof_noCuts->Add(h_trk_chi2rphidof_fake_noCutsNorm);
+  hs_chi2rphidof_noCuts->Add(h_trk_chi2rphidof_PU_noCutsNorm);
+  hs_chi2rphidof_noCuts->Add(h_trk_chi2rphidof_notHiggs_noCutsNorm);
+  hs_chi2rphidof_noCuts->Draw("HIST");
+  h_trk_chi2rphidof_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_chi2rphidof_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_chi2rphidof_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_noCutsNorm.jpeg");
+  delete h_trk_chi2rphidof_fake_noCutsNorm;
+  delete h_trk_chi2rphidof_PU_noCutsNorm;
+  delete h_trk_chi2rphidof_notHiggs_noCutsNorm;
+  delete h_trk_chi2rphidof_np_noCuts;
+  delete hs_chi2rphidof_noCuts;
+
+  h_trk_chi2rphidof_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_fake_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_fake_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_PU_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_PU_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_fake_noCuts->Scale(1./h_trk_chi2rphidof_fake_noCuts->Integral());
+  h_trk_chi2rphidof_fake_noCuts->SetLineColor(2);
+  h_trk_chi2rphidof_fake_noCuts->SetMarkerColor(2);
+  h_trk_chi2rphidof_PU_noCuts->Scale(1./h_trk_chi2rphidof_PU_noCuts->Integral());
+  h_trk_chi2rphidof_PU_noCuts->SetLineColor(3);
+  h_trk_chi2rphidof_PU_noCuts->SetMarkerColor(3);
+  h_trk_chi2rphidof_notHiggs_noCuts->Scale(1./h_trk_chi2rphidof_notHiggs_noCuts->Integral());
+  h_trk_chi2rphidof_notHiggs_noCuts->SetLineColor(4);
+  h_trk_chi2rphidof_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_chi2rphidof_fake_noCuts->Draw("HIST");
+  h_trk_chi2rphidof_primary_noCuts->Draw("HIST,SAME");
+  h_trk_chi2rphidof_PU_noCuts->Draw("HIST,SAME");
+  h_trk_chi2rphidof_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_chi2rphidof_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_chi2rphidof_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_noCuts.jpeg");
+  delete h_trk_chi2rphidof_primary_noCuts;
+  delete h_trk_chi2rphidof_fake_noCuts;
+  delete h_trk_chi2rphidof_PU_noCuts;
+  delete h_trk_chi2rphidof_notHiggs_noCuts;
+
+  h_trk_chi2rphidof_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_chi2rphidof_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_chi2rphidof_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_chi2rphidof_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_chi2rphidof_primary_noCuts_H->Scale(1./h_trk_chi2rphidof_primary_noCuts_H->Integral());
+  h_trk_chi2rphidof_primary_noCuts_H->SetLineColor(1);
+  h_trk_chi2rphidof_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_chi2rphidof_np_noCuts_H->Scale(1./h_trk_chi2rphidof_np_noCuts_H->Integral());
+  h_trk_chi2rphidof_np_noCuts_H->SetLineColor(2);
+  h_trk_chi2rphidof_np_noCuts_H->SetMarkerColor(2);
+  h_trk_chi2rphidof_np_noCuts_H->Draw("HIST");
+  h_trk_chi2rphidof_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_H.jpeg");
+  delete h_trk_chi2rphidof_primary_noCuts_H;
+  delete h_trk_chi2rphidof_np_noCuts_H;
+
+  h_trk_chi2rphidof_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_chi2rphidof_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_chi2rphidof_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_chi2rphidof_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_chi2rphidof_primary_noCuts_L->Scale(1./h_trk_chi2rphidof_primary_noCuts_L->Integral());
+  h_trk_chi2rphidof_primary_noCuts_L->SetLineColor(1);
+  h_trk_chi2rphidof_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_chi2rphidof_np_noCuts_L->Scale(1./h_trk_chi2rphidof_np_noCuts_L->Integral());
+  h_trk_chi2rphidof_np_noCuts_L->SetLineColor(2);
+  h_trk_chi2rphidof_np_noCuts_L->SetMarkerColor(2);
+  h_trk_chi2rphidof_np_noCuts_L->Draw("HIST");
+  h_trk_chi2rphidof_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_L.jpeg");
+  delete h_trk_chi2rphidof_primary_noCuts_L;
+  delete h_trk_chi2rphidof_np_noCuts_L;
+
+  h_trk_chi2rphidof_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_np_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_np_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_primary_qualCuts->Scale(1./h_trk_chi2rphidof_primary_qualCuts->Integral());
+  h_trk_chi2rphidof_primary_qualCuts->SetLineColor(1);
+  h_trk_chi2rphidof_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_chi2rphidof_np_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_np_qualCuts->Clone(); 
+  h_trk_chi2rphidof_np_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCutsNorm->Integral());
+  h_trk_chi2rphidof_np_qualCutsNorm->SetLineColor(2);
+  h_trk_chi2rphidof_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rphidof_np_qualCutsNorm->Draw("HIST");
+  h_trk_chi2rphidof_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_qualCuts.jpeg");
+  delete h_trk_chi2rphidof_np_qualCutsNorm;
+
+  TH1F *h_trk_chi2rphidof_fake_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_fake_qualCuts->Clone(); 
+  h_trk_chi2rphidof_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rphidof_PU_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_PU_qualCuts->Clone(); 
+  h_trk_chi2rphidof_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rphidof_notHiggs_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_notHiggs_qualCuts->Clone(); 
+  h_trk_chi2rphidof_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_chi2rphidof_fake_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCuts->Integral());
+  h_trk_chi2rphidof_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_chi2rphidof_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rphidof_PU_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCuts->Integral());
+  h_trk_chi2rphidof_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_chi2rphidof_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_chi2rphidof_notHiggs_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCuts->Integral());
+  h_trk_chi2rphidof_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_chi2rphidof_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_chi2rphidof_qualCuts = new THStack("hs_chi2rphidof_qualCuts","Stacked BG histograms");
+  hs_chi2rphidof_qualCuts->Add(h_trk_chi2rphidof_fake_qualCutsNorm);
+  hs_chi2rphidof_qualCuts->Add(h_trk_chi2rphidof_PU_qualCutsNorm);
+  hs_chi2rphidof_qualCuts->Add(h_trk_chi2rphidof_notHiggs_qualCutsNorm);
+  hs_chi2rphidof_qualCuts->Draw("HIST");
+  h_trk_chi2rphidof_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_chi2rphidof_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_chi2rphidof_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_qualCutsNorm.jpeg");
+  delete h_trk_chi2rphidof_fake_qualCutsNorm;
+  delete h_trk_chi2rphidof_PU_qualCutsNorm;
+  delete h_trk_chi2rphidof_notHiggs_qualCutsNorm;
+  delete h_trk_chi2rphidof_np_qualCuts;
+  delete hs_chi2rphidof_qualCuts;
+
+  h_trk_chi2rphidof_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_fake_qualCuts->Scale(1./h_trk_chi2rphidof_fake_qualCuts->Integral());
+  h_trk_chi2rphidof_fake_qualCuts->SetLineColor(2);
+  h_trk_chi2rphidof_fake_qualCuts->SetMarkerColor(2);
+  h_trk_chi2rphidof_PU_qualCuts->Scale(1./h_trk_chi2rphidof_PU_qualCuts->Integral());
+  h_trk_chi2rphidof_PU_qualCuts->SetLineColor(3);
+  h_trk_chi2rphidof_PU_qualCuts->SetMarkerColor(3);
+  h_trk_chi2rphidof_notHiggs_qualCuts->Scale(1./h_trk_chi2rphidof_notHiggs_qualCuts->Integral());
+  h_trk_chi2rphidof_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_chi2rphidof_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_chi2rphidof_fake_qualCuts->Draw("HIST");
+  h_trk_chi2rphidof_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_chi2rphidof_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_chi2rphidof_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_chi2rphidof_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_chi2rphidof_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_qualCuts.jpeg");
+  delete h_trk_chi2rphidof_primary_qualCuts;
+  delete h_trk_chi2rphidof_fake_qualCuts;
+  delete h_trk_chi2rphidof_PU_qualCuts;
+  delete h_trk_chi2rphidof_notHiggs_qualCuts;
+
+  h_trk_MVA1_primary_noCuts->Scale(1./h_trk_MVA1_primary_noCuts->Integral());
+  h_trk_MVA1_primary_noCuts->SetLineColor(1);
+  h_trk_MVA1_primary_noCuts->SetMarkerColor(1);
+  TH1F *h_trk_MVA1_np_noCutsNorm = (TH1F*)h_trk_MVA1_np_noCuts->Clone(); 
+  h_trk_MVA1_np_noCutsNorm->Scale(1./h_trk_MVA1_np_noCutsNorm->Integral());
+  h_trk_MVA1_np_noCutsNorm->SetLineColor(2);
+  h_trk_MVA1_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_MVA1_np_noCutsNorm->Draw("HIST");
+  h_trk_MVA1_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts.jpeg");
+  delete h_trk_MVA1_np_noCutsNorm;
+
+  TH1F *h_trk_MVA1_fake_noCutsNorm = (TH1F*)h_trk_MVA1_fake_noCuts->Clone(); 
+  h_trk_MVA1_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_MVA1_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_MVA1_PU_noCutsNorm = (TH1F*)h_trk_MVA1_PU_noCuts->Clone(); 
+  h_trk_MVA1_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_MVA1_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_MVA1_notHiggs_noCutsNorm = (TH1F*)h_trk_MVA1_notHiggs_noCuts->Clone(); 
+  h_trk_MVA1_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_MVA1_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_MVA1_fake_noCutsNorm->Scale(1./h_trk_MVA1_np_noCuts->Integral());
+  h_trk_MVA1_fake_noCutsNorm->SetLineColor(2);
+  h_trk_MVA1_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_MVA1_PU_noCutsNorm->Scale(1./h_trk_MVA1_np_noCuts->Integral());
+  h_trk_MVA1_PU_noCutsNorm->SetLineColor(3);
+  h_trk_MVA1_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_MVA1_notHiggs_noCutsNorm->Scale(1./h_trk_MVA1_np_noCuts->Integral());
+  h_trk_MVA1_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_MVA1_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_MVA1_noCuts = new THStack("hs_MVA1_noCuts","Stacked BG histograms");
+  hs_MVA1_noCuts->Add(h_trk_MVA1_fake_noCutsNorm);
+  hs_MVA1_noCuts->Add(h_trk_MVA1_PU_noCutsNorm);
+  hs_MVA1_noCuts->Add(h_trk_MVA1_notHiggs_noCutsNorm);
+  hs_MVA1_noCuts->Draw("HIST");
+  h_trk_MVA1_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_MVA1_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_MVA1_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_noCutsNorm.jpeg");
+  delete h_trk_MVA1_fake_noCutsNorm;
+  delete h_trk_MVA1_PU_noCutsNorm;
+  delete h_trk_MVA1_notHiggs_noCutsNorm;
+  delete h_trk_MVA1_np_noCuts;
+  delete hs_MVA1_noCuts;
+
+  h_trk_MVA1_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_fake_noCuts->GetXaxis()->SetRange(1, h_trk_MVA1_fake_noCuts->GetNbinsX() + 2);
+  h_trk_MVA1_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_PU_noCuts->GetXaxis()->SetRange(1, h_trk_MVA1_PU_noCuts->GetNbinsX() + 2);
+  h_trk_MVA1_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_MVA1_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_MVA1_fake_noCuts->Scale(1./h_trk_MVA1_fake_noCuts->Integral());
+  h_trk_MVA1_fake_noCuts->SetLineColor(2);
+  h_trk_MVA1_fake_noCuts->SetMarkerColor(2);
+  h_trk_MVA1_PU_noCuts->Scale(1./h_trk_MVA1_PU_noCuts->Integral());
+  h_trk_MVA1_PU_noCuts->SetLineColor(3);
+  h_trk_MVA1_PU_noCuts->SetMarkerColor(3);
+  h_trk_MVA1_notHiggs_noCuts->Scale(1./h_trk_MVA1_notHiggs_noCuts->Integral());
+  h_trk_MVA1_notHiggs_noCuts->SetLineColor(4);
+  h_trk_MVA1_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_MVA1_fake_noCuts->Draw("HIST");
+  h_trk_MVA1_primary_noCuts->Draw("HIST,SAME");
+  h_trk_MVA1_PU_noCuts->Draw("HIST,SAME");
+  h_trk_MVA1_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_MVA1_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_MVA1_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_noCuts.jpeg");
+  delete h_trk_MVA1_primary_noCuts;
+  delete h_trk_MVA1_fake_noCuts;
+  delete h_trk_MVA1_PU_noCuts;
+  delete h_trk_MVA1_notHiggs_noCuts;
+
+  h_trk_MVA1_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_MVA1_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_MVA1_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_MVA1_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_MVA1_primary_noCuts_H->Scale(1./h_trk_MVA1_primary_noCuts_H->Integral());
+  h_trk_MVA1_primary_noCuts_H->SetLineColor(1);
+  h_trk_MVA1_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_MVA1_np_noCuts_H->Scale(1./h_trk_MVA1_np_noCuts_H->Integral());
+  h_trk_MVA1_np_noCuts_H->SetLineColor(2);
+  h_trk_MVA1_np_noCuts_H->SetMarkerColor(2);
+  h_trk_MVA1_np_noCuts_H->Draw("HIST");
+  h_trk_MVA1_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_MVA1_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts_H.jpeg");
+  delete h_trk_MVA1_primary_noCuts_H;
+  delete h_trk_MVA1_np_noCuts_H;
+
+  h_trk_MVA1_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_MVA1_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_MVA1_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_MVA1_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_MVA1_primary_noCuts_L->Scale(1./h_trk_MVA1_primary_noCuts_L->Integral());
+  h_trk_MVA1_primary_noCuts_L->SetLineColor(1);
+  h_trk_MVA1_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_MVA1_np_noCuts_L->Scale(1./h_trk_MVA1_np_noCuts_L->Integral());
+  h_trk_MVA1_np_noCuts_L->SetLineColor(2);
+  h_trk_MVA1_np_noCuts_L->SetMarkerColor(2);
+  h_trk_MVA1_np_noCuts_L->Draw("HIST");
+  h_trk_MVA1_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_MVA1_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts_L.jpeg");
+  delete h_trk_MVA1_primary_noCuts_L;
+  delete h_trk_MVA1_np_noCuts_L;
+
+  h_trk_MVA1_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_MVA1_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_MVA1_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_np_qualCuts->GetXaxis()->SetRange(1, h_trk_MVA1_np_qualCuts->GetNbinsX() + 2);
+  h_trk_MVA1_primary_qualCuts->Scale(1./h_trk_MVA1_primary_qualCuts->Integral());
+  h_trk_MVA1_primary_qualCuts->SetLineColor(1);
+  h_trk_MVA1_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_MVA1_np_qualCutsNorm = (TH1F*)h_trk_MVA1_np_qualCuts->Clone(); 
+  h_trk_MVA1_np_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCutsNorm->Integral());
+  h_trk_MVA1_np_qualCutsNorm->SetLineColor(2);
+  h_trk_MVA1_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_MVA1_np_qualCutsNorm->Draw("HIST");
+  h_trk_MVA1_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA1_qualCuts.jpeg");
+  delete h_trk_MVA1_np_qualCutsNorm;
+
+  TH1F *h_trk_MVA1_fake_qualCutsNorm = (TH1F*)h_trk_MVA1_fake_qualCuts->Clone(); 
+  h_trk_MVA1_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_MVA1_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_MVA1_PU_qualCutsNorm = (TH1F*)h_trk_MVA1_PU_qualCuts->Clone(); 
+  h_trk_MVA1_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_MVA1_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_MVA1_notHiggs_qualCutsNorm = (TH1F*)h_trk_MVA1_notHiggs_qualCuts->Clone(); 
+  h_trk_MVA1_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_MVA1_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_MVA1_fake_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCuts->Integral());
+  h_trk_MVA1_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_MVA1_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_MVA1_PU_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCuts->Integral());
+  h_trk_MVA1_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_MVA1_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_MVA1_notHiggs_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCuts->Integral());
+  h_trk_MVA1_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_MVA1_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_MVA1_qualCuts = new THStack("hs_MVA1_qualCuts","Stacked BG histograms");
+  hs_MVA1_qualCuts->Add(h_trk_MVA1_fake_qualCutsNorm);
+  hs_MVA1_qualCuts->Add(h_trk_MVA1_PU_qualCutsNorm);
+  hs_MVA1_qualCuts->Add(h_trk_MVA1_notHiggs_qualCutsNorm);
+  hs_MVA1_qualCuts->Draw("HIST");
+  h_trk_MVA1_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_MVA1_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_MVA1_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_qualCutsNorm.jpeg");
+  delete h_trk_MVA1_fake_qualCutsNorm;
+  delete h_trk_MVA1_PU_qualCutsNorm;
+  delete h_trk_MVA1_notHiggs_qualCutsNorm;
+  delete h_trk_MVA1_np_qualCuts;
+  delete hs_MVA1_qualCuts;
+
+  h_trk_MVA1_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_MVA1_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_MVA1_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_MVA1_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_MVA1_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_MVA1_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_MVA1_fake_qualCuts->Scale(1./h_trk_MVA1_fake_qualCuts->Integral());
+  h_trk_MVA1_fake_qualCuts->SetLineColor(2);
+  h_trk_MVA1_fake_qualCuts->SetMarkerColor(2);
+  h_trk_MVA1_PU_qualCuts->Scale(1./h_trk_MVA1_PU_qualCuts->Integral());
+  h_trk_MVA1_PU_qualCuts->SetLineColor(3);
+  h_trk_MVA1_PU_qualCuts->SetMarkerColor(3);
+  h_trk_MVA1_notHiggs_qualCuts->Scale(1./h_trk_MVA1_notHiggs_qualCuts->Integral());
+  h_trk_MVA1_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_MVA1_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_MVA1_fake_qualCuts->Draw("HIST");
+  h_trk_MVA1_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_MVA1_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_MVA1_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_MVA1_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_MVA1_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_qualCuts.jpeg");
+  delete h_trk_MVA1_primary_qualCuts;
+  delete h_trk_MVA1_fake_qualCuts;
+  delete h_trk_MVA1_PU_qualCuts;
+  delete h_trk_MVA1_notHiggs_qualCuts;
+
+  h_trk_chi2rzdof->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof->GetXaxis()->SetRange(1, h_trk_chi2rzdof->GetNbinsX() + 2);
+  h_trk_chi2rzdof->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof;
+
+  h_trk_chi2rzdof_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_primary->GetXaxis()->SetRange(1, h_trk_chi2rzdof_primary->GetNbinsX() + 2);
+  h_trk_chi2rzdof_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_primary->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_primary;
+
+  h_trk_chi2rzdof_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_primary_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_primary_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_chi2rzdof_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_np->GetXaxis()->SetRange(1, h_trk_chi2rzdof_np->GetNbinsX() + 2);
+  h_trk_chi2rzdof_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_np->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_np;
+
+  h_trk_chi2rzdof_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_np_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_np_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_np_noCuts->GetName() + ".jpeg");
+   
+  h_trk_chi2rzdof_primary_noCuts->Scale(1./h_trk_chi2rzdof_primary_noCuts->Integral());
+  h_trk_chi2rzdof_primary_noCuts->SetLineColor(1);
+  h_trk_chi2rzdof_primary_noCuts->SetMarkerColor(1);
+  h_trk_chi2rzdof_primary_noCuts->Draw("HIST");
+  TH1F *h_trk_chi2rzdof_np_noCutsNorm = (TH1F*)h_trk_chi2rzdof_np_noCuts->Clone(); 
+  h_trk_chi2rzdof_np_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCutsNorm->Integral());
+  h_trk_chi2rzdof_np_noCutsNorm->SetLineColor(2);
+  h_trk_chi2rzdof_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rzdof_np_noCutsNorm->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts.jpeg");
+  delete h_trk_chi2rzdof_np_noCutsNorm;
+
+  TH1F *h_trk_chi2rzdof_fake_noCutsNorm = (TH1F*)h_trk_chi2rzdof_fake_noCuts->Clone(); 
+  h_trk_chi2rzdof_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rzdof_PU_noCutsNorm = (TH1F*)h_trk_chi2rzdof_PU_noCuts->Clone(); 
+  h_trk_chi2rzdof_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rzdof_notHiggs_noCutsNorm = (TH1F*)h_trk_chi2rzdof_notHiggs_noCuts->Clone(); 
+  h_trk_chi2rzdof_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_chi2rzdof_fake_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCuts->Integral());
+  h_trk_chi2rzdof_fake_noCutsNorm->SetLineColor(2);
+  h_trk_chi2rzdof_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rzdof_PU_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCuts->Integral());
+  h_trk_chi2rzdof_PU_noCutsNorm->SetLineColor(3);
+  h_trk_chi2rzdof_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_chi2rzdof_notHiggs_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCuts->Integral());
+  h_trk_chi2rzdof_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_chi2rzdof_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_chi2rzdof_noCuts = new THStack("hs_chi2rzdof_noCuts","Stacked BG histograms");
+  hs_chi2rzdof_noCuts->Add(h_trk_chi2rzdof_fake_noCutsNorm);
+  hs_chi2rzdof_noCuts->Add(h_trk_chi2rzdof_PU_noCutsNorm);
+  hs_chi2rzdof_noCuts->Add(h_trk_chi2rzdof_notHiggs_noCutsNorm);
+  hs_chi2rzdof_noCuts->Draw("HIST");
+  h_trk_chi2rzdof_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_chi2rzdof_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_chi2rzdof_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_noCutsNorm.jpeg");
+  delete h_trk_chi2rzdof_fake_noCutsNorm;
+  delete h_trk_chi2rzdof_PU_noCutsNorm;
+  delete h_trk_chi2rzdof_notHiggs_noCutsNorm;
+  delete h_trk_chi2rzdof_np_noCuts;
+  delete hs_chi2rzdof_noCuts;
+
+  h_trk_chi2rzdof_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_fake_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_fake_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_PU_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_PU_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_fake_noCuts->Scale(1./h_trk_chi2rzdof_fake_noCuts->Integral());
+  h_trk_chi2rzdof_fake_noCuts->SetLineColor(2);
+  h_trk_chi2rzdof_fake_noCuts->SetMarkerColor(2);
+  h_trk_chi2rzdof_PU_noCuts->Scale(1./h_trk_chi2rzdof_PU_noCuts->Integral());
+  h_trk_chi2rzdof_PU_noCuts->SetLineColor(3);
+  h_trk_chi2rzdof_PU_noCuts->SetMarkerColor(3);
+  h_trk_chi2rzdof_notHiggs_noCuts->Scale(1./h_trk_chi2rzdof_notHiggs_noCuts->Integral());
+  h_trk_chi2rzdof_notHiggs_noCuts->SetLineColor(4);
+  h_trk_chi2rzdof_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_chi2rzdof_fake_noCuts->Draw("HIST");
+  h_trk_chi2rzdof_primary_noCuts->Draw("HIST,SAME");
+  h_trk_chi2rzdof_PU_noCuts->Draw("HIST,SAME");
+  h_trk_chi2rzdof_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_chi2rzdof_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_chi2rzdof_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_noCuts.jpeg");
+  delete h_trk_chi2rzdof_primary_noCuts;
+  delete h_trk_chi2rzdof_fake_noCuts;
+  delete h_trk_chi2rzdof_PU_noCuts;
+  delete h_trk_chi2rzdof_notHiggs_noCuts;
+
+  h_trk_chi2rzdof_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_chi2rzdof_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_chi2rzdof_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_chi2rzdof_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_chi2rzdof_primary_noCuts_H->Scale(1./h_trk_chi2rzdof_primary_noCuts_H->Integral());
+  h_trk_chi2rzdof_primary_noCuts_H->SetLineColor(1);
+  h_trk_chi2rzdof_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_chi2rzdof_np_noCuts_H->Scale(1./h_trk_chi2rzdof_np_noCuts_H->Integral());
+  h_trk_chi2rzdof_np_noCuts_H->SetLineColor(2);
+  h_trk_chi2rzdof_np_noCuts_H->SetMarkerColor(2);
+  h_trk_chi2rzdof_np_noCuts_H->Draw("HIST");
+  h_trk_chi2rzdof_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_H.jpeg");
+  delete h_trk_chi2rzdof_primary_noCuts_H;
+  delete h_trk_chi2rzdof_np_noCuts_H;
+
+  h_trk_chi2rzdof_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_chi2rzdof_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_chi2rzdof_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_chi2rzdof_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_chi2rzdof_primary_noCuts_L->Scale(1./h_trk_chi2rzdof_primary_noCuts_L->Integral());
+  h_trk_chi2rzdof_primary_noCuts_L->SetLineColor(1);
+  h_trk_chi2rzdof_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_chi2rzdof_np_noCuts_L->Scale(1./h_trk_chi2rzdof_np_noCuts_L->Integral());
+  h_trk_chi2rzdof_np_noCuts_L->SetLineColor(2);
+  h_trk_chi2rzdof_np_noCuts_L->SetMarkerColor(2);
+  h_trk_chi2rzdof_np_noCuts_L->Draw("HIST");
+  h_trk_chi2rzdof_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_L.jpeg");
+  delete h_trk_chi2rzdof_primary_noCuts_L;
+  delete h_trk_chi2rzdof_np_noCuts_L;
+
+  h_trk_chi2rzdof_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_np_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_np_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_primary_qualCuts->Scale(1./h_trk_chi2rzdof_primary_qualCuts->Integral());
+  h_trk_chi2rzdof_primary_qualCuts->SetLineColor(1);
+  h_trk_chi2rzdof_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_chi2rzdof_np_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_np_qualCuts->Clone(); 
+  h_trk_chi2rzdof_np_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCutsNorm->Integral());
+  h_trk_chi2rzdof_np_qualCutsNorm->SetLineColor(2);
+  h_trk_chi2rzdof_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rzdof_np_qualCutsNorm->Draw("HIST");
+  h_trk_chi2rzdof_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_qualCuts.jpeg");
+  delete h_trk_chi2rzdof_np_qualCutsNorm;
+
+  TH1F *h_trk_chi2rzdof_fake_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_fake_qualCuts->Clone(); 
+  h_trk_chi2rzdof_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rzdof_PU_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_PU_qualCuts->Clone(); 
+  h_trk_chi2rzdof_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_chi2rzdof_notHiggs_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_notHiggs_qualCuts->Clone(); 
+  h_trk_chi2rzdof_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_chi2rzdof_fake_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCuts->Integral());
+  h_trk_chi2rzdof_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_chi2rzdof_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rzdof_PU_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCuts->Integral());
+  h_trk_chi2rzdof_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_chi2rzdof_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_chi2rzdof_notHiggs_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCuts->Integral());
+  h_trk_chi2rzdof_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_chi2rzdof_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_chi2rzdof_qualCuts = new THStack("hs_chi2rzdof_qualCuts","Stacked BG histograms");
+  hs_chi2rzdof_qualCuts->Add(h_trk_chi2rzdof_fake_qualCutsNorm);
+  hs_chi2rzdof_qualCuts->Add(h_trk_chi2rzdof_PU_qualCutsNorm);
+  hs_chi2rzdof_qualCuts->Add(h_trk_chi2rzdof_notHiggs_qualCutsNorm);
+  hs_chi2rzdof_qualCuts->Draw("HIST");
+  h_trk_chi2rzdof_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_chi2rzdof_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_chi2rzdof_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_qualCutsNorm.jpeg");
+  delete h_trk_chi2rzdof_fake_qualCutsNorm;
+  delete h_trk_chi2rzdof_PU_qualCutsNorm;
+  delete h_trk_chi2rzdof_notHiggs_qualCutsNorm;
+  delete h_trk_chi2rzdof_np_qualCuts;
+  delete hs_chi2rzdof_qualCuts;
+
+  h_trk_chi2rzdof_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_fake_qualCuts->Scale(1./h_trk_chi2rzdof_fake_qualCuts->Integral());
+  h_trk_chi2rzdof_fake_qualCuts->SetLineColor(2);
+  h_trk_chi2rzdof_fake_qualCuts->SetMarkerColor(2);
+  h_trk_chi2rzdof_PU_qualCuts->Scale(1./h_trk_chi2rzdof_PU_qualCuts->Integral());
+  h_trk_chi2rzdof_PU_qualCuts->SetLineColor(3);
+  h_trk_chi2rzdof_PU_qualCuts->SetMarkerColor(3);
+  h_trk_chi2rzdof_notHiggs_qualCuts->Scale(1./h_trk_chi2rzdof_notHiggs_qualCuts->Integral());
+  h_trk_chi2rzdof_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_chi2rzdof_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_chi2rzdof_fake_qualCuts->Draw("HIST");
+  h_trk_chi2rzdof_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_chi2rzdof_PU_qualCuts->Draw("HIST,SAME");
+  h_trk_chi2rzdof_notHiggs_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_chi2rzdof_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_chi2rzdof_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_qualCuts.jpeg");
+  delete h_trk_chi2rzdof_primary_qualCuts;
+  delete h_trk_chi2rzdof_fake_qualCuts;
+  delete h_trk_chi2rzdof_PU_qualCuts;
+  delete h_trk_chi2rzdof_notHiggs_qualCuts;
+
+  h_trk_bendchi2->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2->GetXaxis()->SetRange(1, h_trk_bendchi2->GetNbinsX() + 2);
+  h_trk_bendchi2->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2->GetName() + ".jpeg");
+  delete h_trk_bendchi2;
+
+  h_trk_bendchi2_primary->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_primary->GetXaxis()->SetRange(1, h_trk_bendchi2_primary->GetNbinsX() + 2);
+  h_trk_bendchi2_primary->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_primary->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_primary->GetName() + ".jpeg");
+  delete h_trk_bendchi2_primary;
+
+  h_trk_bendchi2_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_primary_noCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_primary_noCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_primary_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_primary_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_primary_noCuts->GetName() + ".jpeg");
+
+  h_trk_bendchi2_np->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_np->GetXaxis()->SetRange(1, h_trk_bendchi2_np->GetNbinsX() + 2);
+  h_trk_bendchi2_np->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_np->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_np->GetName() + ".jpeg");
+  delete h_trk_bendchi2_np;
+
+  h_trk_bendchi2_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_np_noCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_np_noCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_np_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_np_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_np_noCuts->GetName() + ".jpeg");
+
+  h_trk_bendchi2_primary_noCuts->Scale(1./h_trk_bendchi2_primary_noCuts->Integral());
+  h_trk_bendchi2_primary_noCuts->SetLineColor(1);
+  h_trk_bendchi2_primary_noCuts->SetMarkerColor(1);
+  TH1F *h_trk_bendchi2_np_noCutsNorm = (TH1F*)h_trk_bendchi2_np_noCuts->Clone(); 
+  h_trk_bendchi2_np_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCutsNorm->Integral());
+  h_trk_bendchi2_np_noCutsNorm->SetLineColor(2);
+  h_trk_bendchi2_np_noCutsNorm->SetMarkerColor(2);
+  h_trk_bendchi2_np_noCutsNorm->Draw("HIST");
+  h_trk_bendchi2_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_np_noCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts.jpeg");
+  delete h_trk_bendchi2_np_noCutsNorm;
+
+  TH1F *h_trk_bendchi2_fake_noCutsNorm = (TH1F*)h_trk_bendchi2_fake_noCuts->Clone(); 
+  h_trk_bendchi2_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_fake_noCutsNorm->GetXaxis()->SetRange(1, h_trk_bendchi2_fake_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_bendchi2_PU_noCutsNorm = (TH1F*)h_trk_bendchi2_PU_noCuts->Clone(); 
+  h_trk_bendchi2_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_PU_noCutsNorm->GetXaxis()->SetRange(1, h_trk_bendchi2_PU_noCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_bendchi2_notHiggs_noCutsNorm = (TH1F*)h_trk_bendchi2_notHiggs_noCuts->Clone(); 
+  h_trk_bendchi2_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_notHiggs_noCutsNorm->GetXaxis()->SetRange(1, h_trk_bendchi2_notHiggs_noCutsNorm->GetNbinsX() + 2);
+  h_trk_bendchi2_fake_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCuts->Integral());
+  h_trk_bendchi2_fake_noCutsNorm->SetLineColor(2);
+  h_trk_bendchi2_fake_noCutsNorm->SetMarkerColor(2);
+  h_trk_bendchi2_PU_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCuts->Integral());
+  h_trk_bendchi2_PU_noCutsNorm->SetLineColor(3);
+  h_trk_bendchi2_PU_noCutsNorm->SetMarkerColor(3);
+  h_trk_bendchi2_notHiggs_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCuts->Integral());
+  h_trk_bendchi2_notHiggs_noCutsNorm->SetLineColor(4);
+  h_trk_bendchi2_notHiggs_noCutsNorm->SetMarkerColor(4);
+  auto hs_bendchi2_noCuts = new THStack("hs_bendchi2_noCuts","Stacked BG histograms");
+  hs_bendchi2_noCuts->Add(h_trk_bendchi2_fake_noCutsNorm);
+  hs_bendchi2_noCuts->Add(h_trk_bendchi2_PU_noCutsNorm);
+  hs_bendchi2_noCuts->Add(h_trk_bendchi2_notHiggs_noCutsNorm);
+  hs_bendchi2_noCuts->Draw("HIST");
+  h_trk_bendchi2_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_fake_noCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_bendchi2_PU_noCutsNorm,"PU","l");
+  l->AddEntry(h_trk_bendchi2_notHiggs_noCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_noCutsNorm.jpeg");
+  delete h_trk_bendchi2_fake_noCutsNorm;
+  delete h_trk_bendchi2_PU_noCutsNorm;
+  delete h_trk_bendchi2_notHiggs_noCutsNorm;
+  delete h_trk_bendchi2_np_noCuts;
+  delete hs_bendchi2_noCuts;
+
+  h_trk_bendchi2_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_fake_noCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_fake_noCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_PU_noCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_PU_noCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_notHiggs_noCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_notHiggs_noCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_fake_noCuts->Scale(1./h_trk_bendchi2_fake_noCuts->Integral());
+  h_trk_bendchi2_fake_noCuts->SetLineColor(2);
+  h_trk_bendchi2_fake_noCuts->SetMarkerColor(2);
+  h_trk_bendchi2_PU_noCuts->Scale(1./h_trk_bendchi2_PU_noCuts->Integral());
+  h_trk_bendchi2_PU_noCuts->SetLineColor(3);
+  h_trk_bendchi2_PU_noCuts->SetMarkerColor(3);
+  h_trk_bendchi2_notHiggs_noCuts->Scale(1./h_trk_bendchi2_notHiggs_noCuts->Integral());
+  h_trk_bendchi2_notHiggs_noCuts->SetLineColor(4);
+  h_trk_bendchi2_notHiggs_noCuts->SetMarkerColor(4);
+  h_trk_bendchi2_fake_noCuts->Draw("HIST");
+  h_trk_bendchi2_primary_noCuts->Draw("HIST,SAME");
+  h_trk_bendchi2_PU_noCuts->Draw("HIST,SAME");
+  h_trk_bendchi2_notHiggs_noCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_fake_noCuts,"Fake","l");
+  l->AddEntry(h_trk_bendchi2_PU_noCuts,"PU","l");
+  l->AddEntry(h_trk_bendchi2_notHiggs_noCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_noCuts.jpeg");
+  delete h_trk_bendchi2_primary_noCuts;
+  delete h_trk_bendchi2_fake_noCuts;
+  delete h_trk_bendchi2_PU_noCuts;
+  delete h_trk_bendchi2_notHiggs_noCuts;
+
+  h_trk_bendchi2_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_primary_noCuts_H->GetXaxis()->SetRange(1, h_trk_bendchi2_primary_noCuts_H->GetNbinsX() + 2);
+  h_trk_bendchi2_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_np_noCuts_H->GetXaxis()->SetRange(1, h_trk_bendchi2_np_noCuts_H->GetNbinsX() + 2);
+  h_trk_bendchi2_primary_noCuts_H->Scale(1./h_trk_bendchi2_primary_noCuts_H->Integral());
+  h_trk_bendchi2_primary_noCuts_H->SetLineColor(1);
+  h_trk_bendchi2_primary_noCuts_H->SetMarkerColor(1);
+  h_trk_bendchi2_np_noCuts_H->Scale(1./h_trk_bendchi2_np_noCuts_H->Integral());
+  h_trk_bendchi2_np_noCuts_H->SetLineColor(2);
+  h_trk_bendchi2_np_noCuts_H->SetMarkerColor(2);
+  h_trk_bendchi2_np_noCuts_H->Draw("HIST");
+  h_trk_bendchi2_primary_noCuts_H->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_noCuts_H,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_np_noCuts_H,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_H.jpeg");
+  delete h_trk_bendchi2_primary_noCuts_H;
+  delete h_trk_bendchi2_np_noCuts_H;
+
+  h_trk_bendchi2_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_primary_noCuts_L->GetXaxis()->SetRange(1, h_trk_bendchi2_primary_noCuts_L->GetNbinsX() + 2);
+  h_trk_bendchi2_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_np_noCuts_L->GetXaxis()->SetRange(1, h_trk_bendchi2_np_noCuts_L->GetNbinsX() + 2);
+  h_trk_bendchi2_primary_noCuts_L->Scale(1./h_trk_bendchi2_primary_noCuts_L->Integral());
+  h_trk_bendchi2_primary_noCuts_L->SetLineColor(1);
+  h_trk_bendchi2_primary_noCuts_L->SetMarkerColor(1);
+  h_trk_bendchi2_np_noCuts_L->Scale(1./h_trk_bendchi2_np_noCuts_L->Integral());
+  h_trk_bendchi2_np_noCuts_L->SetLineColor(2);
+  h_trk_bendchi2_np_noCuts_L->SetMarkerColor(2);
+  h_trk_bendchi2_np_noCuts_L->Draw("HIST");
+  h_trk_bendchi2_primary_noCuts_L->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_noCuts_L,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_np_noCuts_L,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_L.jpeg");
+  delete h_trk_bendchi2_primary_noCuts_L;
+  delete h_trk_bendchi2_np_noCuts_L;
+
+  h_trk_bendchi2_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_primary_qualCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_np_qualCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_np_qualCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_primary_qualCuts->Scale(1./h_trk_bendchi2_primary_qualCuts->Integral());
+  h_trk_bendchi2_primary_qualCuts->SetLineColor(1);
+  h_trk_bendchi2_primary_qualCuts->SetMarkerColor(1);
+  TH1F *h_trk_bendchi2_np_qualCutsNorm = (TH1F*)h_trk_bendchi2_np_qualCuts->Clone(); 
+  h_trk_bendchi2_np_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCutsNorm->Integral());
+  h_trk_bendchi2_np_qualCutsNorm->SetLineColor(2);
+  h_trk_bendchi2_np_qualCutsNorm->SetMarkerColor(2);
+  h_trk_bendchi2_np_qualCutsNorm->Draw("HIST");
+  h_trk_bendchi2_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_np_qualCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_qualCuts.jpeg");
+  delete h_trk_bendchi2_np_qualCutsNorm;
+
+  TH1F *h_trk_bendchi2_fake_qualCutsNorm = (TH1F*)h_trk_bendchi2_fake_qualCuts->Clone(); 
+  h_trk_bendchi2_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_bendchi2_fake_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_bendchi2_PU_qualCutsNorm = (TH1F*)h_trk_bendchi2_PU_qualCuts->Clone(); 
+  h_trk_bendchi2_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_PU_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_bendchi2_PU_qualCutsNorm->GetNbinsX() + 2);
+  TH1F *h_trk_bendchi2_notHiggs_qualCutsNorm = (TH1F*)h_trk_bendchi2_notHiggs_qualCuts->Clone(); 
+  h_trk_bendchi2_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_notHiggs_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_bendchi2_notHiggs_qualCutsNorm->GetNbinsX() + 2);
+  h_trk_bendchi2_fake_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCuts->Integral());
+  h_trk_bendchi2_fake_qualCutsNorm->SetLineColor(2);
+  h_trk_bendchi2_fake_qualCutsNorm->SetMarkerColor(2);
+  h_trk_bendchi2_PU_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCuts->Integral());
+  h_trk_bendchi2_PU_qualCutsNorm->SetLineColor(3);
+  h_trk_bendchi2_PU_qualCutsNorm->SetMarkerColor(3);
+  h_trk_bendchi2_notHiggs_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCuts->Integral());
+  h_trk_bendchi2_notHiggs_qualCutsNorm->SetLineColor(4);
+  h_trk_bendchi2_notHiggs_qualCutsNorm->SetMarkerColor(4);
+  auto hs_bendchi2_qualCuts = new THStack("hs_bendchi2_qualCuts","Stacked BG histograms");
+  hs_bendchi2_qualCuts->Add(h_trk_bendchi2_fake_qualCutsNorm);
+  hs_bendchi2_qualCuts->Add(h_trk_bendchi2_PU_qualCutsNorm);
+  hs_bendchi2_qualCuts->Add(h_trk_bendchi2_notHiggs_qualCutsNorm);
+  hs_bendchi2_qualCuts->Draw("HIST");
+  h_trk_bendchi2_primary_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_fake_qualCutsNorm,"Fake","l");
+  l->AddEntry(h_trk_bendchi2_PU_qualCutsNorm,"PU","l");
+  l->AddEntry(h_trk_bendchi2_notHiggs_qualCutsNorm,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_qualCutsNorm.jpeg");
+  delete h_trk_bendchi2_fake_qualCutsNorm;
+  delete h_trk_bendchi2_PU_qualCutsNorm;
+  delete h_trk_bendchi2_notHiggs_qualCutsNorm;
+  delete h_trk_bendchi2_np_qualCuts;
+  delete hs_bendchi2_qualCuts;
+
+  h_trk_bendchi2_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_fake_qualCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_fake_qualCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_PU_qualCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_PU_qualCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_notHiggs_qualCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_notHiggs_qualCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_fake_qualCuts->Scale(1./h_trk_bendchi2_fake_qualCuts->Integral());
+  h_trk_bendchi2_fake_qualCuts->SetLineColor(2);
+  h_trk_bendchi2_fake_qualCuts->SetMarkerColor(2);
+  h_trk_bendchi2_PU_qualCuts->Scale(1./h_trk_bendchi2_PU_qualCuts->Integral());
+  h_trk_bendchi2_PU_qualCuts->SetLineColor(3);
+  h_trk_bendchi2_PU_qualCuts->SetMarkerColor(3);
+  h_trk_bendchi2_notHiggs_qualCuts->Scale(1./h_trk_bendchi2_notHiggs_qualCuts->Integral());
+  h_trk_bendchi2_notHiggs_qualCuts->SetLineColor(4);
+  h_trk_bendchi2_notHiggs_qualCuts->SetMarkerColor(4);
+  h_trk_bendchi2_notHiggs_qualCuts->Draw("HIST");
+  h_trk_bendchi2_primary_qualCuts->Draw("HIST,SAME");
+  h_trk_bendchi2_fake_qualCuts->Draw("HIST,SAME");
+  h_trk_bendchi2_PU_qualCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_qualCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_fake_qualCuts,"Fake","l");
+  l->AddEntry(h_trk_bendchi2_PU_qualCuts,"PU","l");
+  l->AddEntry(h_trk_bendchi2_notHiggs_qualCuts,"Not H->4b","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_qualCuts.jpeg");
+  delete h_trk_bendchi2_primary_qualCuts;
+  delete h_trk_bendchi2_fake_qualCuts;
+  delete h_trk_bendchi2_PU_qualCuts;
+  delete h_trk_bendchi2_notHiggs_qualCuts;
+
+  h_trk_chi2rphidof_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_H->GetXaxis()->SetRange(1, h_trk_chi2rphidof_H->GetNbinsX() + 2);
+  h_trk_chi2rphidof_H->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_H->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_H->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_H;
+
+  h_trk_chi2rzdof_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_H->GetXaxis()->SetRange(1, h_trk_chi2rzdof_H->GetNbinsX() + 2);
+  h_trk_chi2rzdof_H->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_H->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_H->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_H;
+   
+  h_trk_bendchi2_H->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_H->GetXaxis()->SetRange(1, h_trk_bendchi2_H->GetNbinsX() + 2);
+  h_trk_bendchi2_H->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_H->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_H->GetName() + ".jpeg");
+  delete h_trk_bendchi2_H;
+
+  h_trk_chi2rphidof_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_L->GetXaxis()->SetRange(1, h_trk_chi2rphidof_L->GetNbinsX() + 2);
+  h_trk_chi2rphidof_L->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_L->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_L->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_L;
+
+  h_trk_chi2rzdof_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_L->GetXaxis()->SetRange(1, h_trk_chi2rzdof_L->GetNbinsX() + 2);
+  h_trk_chi2rzdof_L->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_L->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_L->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_L;
+
+  h_trk_bendchi2_L->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_L->GetXaxis()->SetRange(1, h_trk_bendchi2_L->GetNbinsX() + 2);
+  h_trk_bendchi2_L->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_L->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_L->GetName() + ".jpeg");
+  delete h_trk_bendchi2_L;
+
+  h_trk_chi2rphidof_C->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_C->GetXaxis()->SetRange(1, h_trk_chi2rphidof_C->GetNbinsX() + 2);
+  h_trk_chi2rphidof_C->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_C->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_C->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_C;
+
+  h_trk_chi2rzdof_C->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_C->GetXaxis()->SetRange(1, h_trk_chi2rzdof_C->GetNbinsX() + 2);
+  h_trk_chi2rzdof_C->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_C->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_C->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_C;
+
+  h_trk_bendchi2_C->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_C->GetXaxis()->SetRange(1, h_trk_bendchi2_C->GetNbinsX() + 2);
+  h_trk_bendchi2_C->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_C->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_C->GetName() + ".jpeg");
+  delete h_trk_bendchi2_C;
+
+  h_trk_chi2rphidof_I->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_I->GetXaxis()->SetRange(1, h_trk_chi2rphidof_I->GetNbinsX() + 2);
+  h_trk_chi2rphidof_I->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_I->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_I->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_I;
+   
+  h_trk_chi2rzdof_I->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_I->GetXaxis()->SetRange(1, h_trk_chi2rzdof_I->GetNbinsX() + 2);
+  h_trk_chi2rzdof_I->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_I->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_I->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_I;
+   
+  h_trk_bendchi2_I->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_I->GetXaxis()->SetRange(1, h_trk_bendchi2_I->GetNbinsX() + 2);
+  h_trk_bendchi2_I->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_I->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_I->GetName() + ".jpeg");
+  delete h_trk_bendchi2_I;
+   
+  h_trk_chi2rphidof_F->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_F->GetXaxis()->SetRange(1, h_trk_chi2rphidof_F->GetNbinsX() + 2);
+  h_trk_chi2rphidof_F->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_F->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_F->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_F;
+   
+  h_trk_chi2rzdof_F->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_F->GetXaxis()->SetRange(1, h_trk_chi2rzdof_F->GetNbinsX() + 2);
+  h_trk_chi2rzdof_F->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_F->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_F->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_F;
+   
+  h_trk_bendchi2_F->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_F->GetXaxis()->SetRange(1, h_trk_bendchi2_F->GetNbinsX() + 2);
+  h_trk_bendchi2_F->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_F->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_F->GetName() + ".jpeg");
+  delete h_trk_bendchi2_F;
+   
+  h_trk_chi2rphidof_P->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_P->GetXaxis()->SetRange(1, h_trk_chi2rphidof_P->GetNbinsX() + 2);
+  h_trk_chi2rphidof_P->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_P->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_P->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_P;
+   
+  h_trk_chi2rzdof_P->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_P->GetXaxis()->SetRange(1, h_trk_chi2rzdof_P->GetNbinsX() + 2);
+  h_trk_chi2rzdof_P->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_P->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_P->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_P;
+   
+  h_trk_bendchi2_P->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_P->GetXaxis()->SetRange(1, h_trk_bendchi2_P->GetNbinsX() + 2);
+  h_trk_bendchi2_P->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_P->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_P->GetName() + ".jpeg");
+  delete h_trk_bendchi2_P;
+   
+  h_trk_chi2rphidof_D->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_D->GetXaxis()->SetRange(1, h_trk_chi2rphidof_D->GetNbinsX() + 2);
+  h_trk_chi2rphidof_D->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rphidof_D->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_D->GetName() + ".jpeg");
+  delete h_trk_chi2rphidof_D;
+   
+  h_trk_chi2rzdof_D->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_D->GetXaxis()->SetRange(1, h_trk_chi2rzdof_D->GetNbinsX() + 2);
+  h_trk_chi2rzdof_D->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_chi2rzdof_D->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_D->GetName() + ".jpeg");
+  delete h_trk_chi2rzdof_D;
+   
+  h_trk_bendchi2_D->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_D->GetXaxis()->SetRange(1, h_trk_bendchi2_D->GetNbinsX() + 2);
+  h_trk_bendchi2_D->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_bendchi2_D->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_bendchi2_D->GetName() + ".jpeg");
+  delete h_trk_bendchi2_D;
+   
+  h_match_tp_pt_noCuts->Sumw2();
+  h_tp_pt_noCuts->Sumw2();
+  TH1F* h_eff_pt_noCuts = (TH1F*)h_match_tp_pt_noCuts->Clone();
+  h_eff_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_noCuts->GetXaxis()->SetRange(1, h_eff_pt_noCuts->GetNbinsX() + 2);
+  h_eff_pt_noCuts->SetName("eff_pt_noCuts");
+  h_eff_pt_noCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_noCuts->Divide(h_match_tp_pt_noCuts, h_tp_pt_noCuts, 1.0, 1.0, "B");
+  h_eff_pt_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_noCuts->GetName() + ".jpeg");
+  delete h_eff_pt_noCuts;
+  delete h_match_tp_pt_noCuts;
+  delete h_tp_pt_noCuts;
+   
+  h_match_tp_eta_noCuts->Sumw2();
+  h_tp_eta_noCuts->Sumw2();
+  TH1F* h_eff_eta_noCuts = (TH1F*)h_match_tp_eta_noCuts->Clone();
+  h_eff_eta_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_noCuts->GetXaxis()->SetRange(1, h_eff_eta_noCuts->GetNbinsX() + 2);
+  h_eff_eta_noCuts->SetName("eff_eta_noCuts");
+  h_eff_eta_noCuts->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_noCuts->Divide(h_match_tp_eta_noCuts, h_tp_eta_noCuts, 1.0, 1.0, "B");
+  h_eff_eta_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_noCuts->GetName() + ".jpeg");
+  delete h_eff_eta_noCuts;
+  delete h_match_tp_eta_noCuts;
+  
+
+  h_match_tp_d0_noCuts->Sumw2();
+  h_tp_d0_noCuts->Sumw2();
+  TH1F* h_eff_d0_noCuts = (TH1F*)h_match_tp_d0_noCuts->Clone();
+  h_eff_d0_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_noCuts->GetXaxis()->SetRange(1, h_eff_d0_noCuts->GetNbinsX() + 2);
+  h_eff_d0_noCuts->SetName("eff_d0_noCuts");
+  h_eff_d0_noCuts->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_noCuts->Divide(h_match_tp_d0_noCuts, h_tp_d0_noCuts, 1.0, 1.0, "B");
+  h_eff_d0_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_noCuts->GetName() + ".jpeg");
+  delete h_eff_d0_noCuts;
+  delete h_match_tp_d0_noCuts;
+  delete h_tp_d0_noCuts;
+
+  h_match_tp_pt_maxD0Cut->Sumw2();
+  h_tp_pt_maxD0Cut->Sumw2();
+  TH1F* h_eff_pt_maxD0Cut = (TH1F*)h_match_tp_pt_maxD0Cut->Clone();
+  h_eff_pt_maxD0Cut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_maxD0Cut->GetXaxis()->SetRange(1, h_eff_pt_maxD0Cut->GetNbinsX() + 2);
+  h_eff_pt_maxD0Cut->SetName("eff_pt_maxD0Cut");
+  h_eff_pt_maxD0Cut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_maxD0Cut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_maxD0Cut->Divide(h_match_tp_pt_maxD0Cut, h_tp_pt_maxD0Cut, 1.0, 1.0, "B");
+  h_eff_pt_maxD0Cut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_maxD0Cut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_maxD0Cut->GetName() + ".jpeg");
+  delete h_eff_pt_maxD0Cut;
+  delete h_match_tp_pt_maxD0Cut;
+  delete h_tp_pt_maxD0Cut;
+
+  h_match_tp_eta_maxD0Cut->Sumw2();
+  h_tp_eta_maxD0Cut->Sumw2();
+  TH1F* h_eff_eta_maxD0Cut = (TH1F*)h_match_tp_eta_maxD0Cut->Clone();
+  h_eff_eta_maxD0Cut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_maxD0Cut->GetXaxis()->SetRange(1, h_eff_eta_maxD0Cut->GetNbinsX() + 2);
+  h_eff_eta_maxD0Cut->SetName("eff_eta_maxD0Cut");
+  h_eff_eta_maxD0Cut->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_maxD0Cut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_maxD0Cut->Divide(h_match_tp_eta_maxD0Cut, h_tp_eta_maxD0Cut, 1.0, 1.0, "B");
+  h_eff_eta_maxD0Cut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_maxD0Cut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_maxD0Cut->GetName() + ".jpeg");
+  delete h_eff_eta_maxD0Cut;
+  delete h_match_tp_eta_maxD0Cut;
+  delete h_tp_eta_maxD0Cut;
+
+  h_match_tp_d0_maxD0Cut->Sumw2();
+  h_tp_d0_maxD0Cut->Sumw2();
+  TH1F* h_eff_d0_maxD0Cut = (TH1F*)h_match_tp_d0_maxD0Cut->Clone();
+  h_eff_d0_maxD0Cut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_maxD0Cut->GetXaxis()->SetRange(1, h_eff_d0_maxD0Cut->GetNbinsX() + 2);
+  h_eff_d0_maxD0Cut->SetName("eff_d0_maxD0Cut");
+  h_eff_d0_maxD0Cut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_maxD0Cut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_maxD0Cut->Divide(h_match_tp_d0_maxD0Cut, h_tp_d0_maxD0Cut, 1.0, 1.0, "B");
+  h_eff_d0_maxD0Cut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_maxD0Cut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_maxD0Cut->GetName() + ".jpeg");
+  delete h_eff_d0_maxD0Cut;
+  delete h_match_tp_d0_maxD0Cut;
+  delete h_tp_d0_maxD0Cut;
+
+  h_match_tp_pt_minD0Cut->Sumw2();
+  h_tp_pt_minD0Cut->Sumw2();
+  TH1F* h_eff_pt_minD0Cut = (TH1F*)h_match_tp_pt_minD0Cut->Clone();
+  h_eff_pt_minD0Cut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_minD0Cut->GetXaxis()->SetRange(1, h_eff_pt_minD0Cut->GetNbinsX() + 2);
+  h_eff_pt_minD0Cut->SetName("eff_pt_minD0Cut");
+  h_eff_pt_minD0Cut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_minD0Cut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_minD0Cut->Divide(h_match_tp_pt_minD0Cut, h_tp_pt_minD0Cut, 1.0, 1.0, "B");
+  h_eff_pt_minD0Cut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_minD0Cut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_minD0Cut->GetName() + ".jpeg");
+  delete h_eff_pt_minD0Cut;
+  delete h_match_tp_pt_minD0Cut;
+  delete h_tp_pt_minD0Cut;
+
+  h_match_tp_eta_minD0Cut->Sumw2();
+  h_tp_eta_minD0Cut->Sumw2();
+  TH1F* h_eff_eta_minD0Cut = (TH1F*)h_match_tp_eta_minD0Cut->Clone();
+  h_eff_eta_minD0Cut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_minD0Cut->GetXaxis()->SetRange(1, h_eff_eta_minD0Cut->GetNbinsX() + 2);
+  h_eff_eta_minD0Cut->SetName("eff_eta_minD0Cut");
+  h_eff_eta_minD0Cut->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_minD0Cut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_minD0Cut->Divide(h_match_tp_eta_minD0Cut, h_tp_eta_minD0Cut, 1.0, 1.0, "B");
+  h_eff_eta_minD0Cut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_minD0Cut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_minD0Cut->GetName() + ".jpeg");
+  delete h_eff_eta_minD0Cut;
+  delete h_match_tp_eta_minD0Cut;
+  delete h_tp_eta_minD0Cut;
+   
+  h_match_tp_d0_minD0Cut->Sumw2();
+  h_tp_d0_minD0Cut->Sumw2();
+  TH1F* h_eff_d0_minD0Cut = (TH1F*)h_match_tp_d0_minD0Cut->Clone();
+  h_eff_d0_minD0Cut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_minD0Cut->GetXaxis()->SetRange(1, h_eff_d0_minD0Cut->GetNbinsX() + 2);
+  h_eff_d0_minD0Cut->SetName("eff_d0_minD0Cut");
+  h_eff_d0_minD0Cut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_minD0Cut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_minD0Cut->Divide(h_match_tp_d0_minD0Cut, h_tp_d0_minD0Cut, 1.0, 1.0, "B");
+  h_eff_d0_minD0Cut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_minD0Cut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_minD0Cut->GetName() + ".jpeg");
+  delete h_eff_d0_minD0Cut;
+  delete h_match_tp_d0_minD0Cut;
+  delete h_tp_d0_minD0Cut;
+
+  h_match_tp_pt_minPtCut->Sumw2();
+  h_tp_pt_minPtCut->Sumw2();
+  TH1F* h_eff_pt_minPtCut = (TH1F*)h_match_tp_pt_minPtCut->Clone();
+  h_eff_pt_minPtCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_minPtCut->GetXaxis()->SetRange(1, h_eff_pt_minPtCut->GetNbinsX() + 2);
+  h_eff_pt_minPtCut->SetName("eff_pt_minPtCut");
+  h_eff_pt_minPtCut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_minPtCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_minPtCut->Divide(h_match_tp_pt_minPtCut, h_tp_pt_minPtCut, 1.0, 1.0, "B");
+  h_eff_pt_minPtCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_minPtCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_minPtCut->GetName() + ".jpeg");
+  delete h_eff_pt_minPtCut;
+  delete h_match_tp_pt_minPtCut;
+  delete h_tp_pt_minPtCut;
+
+  h_match_tp_eta_minPtCut->Sumw2();
+  h_tp_eta_minPtCut->Sumw2();
+  TH1F* h_eff_eta_minPtCut = (TH1F*)h_match_tp_eta_minPtCut->Clone();
+  h_eff_eta_minPtCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_minPtCut->GetXaxis()->SetRange(1, h_eff_eta_minPtCut->GetNbinsX() + 2);
+  h_eff_eta_minPtCut->SetName("eff_eta_minPtCut");
+  h_eff_eta_minPtCut->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_minPtCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_minPtCut->Divide(h_match_tp_eta_minPtCut, h_tp_eta_minPtCut, 1.0, 1.0, "B");
+  h_eff_eta_minPtCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_minPtCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_minPtCut->GetName() + ".jpeg");
+  delete h_eff_eta_minPtCut;
+  delete h_match_tp_eta_minPtCut;
+  delete h_tp_eta_minPtCut;
+
+  h_match_tp_d0_minPtCut->Sumw2();
+  h_tp_d0_minPtCut->Sumw2();
+  TH1F* h_eff_d0_minPtCut = (TH1F*)h_match_tp_d0_minPtCut->Clone();
+  h_eff_d0_minPtCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_minPtCut->GetXaxis()->SetRange(1, h_eff_d0_minPtCut->GetNbinsX() + 2);
+  h_eff_d0_minPtCut->SetName("eff_d0_minPtCut");
+  h_eff_d0_minPtCut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_minPtCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_minPtCut->Divide(h_match_tp_d0_minPtCut, h_tp_d0_minPtCut, 1.0, 1.0, "B");
+  h_eff_d0_minPtCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_minPtCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_minPtCut->GetName() + ".jpeg");
+  delete h_eff_d0_minPtCut;
+  delete h_match_tp_d0_minPtCut;
+  delete h_tp_d0_minPtCut;
+
+  h_match_tp_pt_maxPtCut->Sumw2();
+  h_tp_pt_maxPtCut->Sumw2();
+  TH1F* h_eff_pt_maxPtCut = (TH1F*)h_match_tp_pt_maxPtCut->Clone();
+  h_eff_pt_maxPtCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_maxPtCut->GetXaxis()->SetRange(1, h_eff_pt_maxPtCut->GetNbinsX() + 2);
+  h_eff_pt_maxPtCut->SetName("eff_pt_maxPtCut");
+  h_eff_pt_maxPtCut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_maxPtCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_maxPtCut->Divide(h_match_tp_pt_maxPtCut, h_tp_pt_maxPtCut, 1.0, 1.0, "B");
+  h_eff_pt_maxPtCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_maxPtCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_maxPtCut->GetName() + ".jpeg");
+  delete h_eff_pt_maxPtCut;
+  delete h_match_tp_pt_maxPtCut;
+  delete h_tp_pt_maxPtCut;
+
+  h_match_tp_eta_maxPtCut->Sumw2();
+  h_tp_eta_maxPtCut->Sumw2();
+  TH1F* h_eff_eta_maxPtCut = (TH1F*)h_match_tp_eta_maxPtCut->Clone();
+  h_eff_eta_maxPtCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_maxPtCut->GetXaxis()->SetRange(1, h_eff_eta_maxPtCut->GetNbinsX() + 2);
+  h_eff_eta_maxPtCut->SetName("eff_eta_maxPtCut");
+  h_eff_eta_maxPtCut->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_maxPtCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_maxPtCut->Divide(h_match_tp_eta_maxPtCut, h_tp_eta_maxPtCut, 1.0, 1.0, "B");
+  h_eff_eta_maxPtCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_maxPtCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_maxPtCut->GetName() + ".jpeg");
+  delete h_eff_eta_maxPtCut;
+  delete h_match_tp_eta_maxPtCut;
+  delete h_tp_eta_maxPtCut;
+
+  h_match_tp_d0_maxPtCut->Sumw2();
+  h_tp_d0_maxPtCut->Sumw2();
+  TH1F* h_eff_d0_maxPtCut = (TH1F*)h_match_tp_d0_maxPtCut->Clone();
+  h_eff_d0_maxPtCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_maxPtCut->GetXaxis()->SetRange(1, h_eff_d0_maxPtCut->GetNbinsX() + 2);
+  h_eff_d0_maxPtCut->SetName("eff_d0_maxPtCut");
+  h_eff_d0_maxPtCut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_maxPtCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_maxPtCut->Divide(h_match_tp_d0_maxPtCut, h_tp_d0_maxPtCut, 1.0, 1.0, "B");
+  h_eff_d0_maxPtCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_maxPtCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_maxPtCut->GetName() + ".jpeg");
+  delete h_eff_d0_maxPtCut;
+  delete h_match_tp_d0_maxPtCut;
+  delete h_tp_d0_maxPtCut;
+
+  h_match_tp_pt_maxEtaCut->Sumw2();
+  h_tp_pt_maxEtaCut->Sumw2();
+  TH1F* h_eff_pt_maxEtaCut = (TH1F*)h_match_tp_pt_maxEtaCut->Clone();
+  h_eff_pt_maxEtaCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_maxEtaCut->GetXaxis()->SetRange(1, h_eff_pt_maxEtaCut->GetNbinsX() + 2);
+  h_eff_pt_maxEtaCut->SetName("eff_pt_maxEtaCut");
+  h_eff_pt_maxEtaCut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_maxEtaCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_maxEtaCut->Divide(h_match_tp_pt_maxEtaCut, h_tp_pt_maxEtaCut, 1.0, 1.0, "B");
+  h_eff_pt_maxEtaCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_maxEtaCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_maxEtaCut->GetName() + ".jpeg");
+  delete h_eff_pt_maxEtaCut;
+  //delete h_match_tp_pt_maxEtaCut;  
+
+  h_match_tp_eta_maxEtaCut->Sumw2();
+  h_tp_eta_maxEtaCut->Sumw2();
+  TH1F* h_eff_eta_maxEtaCut = (TH1F*)h_match_tp_eta_maxEtaCut->Clone();
+  h_eff_eta_maxEtaCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_maxEtaCut->GetXaxis()->SetRange(1, h_eff_eta_maxEtaCut->GetNbinsX() + 2);
+  h_eff_eta_maxEtaCut->SetName("eff_eta_maxEtaCut");
+  h_eff_eta_maxEtaCut->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_maxEtaCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_maxEtaCut->Divide(h_match_tp_eta_maxEtaCut, h_tp_eta_maxEtaCut, 1.0, 1.0, "B");
+  h_eff_eta_maxEtaCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_maxEtaCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_maxEtaCut->GetName() + ".jpeg");
+  delete h_eff_eta_maxEtaCut;
+  delete h_match_tp_eta_maxEtaCut;
+  
+
+  h_match_tp_d0_maxEtaCut->Sumw2();
+  h_tp_d0_maxEtaCut->Sumw2();
+  TH1F* h_eff_d0_maxEtaCut = (TH1F*)h_match_tp_d0_maxEtaCut->Clone();
+  h_eff_d0_maxEtaCut->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_maxEtaCut->GetXaxis()->SetRange(1, h_eff_d0_maxEtaCut->GetNbinsX() + 2);
+  h_eff_d0_maxEtaCut->SetName("eff_d0_maxEtaCut");
+  h_eff_d0_maxEtaCut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_maxEtaCut->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_maxEtaCut->Divide(h_match_tp_d0_maxEtaCut, h_tp_d0_maxEtaCut, 1.0, 1.0, "B");
+  h_eff_d0_maxEtaCut->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_maxEtaCut->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_maxEtaCut->GetName() + ".jpeg");
+  delete h_eff_d0_maxEtaCut;
+  delete h_match_tp_d0_maxEtaCut;
+  delete h_tp_d0_maxEtaCut;
+
+  h_match_tp_pt_allCuts->Sumw2();
+  h_tp_pt_allCuts->Sumw2();
+  TH1F* h_eff_pt_allCuts = (TH1F*)h_match_tp_pt_allCuts->Clone();
+  h_eff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_pt_allCuts->GetXaxis()->SetRange(1, h_eff_pt_allCuts->GetNbinsX() + 2);
+  h_eff_pt_allCuts->SetName("eff_pt_allCuts");
+  h_eff_pt_allCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_eff_pt_allCuts->Divide(h_match_tp_pt_allCuts, h_tp_pt_allCuts, 1.0, 1.0, "B");
+  h_eff_pt_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_pt_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_pt_allCuts->GetName() + ".jpeg");
+  delete h_eff_pt_allCuts;
+  //delete h_match_tp_pt_allCuts;
+  
+
+  h_match_tp_eta_allCuts->Sumw2();
+  h_tp_eta_allCuts->Sumw2();
+  TH1F* h_eff_eta_allCuts = (TH1F*)h_match_tp_eta_allCuts->Clone();
+  h_eff_eta_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_eta_allCuts->GetXaxis()->SetRange(1, h_eff_eta_allCuts->GetNbinsX() + 2);
+  h_eff_eta_allCuts->SetName("eff_eta_allCuts");
+  h_eff_eta_allCuts->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_eta_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_eff_eta_allCuts->Divide(h_match_tp_eta_allCuts, h_tp_eta_allCuts, 1.0, 1.0, "B");
+  h_eff_eta_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_eta_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_eta_allCuts->GetName() + ".jpeg");
+  delete h_eff_eta_allCuts;
+  delete h_match_tp_eta_allCuts;
+  
+
+  h_match_tp_d0_allCuts->Sumw2();
+  h_tp_d0_allCuts->Sumw2();
+  TH1F* h_eff_d0_allCuts = (TH1F*)h_match_tp_d0_allCuts->Clone();
+  h_eff_d0_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_d0_allCuts->GetXaxis()->SetRange(1, h_eff_d0_allCuts->GetNbinsX() + 2);
+  h_eff_d0_allCuts->SetName("eff_d0_allCuts");
+  h_eff_d0_allCuts->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
+  h_eff_d0_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_eff_d0_allCuts->Divide(h_match_tp_d0_allCuts, h_tp_d0_allCuts, 1.0, 1.0, "B");
+  h_eff_d0_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_d0_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_d0_allCuts->GetName() + ".jpeg");
+  delete h_eff_d0_allCuts;
+  delete h_match_tp_d0_allCuts;
+  delete h_tp_d0_allCuts;
+
+  h_trk_matchtp_pt_allCuts->Sumw2();
+  //h_tp_pt_allCuts->Sumw2();
+  TH1F* h_psEff_pt_allCuts = (TH1F*)h_trk_matchtp_pt_allCuts->Clone();
+  h_psEff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_pt_allCuts->GetXaxis()->SetRange(1, h_psEff_pt_allCuts->GetNbinsX() + 2);
+  h_psEff_pt_allCuts->SetName("psEff_pt_allCuts");
+  h_psEff_pt_allCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_psEff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_pt_allCuts->Divide(h_trk_matchtp_pt_allCuts, h_tp_pt_allCuts, 1.0, 1.0, "B");
+  h_psEff_pt_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_pt_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_pt_allCuts->GetName() + ".jpeg");
+  delete h_psEff_pt_allCuts;
+  delete h_trk_matchtp_pt_allCuts;
+  delete h_tp_pt_allCuts;
+
+  h_trk_matchtp_eta_allCuts->Sumw2();
+  //h_tp_eta_allCuts->Sumw2();
+  TH1F* h_psEff_eta_allCuts = (TH1F*)h_trk_matchtp_eta_allCuts->Clone();
+  h_psEff_eta_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_eta_allCuts->GetXaxis()->SetRange(1, h_psEff_eta_allCuts->GetNbinsX() + 2);
+  h_psEff_eta_allCuts->SetName("psEff_eta_allCuts");
+  h_psEff_eta_allCuts->GetXaxis()->SetTitle("Tracking Particle #eta (GeV)");
+  h_psEff_eta_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_eta_allCuts->Divide(h_trk_matchtp_eta_allCuts, h_tp_eta_allCuts, 1.0, 1.0, "B");
+  h_psEff_eta_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_eta_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_eta_allCuts->GetName() + ".jpeg");
+  delete h_psEff_eta_allCuts;
+  delete h_trk_matchtp_eta_allCuts;
+  delete h_tp_eta_allCuts;
+
+  h_trk_matchtp_dxy_allCuts->Sumw2();
+  h_tp_dxy_allCuts->Sumw2();
+  TH1F* h_psEff_dxy_allCuts = (TH1F*)h_trk_matchtp_dxy_allCuts->Clone();
+  h_psEff_dxy_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_dxy_allCuts->GetXaxis()->SetRange(1, h_psEff_dxy_allCuts->GetNbinsX() + 2);
+  h_psEff_dxy_allCuts->SetName("psEff_dxy_allCuts");
+  h_psEff_dxy_allCuts->GetXaxis()->SetTitle("Tracking Particle #dxy (GeV)");
+  h_psEff_dxy_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_dxy_allCuts->Divide(h_trk_matchtp_dxy_allCuts, h_tp_dxy_allCuts, 1.0, 1.0, "B");
+  h_psEff_dxy_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_dxy_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_dxy_allCuts->GetName() + ".jpeg");
+  delete h_psEff_dxy_allCuts;
+  delete h_trk_matchtp_dxy_allCuts;
+  delete h_tp_dxy_allCuts;
+
+  h_trk_matchtp_pt_noCuts->Sumw2();
+  h_tp_pt_noCuts_primary->Sumw2();
+  TH1F* h_psEff_pt_noCuts = (TH1F*)h_trk_matchtp_pt_noCuts->Clone();
+  h_psEff_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_pt_noCuts->GetXaxis()->SetRange(1, h_psEff_pt_noCuts->GetNbinsX() + 2);
+  h_psEff_pt_noCuts->SetName("psEff_pt_noCuts");
+  h_psEff_pt_noCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_psEff_pt_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_pt_noCuts->Divide(h_trk_matchtp_pt_noCuts, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
+  h_psEff_pt_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_pt_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_pt_noCuts->GetName() + ".jpeg");
+  delete h_psEff_pt_noCuts;
+  delete h_trk_matchtp_pt_noCuts;
+
+  h_trk_matchtp_eta_noCuts->Sumw2();
+  //h_tp_eta_noCuts->Sumw2();
+  TH1F* h_psEff_eta_noCuts = (TH1F*)h_trk_matchtp_eta_noCuts->Clone();
+  h_psEff_eta_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_eta_noCuts->GetXaxis()->SetRange(1, h_psEff_eta_noCuts->GetNbinsX() + 2);
+  h_psEff_eta_noCuts->SetName("psEff_eta_noCuts");
+  h_psEff_eta_noCuts->GetXaxis()->SetTitle("Tracking Particle #eta (GeV)");
+  h_psEff_eta_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_eta_noCuts->Divide(h_trk_matchtp_eta_noCuts, h_tp_eta_noCuts, 1.0, 1.0, "B");
+  h_psEff_eta_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_eta_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_eta_noCuts->GetName() + ".jpeg");
+  delete h_psEff_eta_noCuts;
+  delete h_trk_matchtp_eta_noCuts;
+  delete h_tp_eta_noCuts;
+
+  h_trk_matchtp_dxy_noCuts->Sumw2();
+  h_tp_dxy_noCuts->Sumw2();
+  TH1F* h_psEff_dxy_noCuts = (TH1F*)h_trk_matchtp_dxy_noCuts->Clone();
+  h_psEff_dxy_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_dxy_noCuts->GetXaxis()->SetRange(1, h_psEff_dxy_noCuts->GetNbinsX() + 2);
+  h_psEff_dxy_noCuts->SetName("psEff_dxy_noCuts");
+  h_psEff_dxy_noCuts->GetXaxis()->SetTitle("Tracking Particle #dxy (GeV)");
+  h_psEff_dxy_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_dxy_noCuts->Divide(h_trk_matchtp_dxy_noCuts, h_tp_dxy_noCuts, 1.0, 1.0, "B");
+  h_psEff_dxy_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_dxy_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_dxy_noCuts->GetName() + ".jpeg");
+  delete h_psEff_dxy_noCuts;
+  delete h_trk_matchtp_dxy_noCuts;
+  delete h_tp_dxy_noCuts;
+
+  h_trk_matchtp_pt_oldCuts->Sumw2();
+  //h_tp_pt_maxEtaCut->Sumw2();
+  TH1F* h_psEff_pt_oldCuts = (TH1F*)h_trk_matchtp_pt_oldCuts->Clone();
+  h_psEff_pt_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_pt_oldCuts->GetXaxis()->SetRange(1, h_psEff_pt_oldCuts->GetNbinsX() + 2);
+  h_psEff_pt_oldCuts->SetName("psEff_pt_oldCuts");
+  h_psEff_pt_oldCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_psEff_pt_oldCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_pt_oldCuts->Divide(h_trk_matchtp_pt_oldCuts, h_tp_pt_maxEtaCut, 1.0, 1.0, "B");
+  h_psEff_pt_oldCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_pt_oldCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_pt_oldCuts->GetName() + ".jpeg");
+  delete h_psEff_pt_oldCuts;
+  delete h_trk_matchtp_pt_oldCuts;
+  delete h_tp_pt_maxEtaCut;
+
+  h_trk_matchtp_eta_oldCuts->Sumw2();
+  //h_tp_eta_maxEtaCut->Sumw2();
+  TH1F* h_psEff_eta_oldCuts = (TH1F*)h_trk_matchtp_eta_oldCuts->Clone();
+  h_psEff_eta_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_eta_oldCuts->GetXaxis()->SetRange(1, h_psEff_eta_oldCuts->GetNbinsX() + 2);
+  h_psEff_eta_oldCuts->SetName("psEff_eta_oldCuts");
+  h_psEff_eta_oldCuts->GetXaxis()->SetTitle("Tracking Particle #eta (GeV)");
+  h_psEff_eta_oldCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_eta_oldCuts->Divide(h_trk_matchtp_eta_oldCuts, h_tp_eta_maxEtaCut, 1.0, 1.0, "B");
+  h_psEff_eta_oldCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_eta_oldCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_eta_oldCuts->GetName() + ".jpeg");
+  delete h_psEff_eta_oldCuts;
+  delete h_trk_matchtp_eta_oldCuts;
+  delete h_tp_eta_maxEtaCut;
+
+  h_trk_matchtp_dxy_oldCuts->Sumw2();
+  h_tp_dxy_oldCuts->Sumw2();
+  TH1F* h_psEff_dxy_oldCuts = (TH1F*)h_trk_matchtp_dxy_oldCuts->Clone();
+  h_psEff_dxy_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_psEff_dxy_oldCuts->GetXaxis()->SetRange(1, h_psEff_dxy_oldCuts->GetNbinsX() + 2);
+  h_psEff_dxy_oldCuts->SetName("psEff_dxy_oldCuts");
+  h_psEff_dxy_oldCuts->GetXaxis()->SetTitle("Tracking Particle #dxy (GeV)");
+  h_psEff_dxy_oldCuts->GetYaxis()->SetTitle("Efficiency");
+  h_psEff_dxy_oldCuts->Divide(h_trk_matchtp_dxy_oldCuts, h_tp_dxy_oldCuts, 1.0, 1.0, "B");
+  h_psEff_dxy_oldCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_psEff_dxy_oldCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_psEff_dxy_oldCuts->GetName() + ".jpeg");
+  delete h_psEff_dxy_oldCuts;
+  delete h_trk_matchtp_dxy_oldCuts;
+  delete h_tp_dxy_oldCuts;
+
+  h_match_tp_pt_noCuts_primary->Sumw2();
+  TH1F* h_primaryEff_pt_noCuts = (TH1F*)h_match_tp_pt_noCuts_primary->Clone();
+  h_primaryEff_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_primaryEff_pt_noCuts->GetXaxis()->SetRange(1, h_primaryEff_pt_noCuts->GetNbinsX() + 2);
+  h_primaryEff_pt_noCuts->SetName("primaryEff_pt_noCuts");
+  h_primaryEff_pt_noCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_primaryEff_pt_noCuts->GetYaxis()->SetTitle("Efficiency");
+  h_primaryEff_pt_noCuts->Divide(h_match_tp_pt_noCuts_primary, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
+  h_primaryEff_pt_noCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_primaryEff_pt_noCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_primaryEff_pt_noCuts->GetName() + ".jpeg");
+  delete h_primaryEff_pt_noCuts;
+  delete h_match_tp_pt_noCuts_primary;
+  
+  //h_match_tp_pt_allCuts->Sumw2();
+  TH1F* h_primaryEff_pt_allCuts = (TH1F*)h_match_tp_pt_allCuts->Clone();
+  h_primaryEff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_primaryEff_pt_allCuts->GetXaxis()->SetRange(1, h_primaryEff_pt_allCuts->GetNbinsX() + 2);
+  h_primaryEff_pt_allCuts->SetName("primaryEff_pt_allCuts");
+  h_primaryEff_pt_allCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_primaryEff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_primaryEff_pt_allCuts->Divide(h_match_tp_pt_allCuts, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
+  h_primaryEff_pt_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_primaryEff_pt_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_primaryEff_pt_allCuts->GetName() + ".jpeg");
+  delete h_primaryEff_pt_allCuts;
+  delete h_match_tp_pt_allCuts;
+
+  h_match_tp_pt_allCuts_trkCuts->Sumw2();
+  TH1F* h_primaryEff_pt_allCuts_trkCuts = (TH1F*)h_match_tp_pt_allCuts_trkCuts->Clone();
+  h_primaryEff_pt_allCuts_trkCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_primaryEff_pt_allCuts_trkCuts->GetXaxis()->SetRange(1, h_primaryEff_pt_allCuts_trkCuts->GetNbinsX() + 2);
+  h_primaryEff_pt_allCuts_trkCuts->SetName("primaryEff_pt_allCuts_trkCuts");
+  h_primaryEff_pt_allCuts_trkCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_primaryEff_pt_allCuts_trkCuts->GetYaxis()->SetTitle("Efficiency");
+  h_primaryEff_pt_allCuts_trkCuts->Divide(h_match_tp_pt_allCuts_trkCuts, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
+  h_primaryEff_pt_allCuts_trkCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_primaryEff_pt_allCuts_trkCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_primaryEff_pt_allCuts_trkCuts->GetName() + ".jpeg");
+  delete h_primaryEff_pt_allCuts_trkCuts;
+  delete h_match_tp_pt_allCuts_trkCuts;
+  
+  //h_match_tp_pt_maxEtaCut->Sumw2();
+  TH1F* h_primaryEff_pt_oldCuts = (TH1F*)h_match_tp_pt_maxEtaCut->Clone();
+  h_primaryEff_pt_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_primaryEff_pt_oldCuts->GetXaxis()->SetRange(1, h_primaryEff_pt_oldCuts->GetNbinsX() + 2);
+  h_primaryEff_pt_oldCuts->SetName("primaryEff_pt_oldCuts");
+  h_primaryEff_pt_oldCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_primaryEff_pt_oldCuts->GetYaxis()->SetTitle("Efficiency");
+  h_primaryEff_pt_oldCuts->Divide(h_match_tp_pt_maxEtaCut, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
+  h_primaryEff_pt_oldCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_primaryEff_pt_oldCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_primaryEff_pt_oldCuts->GetName() + ".jpeg");
+  delete h_primaryEff_pt_oldCuts;
+  delete h_match_tp_pt_maxEtaCut;
+  delete h_tp_pt_noCuts_primary;
+  
+  h_trk_pt_oldCuts->Sumw2();
+  h_trk_pt_noCuts->Sumw2();
+  TH1F* h_trkEff_pt_oldCuts = (TH1F*)h_trk_pt_oldCuts->Clone();
+  h_trkEff_pt_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trkEff_pt_oldCuts->GetXaxis()->SetRange(1, h_trkEff_pt_oldCuts->GetNbinsX() + 2);
+  h_trkEff_pt_oldCuts->SetName("trkEff_pt_oldCuts");
+  h_trkEff_pt_oldCuts->GetXaxis()->SetTitle("Track p_{T} (GeV)");
+  h_trkEff_pt_oldCuts->GetYaxis()->SetTitle("Efficiency");
+  h_trkEff_pt_oldCuts->Divide(h_trk_pt_oldCuts, h_trk_pt_noCuts, 1.0, 1.0, "B");
+  h_trkEff_pt_oldCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trkEff_pt_oldCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trkEff_pt_oldCuts->GetName() + ".jpeg");
+  delete h_trkEff_pt_oldCuts;
+  delete h_trk_pt_oldCuts;
+
+  h_trk_pt_allCuts->Sumw2();
+  TH1F* h_trkEff_pt_allCuts = (TH1F*)h_trk_pt_allCuts->Clone();
+  h_trkEff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trkEff_pt_allCuts->GetXaxis()->SetRange(1, h_trkEff_pt_allCuts->GetNbinsX() + 2);
+  h_trkEff_pt_allCuts->SetName("trkEff_pt_allCuts");
+  h_trkEff_pt_allCuts->GetXaxis()->SetTitle("Track p_{T} (GeV)");
+  h_trkEff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
+  h_trkEff_pt_allCuts->Divide(h_trk_pt_allCuts, h_trk_pt_noCuts, 1.0, 1.0, "B");
+  h_trkEff_pt_allCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trkEff_pt_allCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trkEff_pt_allCuts->GetName() + ".jpeg");
+  delete h_trkEff_pt_allCuts;
+  delete h_trk_pt_allCuts;
+  delete h_trk_pt_noCuts;
+
+  h_delta_dist_xy->GetYaxis()->SetNoExponent(kTRUE);
+  h_delta_dist_xy->GetXaxis()->SetRange(1, h_delta_dist_xy->GetNbinsX() + 2);
+  h_delta_dist_xy->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_delta_dist_xy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_delta_dist_xy->GetName() + ".jpeg");
+  delete h_delta_dist_xy;
+   
+  h_error_delta_x->GetYaxis()->SetNoExponent(kTRUE);
+  h_error_delta_x->GetXaxis()->SetRange(1, h_error_delta_x->GetNbinsX() + 2);
+  h_error_delta_x->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_error_delta_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_error_delta_x->GetName() + ".jpeg");
+  delete h_error_delta_x;
+   
+  h_delta_dist_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_delta_dist_z->GetXaxis()->SetRange(1, h_delta_dist_z->GetNbinsX() + 2);
+  h_delta_dist_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_delta_dist_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_delta_dist_z->GetName() + ".jpeg");
+  delete h_delta_dist_z;
+
+  h_error_delta_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_error_delta_z->GetXaxis()->SetRange(1, h_error_delta_z->GetNbinsX() + 2);
+  h_error_delta_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_error_delta_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_error_delta_z->GetName() + ".jpeg");
+  delete h_error_delta_z;
+   
+  h_delta_x->GetYaxis()->SetNoExponent(kTRUE);
+  h_delta_x->GetXaxis()->SetRange(1, h_delta_x->GetNbinsX() + 2);
+  h_delta_x->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_delta_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_delta_x->GetName() + ".jpeg");
+  delete h_delta_x;
+
+  char binlabel[1000];
+  sprintf(binlabel, "0 + 1,   0 + 2,   1 + 2,   0 + 3,   1 + 3,   2 + 3");
+
+  h_trk_Counter_TPcombination->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_Counter_TPcombination->GetXaxis()->SetRange(0, h_trk_Counter_TPcombination->GetNbinsX() + 1);
+  h_trk_Counter_TPcombination->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  mySmallText(0.25, 0.95, 1, binlabel);
+  h_trk_Counter_TPcombination->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_Counter_TPcombination->GetName() + ".jpeg");
+  delete h_trk_Counter_TPcombination;
+
+  h_trk_delta_dist_xy->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_delta_dist_xy->GetXaxis()->SetRange(1, h_trk_delta_dist_xy->GetNbinsX() + 2);
+  h_trk_delta_dist_xy->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_delta_dist_xy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_delta_dist_xy->GetName() + ".jpeg");
+  delete h_trk_delta_dist_xy;
+
+  h_trackVertex_cos_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_cos_T->GetXaxis()->SetRange(1, h_trackVertex_cos_T->GetNbinsX() + 2);
+  h_trackVertex_cos_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_cos_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_cos_T->GetName() + ".jpeg");
+  delete h_trackVertex_cos_T;
+
+  h_trackVertex_alpha_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_alpha_T->GetXaxis()->SetRange(1, h_trackVertex_alpha_T->GetNbinsX() + 2);
+  h_trackVertex_alpha_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_alpha_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_alpha_T->GetName() + ".jpeg");
+  delete h_trackVertex_alpha_T;
+
+  h_trackVertex_d_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_d_T->GetXaxis()->SetRange(1, h_trackVertex_d_T->GetNbinsX() + 2);
+  h_trackVertex_d_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_d_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_d_T->GetName() + ".jpeg");
+  delete h_trackVertex_d_T;
+
+  h_trackVertex_openingAngle->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_openingAngle->GetXaxis()->SetRange(1, h_trackVertex_openingAngle->GetNbinsX() + 2);
+  h_trackVertex_openingAngle->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_openingAngle->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_openingAngle->GetName() + ".jpeg");
+  delete h_trackVertex_openingAngle;
+
+  h_trackVertex_parentPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_parentPt->GetXaxis()->SetRange(1, h_trackVertex_parentPt->GetNbinsX() + 2);
+  h_trackVertex_parentPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_parentPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_parentPt->GetName() + ".jpeg");
+  delete h_trackVertex_parentPt;
+
+  h_trackVertex_R_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trackVertex_R_T->GetXaxis()->SetRange(1, h_trackVertex_R_T->GetNbinsX() + 2);
+  h_trackVertex_R_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertex_R_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertex_R_T->GetName() + ".jpeg");
+  delete h_trackVertex_R_T;
+
+  h_trueVertex_cos_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_cos_T->GetXaxis()->SetRange(1, h_trueVertex_cos_T->GetNbinsX() + 2);
+  h_trueVertex_cos_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_cos_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_cos_T->GetName() + ".jpeg");
+  delete h_trueVertex_cos_T;
+
+  h_trueVertex_alpha_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_alpha_T->GetXaxis()->SetRange(1, h_trueVertex_alpha_T->GetNbinsX() + 2);
+  h_trueVertex_alpha_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_alpha_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_alpha_T->GetName() + ".jpeg");
+  delete h_trueVertex_alpha_T;
+
+  h_trueVertex_d_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_d_T->GetXaxis()->SetRange(1, h_trueVertex_d_T->GetNbinsX() + 2);
+  h_trueVertex_d_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_d_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_d_T->GetName() + ".jpeg");
+  delete h_trueVertex_d_T;
+
+  h_trueVertex_openingAngle->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_openingAngle->GetXaxis()->SetRange(1, h_trueVertex_openingAngle->GetNbinsX() + 2);
+  h_trueVertex_openingAngle->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_openingAngle->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_openingAngle->GetName() + ".jpeg");
+  delete h_trueVertex_openingAngle;
+
+  h_trueVertex_parentPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_parentPt->GetXaxis()->SetRange(1, h_trueVertex_parentPt->GetNbinsX() + 2);
+  h_trueVertex_parentPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_parentPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_parentPt->GetName() + ".jpeg");
+  delete h_trueVertex_parentPt;
+   
+  h_trueVertex_R_T->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_R_T->GetXaxis()->SetRange(1, h_trueVertex_R_T->GetNbinsX() + 2);
+  h_trueVertex_R_T->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_R_T->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_R_T->GetName() + ".jpeg");
+  delete h_trueVertex_R_T;
+
+  h_trueVertex_delta_dist_z0->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_delta_dist_z0->GetXaxis()->SetRange(1, h_trueVertex_delta_dist_z0->GetNbinsX() + 2);
+  h_trueVertex_delta_dist_z0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_delta_dist_z0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_delta_dist_z0->GetName() + ".jpeg");
+  delete h_trueVertex_delta_dist_z0;
+
+  h_trueVertex_delta_dist_d0->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_delta_dist_d0->GetXaxis()->SetRange(1, h_trueVertex_delta_dist_d0->GetNbinsX() + 2);
+  h_trueVertex_delta_dist_d0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_delta_dist_d0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_delta_dist_d0->GetName() + ".jpeg");
+  delete h_trueVertex_delta_dist_d0;
+
+  h_trueVertex_delta_dist_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_delta_dist_eta->GetXaxis()->SetRange(1, h_trueVertex_delta_dist_eta->GetNbinsX() + 2);
+  h_trueVertex_delta_dist_eta->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_delta_dist_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_delta_dist_eta->GetName() + ".jpeg");
+  delete h_trueVertex_delta_dist_eta;
+
+  h_trueVertex_delta_dist_phi->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_delta_dist_phi->GetXaxis()->SetRange(1, h_trueVertex_delta_dist_phi->GetNbinsX() + 2);
+  h_trueVertex_delta_dist_phi->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_delta_dist_phi->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_delta_dist_phi->GetName() + ".jpeg");
+  delete h_trueVertex_delta_dist_phi;
+
+  h_trueVertex_delta_dist_indexPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_trueVertex_delta_dist_indexPt->GetXaxis()->SetRange(1, h_trueVertex_delta_dist_indexPt->GetNbinsX() + 2);
+  h_trueVertex_delta_dist_indexPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trueVertex_delta_dist_indexPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trueVertex_delta_dist_indexPt->GetName() + ".jpeg");
+  delete h_trueVertex_delta_dist_indexPt;
+
+  h_trk_delta_dist_z->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_delta_dist_z->GetXaxis()->SetRange(1, h_trk_delta_dist_z->GetNbinsX() + 2);
+  h_trk_delta_dist_z->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trk_delta_dist_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trk_delta_dist_z->GetName() + ".jpeg");
+  delete h_trk_delta_dist_z;
+
+  char res[1000];
+  float rms = 0;
+  TF1* fit;
+  fit = new TF1("fit", "gaus", -1, 1);
+  h_res_tp_trk_x->GetXaxis()->SetRange(1, h_res_tp_trk_x->GetNbinsX() + 2);
+  h_res_tp_trk_x->Fit("fit");
+  h_res_tp_trk_x->Draw();
+  rms = fit->GetParameter(2);
+  sprintf(res, "RMS = %.4f", rms);
+  mySmallText(0.22, 0.82, 1, res);
+  mySmallText(0.4, 0.42, 1, ctxt);
+  h_res_tp_trk_x->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_res_tp_trk_x->GetName() + ".jpeg");
+  delete h_res_tp_trk_x;
+  delete fit;
+
+  fit = new TF1("fit", "gaus", -1, 1);
+  h_res_tp_trk_y->GetXaxis()->SetRange(1, h_res_tp_trk_y->GetNbinsX() + 2);
+  h_res_tp_trk_y->Fit("fit");
+  h_res_tp_trk_y->Draw();
+  rms = fit->GetParameter(2);
+  sprintf(res, "RMS = %.4f", rms);
+  mySmallText(0.22, 0.82, 1, res);
+  mySmallText(0.4, 0.42, 1, ctxt);
+  h_res_tp_trk_y->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_res_tp_trk_y->GetName() + ".jpeg");
+  delete h_res_tp_trk_y;
+  delete fit;
+
+  fit = new TF1("fit", "gaus", -1, 1);
+  h_res_tp_trk_r->GetXaxis()->SetRange(1, h_res_tp_trk_r->GetNbinsX() + 2);
+  h_res_tp_trk_r->Fit("fit");
+  h_res_tp_trk_r->Draw();
+  rms = fit->GetParameter(2);
+  sprintf(res, "RMS = %.4f", rms);
+  mySmallText(0.22, 0.82, 1, res);
+  mySmallText(0.4, 0.42, 1, ctxt);
+  h_res_tp_trk_r->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_res_tp_trk_r->GetName() + ".jpeg");
+  delete h_res_tp_trk_r;
+  delete fit;
+
+  fit = new TF1("fit", "gaus", -1, 1);
+  h_res_tp_trk_phi->GetXaxis()->SetRange(1, h_res_tp_trk_phi->GetNbinsX() + 2);
+  h_res_tp_trk_phi->Fit("fit");
+  h_res_tp_trk_phi->Draw();
+  rms = fit->GetParameter(2);
+  sprintf(res, "RMS = %.4f", rms);
+  mySmallText(0.22, 0.82, 1, res);
+  mySmallText(0.4, 0.42, 1, ctxt);
+  h_res_tp_trk_phi->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_res_tp_trk_phi->GetName() + ".jpeg");
+  delete h_res_tp_trk_phi;
+  delete fit;
+
+  fit = new TF1("fit", "gaus", -10, 10);
+  h_res_tp_trk_z->GetXaxis()->SetRange(1, h_res_tp_trk_z->GetNbinsX() + 2);
+  h_res_tp_trk_z->Fit("fit");
+  h_res_tp_trk_z->Draw();
+  rms = fit->GetParameter(2);
+  sprintf(res, "RMS = %.4f", rms);
+  mySmallText(0.22, 0.82, 1, res);
+  mySmallText(0.4, 0.42, 1, ctxt);
+  h_res_tp_trk_z->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_res_tp_trk_z->GetName() + ".jpeg");
+  delete h_res_tp_trk_z;
+  delete fit;
+
+  h_all_trueVertex_pt->GetXaxis()->SetRange(1, h_all_trueVertex_pt->GetNbinsX() + 2);
+  h_all_trueVertex_pt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trueVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trueVertex_pt->GetName() + ".jpeg");
+
+  h_all_trueVertex_minD0->GetXaxis()->SetRange(1, h_all_trueVertex_minD0->GetNbinsX() + 2);
+  h_all_trueVertex_minD0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trueVertex_minD0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trueVertex_minD0->GetName() + ".jpeg");
+
+  h_all_trueVertex_lowPt->GetXaxis()->SetRange(1, h_all_trueVertex_lowPt->GetNbinsX() + 2);
+  h_all_trueVertex_lowPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trueVertex_lowPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trueVertex_lowPt->GetName() + ".jpeg");
+
+  h_all_trackVertex_pt->GetXaxis()->SetRange(1, h_all_trackVertex_pt->GetNbinsX() + 2);
+  h_all_trackVertex_pt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trackVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trackVertex_pt->GetName() + ".jpeg");
+
+  h_all_trackVertex_minD0->GetXaxis()->SetRange(1, h_all_trackVertex_minD0->GetNbinsX() + 2);
+  h_all_trackVertex_minD0->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trackVertex_minD0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trackVertex_minD0->GetName() + ".jpeg");
+   
+  h_all_trackVertex_lowPt->GetXaxis()->SetRange(1, h_all_trackVertex_lowPt->GetNbinsX() + 2);
+  h_all_trackVertex_lowPt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trackVertex_lowPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trackVertex_lowPt->GetName() + ".jpeg");
+
+  h_correct_trueVertex_pt->GetXaxis()->SetRange(1, h_correct_trueVertex_pt->GetNbinsX() + 2);
+  h_correct_trueVertex_pt->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trueVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trueVertex_pt->GetName() + ".jpeg");
+   
+  h_all_trueVertex_pt->Sumw2();
+  h_correct_trueVertex_pt->Sumw2();
+  TH1F* h_eff_trueVertex_pt = (TH1F*)h_correct_trueVertex_pt->Clone();
+  h_eff_trueVertex_pt->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_trueVertex_pt->GetXaxis()->SetRange(1, h_eff_trueVertex_pt->GetNbinsX() + 2);
+  h_eff_trueVertex_pt->SetName("eff_trueVertex_pt");
+  h_eff_trueVertex_pt->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_trueVertex_pt->GetYaxis()->SetTitle("Efficiency");
+  h_eff_trueVertex_pt->Divide(h_correct_trueVertex_pt,h_all_trueVertex_pt, 1.0, 1.0, "B");
+  h_eff_trueVertex_pt->Draw();
+  h_eff_trueVertex_pt->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_trueVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_trueVertex_pt->GetName() + ".jpeg");
+  delete h_eff_trueVertex_pt;
+  delete h_all_trueVertex_pt;
+  delete h_correct_trueVertex_pt;
+
+  h_all_trueVertex_lowPt->Sumw2();
+  h_correct_trueVertex_lowPt->Sumw2();
+  TH1F* h_eff_trueVertex_lowPt = (TH1F*)h_correct_trueVertex_lowPt->Clone();
+  h_eff_trueVertex_lowPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_trueVertex_lowPt->GetXaxis()->SetRange(1, h_eff_trueVertex_lowPt->GetNbinsX() + 2);
+  h_eff_trueVertex_lowPt->SetName("eff_trueVertex_lowPt");
+  h_eff_trueVertex_lowPt->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_trueVertex_lowPt->GetYaxis()->SetTitle("Efficiency");
+  h_eff_trueVertex_lowPt->Divide(h_correct_trueVertex_lowPt,h_all_trueVertex_lowPt, 1.0, 1.0, "B");
+  h_eff_trueVertex_lowPt->Draw();
+  h_eff_trueVertex_lowPt->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_trueVertex_lowPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_trueVertex_lowPt->GetName() + ".jpeg");
+  delete h_eff_trueVertex_lowPt;
+  delete h_all_trueVertex_lowPt;
+  delete h_correct_trueVertex_lowPt;
+
+  h_all_oneMatch_trueVertex_pt->Sumw2();
+  h_correct_oneMatch_trueVertex_pt->Sumw2();
+  TH1F* h_eff_oneMatch_trueVertex_pt = (TH1F*)h_correct_oneMatch_trueVertex_pt->Clone();
+  h_eff_oneMatch_trueVertex_pt->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatch_trueVertex_pt->GetXaxis()->SetRange(1, h_eff_oneMatch_trueVertex_pt->GetNbinsX() + 2);
+  h_eff_oneMatch_trueVertex_pt->SetName("eff_oneMatch_trueVertex_pt");
+  h_eff_oneMatch_trueVertex_pt->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_oneMatch_trueVertex_pt->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatch_trueVertex_pt->Divide(h_correct_oneMatch_trueVertex_pt,h_all_oneMatch_trueVertex_pt, 1.0, 1.0, "B");
+  h_eff_oneMatch_trueVertex_pt->Draw();
+  h_eff_oneMatch_trueVertex_pt->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatch_trueVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatch_trueVertex_pt->GetName() + ".jpeg");
+  delete h_eff_oneMatch_trueVertex_pt;
+  delete h_all_oneMatch_trueVertex_pt;
+  delete h_correct_oneMatch_trueVertex_pt;
+
+  h_all_oneMatch_trueVertex_lowPt->Sumw2();
+  h_correct_oneMatch_trueVertex_lowPt->Sumw2();
+  TH1F* h_eff_oneMatch_trueVertex_lowPt = (TH1F*)h_correct_oneMatch_trueVertex_lowPt->Clone();
+  h_eff_oneMatch_trueVertex_lowPt->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatch_trueVertex_lowPt->GetXaxis()->SetRange(1, h_eff_oneMatch_trueVertex_lowPt->GetNbinsX() + 2);
+  h_eff_oneMatch_trueVertex_lowPt->SetName("eff_oneMatch_trueVertex_lowPt");
+  h_eff_oneMatch_trueVertex_lowPt->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_oneMatch_trueVertex_lowPt->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatch_trueVertex_lowPt->Divide(h_correct_oneMatch_trueVertex_lowPt,h_all_oneMatch_trueVertex_lowPt, 1.0, 1.0, "B");
+  h_eff_oneMatch_trueVertex_lowPt->Draw();
+  h_eff_oneMatch_trueVertex_lowPt->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatch_trueVertex_lowPt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatch_trueVertex_lowPt->GetName() + ".jpeg");
+  delete h_eff_oneMatch_trueVertex_lowPt;
+  delete h_all_oneMatch_trueVertex_lowPt;
+  delete h_correct_oneMatch_trueVertex_lowPt;
+
+  h_all_oneMatchAlt_trueVertex_pt->Sumw2();
+  h_correct_oneMatchAlt_trueVertex_pt->Sumw2();
+  TH1F* h_eff_oneMatchAlt_trueVertex_pt = (TH1F*)h_correct_oneMatchAlt_trueVertex_pt->Clone();
+  h_eff_oneMatchAlt_trueVertex_pt->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatchAlt_trueVertex_pt->GetXaxis()->SetRange(1, h_eff_oneMatchAlt_trueVertex_pt->GetNbinsX() + 2);
+  h_eff_oneMatchAlt_trueVertex_pt->SetName("eff_oneMatchAlt_trueVertex_pt");
+  h_eff_oneMatchAlt_trueVertex_pt->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_oneMatchAlt_trueVertex_pt->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatchAlt_trueVertex_pt->Divide(h_correct_oneMatchAlt_trueVertex_pt,h_all_oneMatchAlt_trueVertex_pt, 1.0, 1.0, "B");
+  h_eff_oneMatchAlt_trueVertex_pt->Draw();
+  h_eff_oneMatchAlt_trueVertex_pt->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatchAlt_trueVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatchAlt_trueVertex_pt->GetName() + ".jpeg");
+  delete h_eff_oneMatchAlt_trueVertex_pt;
+  delete h_all_oneMatchAlt_trueVertex_pt;
+  delete h_correct_oneMatchAlt_trueVertex_pt;
+
+  std::vector<double> eff_dxy_cuts;
+  for(uint i=0;i<dxy_cuts.size();i++){
+    eff_dxy_cuts.push_back(correct_vert_dxy_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_dxy_cuts = new TGraph(int(dxy_cuts.size()),dxy_cuts.data(),eff_dxy_cuts.data());
+  gr_eff_dxy_cuts->SetTitle("Eff vs Dxy Cut; Dxy Cut (cm); Efficiency");
+  gr_eff_dxy_cuts->SetName("gr_eff_dxy_cuts");
+  gr_eff_dxy_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_dxy_cuts->GetName() + ".jpeg");
+  delete gr_eff_dxy_cuts;
+
+  std::vector<double> eff_dz_cuts;
+  for(uint i=0;i<dz_cuts.size();i++){
+    eff_dz_cuts.push_back(correct_vert_dz_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_dz_cuts = new TGraph(int(dz_cuts.size()),dz_cuts.data(),eff_dz_cuts.data());
+  gr_eff_dz_cuts->SetTitle("Eff vs Dz Cut; Dz Cut (cm); Efficiency");
+  gr_eff_dz_cuts->SetName("gr_eff_dz_cuts");
+  gr_eff_dz_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_dz_cuts->GetName() + ".jpeg");
+  delete gr_eff_dz_cuts;
+   
+  std::vector<double> eff_cos_T_cuts;
+  for(uint i=0;i<cos_T_cuts.size();i++){
+    eff_cos_T_cuts.push_back(correct_vert_cos_T_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_cos_T_cuts = new TGraph(int(cos_T_cuts.size()),cos_T_cuts.data(),eff_cos_T_cuts.data());
+  gr_eff_cos_T_cuts->SetTitle("Eff vs Cos(alpha) Cut; Cos(alpha) Cut; Efficiency");
+  gr_eff_cos_T_cuts->SetName("gr_eff_cos_T_cuts");
+  gr_eff_cos_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_cos_T_cuts->GetName() + ".jpeg");
+  delete gr_eff_cos_T_cuts;
+
+  std::vector<double> eff_d_T_cuts;
+  for(uint i=0;i<d_T_cuts.size();i++){
+    eff_d_T_cuts.push_back(correct_vert_d_T_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_d_T_cuts = new TGraph(int(d_T_cuts.size()),d_T_cuts.data(),eff_d_T_cuts.data());
+  gr_eff_d_T_cuts->SetTitle("Eff vs d_T Cut; d_T Cut (cm); Efficiency");
+  gr_eff_d_T_cuts->SetName("gr_eff_d_T_cuts");
+  gr_eff_d_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_d_T_cuts->GetName() + ".jpeg");
+  delete gr_eff_d_T_cuts;
+   
+  std::vector<double> eff_R_T_cuts;
+  for(uint i=0;i<R_T_cuts.size();i++){
+    eff_R_T_cuts.push_back(correct_vert_R_T_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_R_T_cuts = new TGraph(int(R_T_cuts.size()),R_T_cuts.data(),eff_R_T_cuts.data());
+  gr_eff_R_T_cuts->SetTitle("Eff vs R_T Cut; R_T Cut (cm); Efficiency");
+  gr_eff_R_T_cuts->SetName("gr_eff_R_T_cuts");
+  gr_eff_R_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_R_T_cuts->GetName() + ".jpeg");
+  delete gr_eff_R_T_cuts;
+
+  std::vector<double> eff_chi2rz_cuts;
+  for(uint i=0;i<chi2rz_cuts.size();i++){
+    eff_chi2rz_cuts.push_back(correct_vert_chi2rz_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_chi2rz_cuts = new TGraph(int(chi2rz_cuts.size()),chi2rz_cuts.data(),eff_chi2rz_cuts.data());
+  gr_eff_chi2rz_cuts->SetTitle("Eff vs chi2rz Cut; chi2rz Cut; Efficiency");
+  gr_eff_chi2rz_cuts->SetName("gr_eff_chi2rz_cuts");
+  gr_eff_chi2rz_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_chi2rz_cuts->GetName() + ".jpeg");
+  delete gr_eff_chi2rz_cuts;
+
+  std::vector<double> eff_minD0_cuts;
+  for(uint i=0;i<minD0_cuts.size();i++){
+    eff_minD0_cuts.push_back(correct_vert_minD0_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_minD0_cuts = new TGraph(int(minD0_cuts.size()),minD0_cuts.data(),eff_minD0_cuts.data());
+  gr_eff_minD0_cuts->SetTitle("Eff vs minD0 Cut; minD0 Cut (cm); Efficiency");
+  gr_eff_minD0_cuts->SetName("gr_eff_minD0_cuts");
+  gr_eff_minD0_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_minD0_cuts->GetName() + ".jpeg");
+  delete gr_eff_minD0_cuts;
+
+  std::vector<double> eff_stubSum_cuts;
+  for(uint i=0;i<stubSum_cuts.size();i++){
+    eff_stubSum_cuts.push_back(correct_vert_stubSum_cut[i] / true_vertices);
+  }
+  TGraph* gr_eff_stubSum_cuts = new TGraph(int(stubSum_cuts.size()),stubSum_cuts.data(),eff_stubSum_cuts.data());
+  gr_eff_stubSum_cuts->SetTitle("Eff vs stubSum Cut; stubSum Cut; Efficiency");
+  gr_eff_stubSum_cuts->SetName("gr_eff_stubSum_cuts");
+  gr_eff_stubSum_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_stubSum_cuts->GetName() + ".jpeg");
+  delete gr_eff_stubSum_cuts;
+   
+  std::vector<double> false_dxy_cuts;
+  for(uint i=0;i<dxy_cuts.size();i++){
+    if(all_vert_dxy_cut[i]!=0){
+      false_dxy_cuts.push_back(false_vert_dxy_cut[i] / all_vert_dxy_cut[i]);
+    }
+    else{
+      false_dxy_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_dxy_cuts = new TGraph(int(dxy_cuts.size()),dxy_cuts.data(),false_dxy_cuts.data());
+  gr_false_dxy_cuts->SetTitle("False Rate vs Dxy Cut; Dxy Cut (cm); False Rate");
+  gr_false_dxy_cuts->SetName("gr_false_dxy_cuts");
+  gr_false_dxy_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_dxy_cuts->GetName() + ".jpeg");
+  delete gr_false_dxy_cuts;
+
+  std::vector<double> false_dz_cuts;
+  for(uint i=0;i<dz_cuts.size();i++){
+    if(all_vert_dz_cut[i]!=0){
+      false_dz_cuts.push_back(false_vert_dz_cut[i] / all_vert_dz_cut[i]);
+    }
+    else{
+      false_dz_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_dz_cuts = new TGraph(int(dz_cuts.size()),dz_cuts.data(),false_dz_cuts.data());
+  gr_false_dz_cuts->SetTitle("False Rate vs Dz Cut; Dz Cut (cm); False Rate");
+  gr_false_dz_cuts->SetName("gr_false_dz_cuts");
+  gr_false_dz_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_dz_cuts->GetName() + ".jpeg");
+  delete gr_false_dz_cuts;
+
+  TGraph* gr_eff_vs_false_dz_cuts = new TGraph(int(dz_cuts.size()),eff_dz_cuts.data(),false_dz_cuts.data());
+  gr_eff_vs_false_dz_cuts->SetTitle("False Rate vs Efficiency for Dz Cut; Efficiency; False Rate");
+  gr_eff_vs_false_dz_cuts->SetName("gr_eff_vs_false_dz_cuts");
+  gr_eff_vs_false_dz_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_dz_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_dz_cuts;
+   
+  std::vector<double> false_cos_T_cuts;
+  for(uint i=0;i<cos_T_cuts.size();i++){
+    if(all_vert_cos_T_cut[i]!=0){
+      false_cos_T_cuts.push_back(false_vert_cos_T_cut[i] / all_vert_cos_T_cut[i]);
+    }
+    else{
+      false_cos_T_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_cos_T_cuts = new TGraph(int(cos_T_cuts.size()),cos_T_cuts.data(),false_cos_T_cuts.data());
+  gr_false_cos_T_cuts->SetTitle("False Rate vs Cos(alpha) Cut; Cos(alpha) Cut; False Rate");
+  gr_false_cos_T_cuts->SetName("gr_false_cos_T_cuts");
+  gr_false_cos_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_cos_T_cuts->GetName() + ".jpeg");
+  delete gr_false_cos_T_cuts;
+
+  TGraph* gr_eff_vs_false_cos_T_cuts = new TGraph(int(cos_T_cuts.size()),eff_cos_T_cuts.data(),false_cos_T_cuts.data());
+  gr_eff_vs_false_cos_T_cuts->SetTitle("False Rate vs Efficiency of Cos(alpha) Cut; Efficiency; False Rate");
+  gr_eff_vs_false_cos_T_cuts->SetName("gr_eff_vs_false_cos_T_cuts");
+  gr_eff_vs_false_cos_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_cos_T_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_cos_T_cuts;
+
+  std::vector<double> false_d_T_cuts;
+  for(uint i=0;i<d_T_cuts.size();i++){
+    if(all_vert_d_T_cut[i]!=0){
+      false_d_T_cuts.push_back(false_vert_d_T_cut[i] / all_vert_d_T_cut[i]);
+    }
+    else{
+      false_d_T_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_d_T_cuts = new TGraph(int(d_T_cuts.size()),d_T_cuts.data(),false_d_T_cuts.data());
+  gr_false_d_T_cuts->SetTitle("False Rate vs d_T Cut; d_T Cut (cm); False Rate");
+  gr_false_d_T_cuts->SetName("gr_false_d_T_cuts");
+  gr_false_d_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_d_T_cuts->GetName() + ".jpeg");
+  delete gr_false_d_T_cuts;
+
+  TGraph* gr_eff_vs_false_d_T_cuts = new TGraph(int(d_T_cuts.size()),eff_d_T_cuts.data(),false_d_T_cuts.data());
+  gr_eff_vs_false_d_T_cuts->SetTitle("False Rate vs Efficiency of d_T Cut; Efficiency; False Rate");
+  gr_eff_vs_false_d_T_cuts->SetName("gr_eff_vs_false_d_T_cuts");
+  gr_eff_vs_false_d_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_d_T_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_d_T_cuts;
+
+  std::vector<double> false_R_T_cuts;
+  for(uint i=0;i<R_T_cuts.size();i++){
+    if(all_vert_R_T_cut[i]!=0){
+      false_R_T_cuts.push_back(false_vert_R_T_cut[i] / all_vert_R_T_cut[i]);
+    }
+    else{
+      false_R_T_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_R_T_cuts = new TGraph(int(R_T_cuts.size()),R_T_cuts.data(),false_R_T_cuts.data());
+  gr_false_R_T_cuts->SetTitle("False Rate vs R_T Cut; R_T Cut (cm); False Rate");
+  gr_false_R_T_cuts->SetName("gr_false_R_T_cuts");
+  gr_false_R_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_R_T_cuts->GetName() + ".jpeg");
+  delete gr_false_R_T_cuts;
+
+  TGraph* gr_eff_vs_false_R_T_cuts = new TGraph(int(R_T_cuts.size()),eff_R_T_cuts.data(),false_R_T_cuts.data());
+  gr_eff_vs_false_R_T_cuts->SetTitle("False Rate vs Efficiency of R_T Cut; Efficiency; False Rate");
+  gr_eff_vs_false_R_T_cuts->SetName("gr_eff_vs_false_R_T_cuts");
+  gr_eff_vs_false_R_T_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_R_T_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_R_T_cuts;
+
+  std::vector<double> false_chi2rz_cuts;
+  for(uint i=0;i<chi2rz_cuts.size();i++){
+    if(all_vert_chi2rz_cut[i]!=0){
+      false_chi2rz_cuts.push_back(false_vert_chi2rz_cut[i] / all_vert_chi2rz_cut[i]);
+    }
+    else{
+      false_chi2rz_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_chi2rz_cuts = new TGraph(int(chi2rz_cuts.size()),chi2rz_cuts.data(),false_chi2rz_cuts.data());
+  gr_false_chi2rz_cuts->SetTitle("False Rate vs chi2rz Cut; chi2rz Cut; False Rate");
+  gr_false_chi2rz_cuts->SetName("gr_false_chi2rz_cuts");
+  gr_false_chi2rz_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_chi2rz_cuts->GetName() + ".jpeg");
+  delete gr_false_chi2rz_cuts;
+
+  TGraph* gr_eff_vs_false_chi2rz_cuts = new TGraph(int(chi2rz_cuts.size()),eff_chi2rz_cuts.data(),false_chi2rz_cuts.data());
+  gr_eff_vs_false_chi2rz_cuts->SetTitle("False Rate vs Efficiency of chi2rz Cut; Efficiency; False Rate");
+  gr_eff_vs_false_chi2rz_cuts->SetName("gr_eff_vs_false_chi2rz_cuts");
+  gr_eff_vs_false_chi2rz_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_chi2rz_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_chi2rz_cuts;
+
+  std::vector<double> false_minD0_cuts;
+  for(uint i=0;i<minD0_cuts.size();i++){
+    if(all_vert_minD0_cut[i]!=0){
+      false_minD0_cuts.push_back(false_vert_minD0_cut[i] / all_vert_minD0_cut[i]);
+    }
+    else{
+      false_minD0_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_minD0_cuts = new TGraph(int(minD0_cuts.size()),minD0_cuts.data(),false_minD0_cuts.data());
+  gr_false_minD0_cuts->SetTitle("False Rate vs minD0 Cut; minD0 Cut (cm); False Rate");
+  gr_false_minD0_cuts->SetName("gr_false_minD0_cuts");
+  gr_false_minD0_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_minD0_cuts->GetName() + ".jpeg");
+  delete gr_false_minD0_cuts;
+   
+  TGraph* gr_eff_vs_false_minD0_cuts = new TGraph(int(minD0_cuts.size()),eff_minD0_cuts.data(),false_minD0_cuts.data());
+  gr_eff_vs_false_minD0_cuts->SetTitle("False Rate vs Efficiency of minD0 Cut; Efficiency; False Rate");
+  gr_eff_vs_false_minD0_cuts->SetName("gr_eff_vs_false_minD0_cuts");
+  gr_eff_vs_false_minD0_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_minD0_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_minD0_cuts;
+
+  std::vector<double> false_stubSum_cuts;
+  for(uint i=0;i<stubSum_cuts.size();i++){
+    if(all_vert_stubSum_cut[i]!=0){
+      false_stubSum_cuts.push_back(false_vert_stubSum_cut[i] / all_vert_stubSum_cut[i]);
+    }
+    else{
+      false_stubSum_cuts.push_back(0);
+    }
+  }
+  TGraph* gr_false_stubSum_cuts = new TGraph(int(stubSum_cuts.size()),stubSum_cuts.data(),false_stubSum_cuts.data());
+  gr_false_stubSum_cuts->SetTitle("False Rate vs stubSum Cut; stubSum Cut; False Rate");
+  gr_false_stubSum_cuts->SetName("gr_false_stubSum_cuts");
+  gr_false_stubSum_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_false_stubSum_cuts->GetName() + ".jpeg");
+  delete gr_false_stubSum_cuts;
+
+  TGraph* gr_eff_vs_false_stubSum_cuts = new TGraph(int(stubSum_cuts.size()),eff_stubSum_cuts.data(),false_stubSum_cuts.data());
+  gr_eff_vs_false_stubSum_cuts->SetTitle("False Rate vs Efficiency of stubSum Cut; Efficiency; False Rate");
+  gr_eff_vs_false_stubSum_cuts->SetName("gr_eff_vs_false_stubSum_cuts");
+  gr_eff_vs_false_stubSum_cuts->Draw("AC*");
+  c.SaveAs(DIR + "/"+ gr_eff_vs_false_stubSum_cuts->GetName() + ".jpeg");
+  delete gr_eff_vs_false_stubSum_cuts;
+
+  TH2F *array_cut_num = new TH2F("array_cut_num","array_cut_num",20,0,1,20,0,1);
+  TH2F *array_cut_i = new TH2F("array_cut_i","array_cut_i",20,0,1,20,0,1);
+  TH2F *array_cut_j = new TH2F("array_cut_j","array_cut_j",20,0,1,20,0,1);
+  for(uint k_a=0;k_a<dz_cuts.size();k_a++){
+    for(uint k_b=0;k_b<cos_T_cuts.size();k_b++){
+      for(uint k_c=0;k_c<d_T_cuts.size();k_c++){
+	for(uint k_d=0;k_d<R_T_cuts.size();k_d++){
+	  for(uint k_e=0;k_e<chi2rz_cuts.size();k_e++){
+	    for(uint k_f=0;k_f<minD0_cuts.size();k_f++){
+	      for(uint k_g=0;k_g<stubSum_cuts.size();k_g++){
+		double eff = correct_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g] / true_vertices;
+		double fake = (all_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]!=0) ? (false_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]/all_vert_array_cut[k_a][k_b][k_c][k_d][k_e][k_f][k_g]) : 0;
+		array_cut_num->Fill(fake,eff,1);
+		if(array_cut_num->GetBinContent(int(fake/0.05)+1,int(eff/0.05)+1)==1){
+		  int indices_i = k_a * 1000 + k_b * 100 + k_c * 10 + k_d; 
+		  int indices_j = k_e * 100 + k_f * 10 + k_g;
+		  array_cut_i->Fill(fake,eff,indices_i);
+		  array_cut_j->Fill(fake,eff,indices_j);
+		}
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+  array_cut_i->SetMarkerSize(1.0);
+  array_cut_j->SetMarkerSize(1.0);
+  array_cut_i->SetBarOffset(0.2);
+  array_cut_j->SetBarOffset(-0.2);
+  array_cut_num->GetXaxis()->SetTitle("Fake Rate");
+  array_cut_num->GetYaxis()->SetTitle("Efficiency");
+  array_cut_num->Draw("COLZ");
+  array_cut_i->Draw("TEXT SAME");
+  array_cut_j->Draw("TEXT SAME");
+  c.SaveAs(DIR + "/"+ "effVsFakeArray.pdf");
+   
+  h_all_trackVertex_pt->Sumw2();
+  h_false_trackVertex_pt->Sumw2();
+  TH1F* h_fake_trackVertex_pt = (TH1F*)h_false_trackVertex_pt->Clone();
+  h_fake_trackVertex_pt->GetYaxis()->SetNoExponent(kTRUE);
+  h_fake_trackVertex_pt->GetXaxis()->SetRange(1, h_fake_trackVertex_pt->GetNbinsX() + 2);
+  h_fake_trackVertex_pt->SetName("fake_trackVertex_pt");
+  h_fake_trackVertex_pt->GetXaxis()->SetTitle("Track p_{T} (GeV)");
+  h_fake_trackVertex_pt->GetYaxis()->SetTitle("Fake Rate");
+  h_fake_trackVertex_pt->Divide(h_false_trackVertex_pt,h_all_trackVertex_pt, 1.0, 1.0, "B");
+  h_fake_trackVertex_pt->Draw();
+  h_fake_trackVertex_pt->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_fake_trackVertex_pt->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_fake_trackVertex_pt->GetName() + ".jpeg");
+  delete h_fake_trackVertex_pt;
+  delete h_all_trackVertex_pt;
+  delete h_false_trackVertex_pt;
+
+  h_all_trueVertex_eta->GetXaxis()->SetRange(1, h_all_trueVertex_eta->GetNbinsX() + 2);
+  h_all_trueVertex_eta->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trueVertex_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trueVertex_eta->GetName() + ".jpeg");
+
+  h_correct_trueVertex_eta->GetXaxis()->SetRange(1, h_correct_trueVertex_eta->GetNbinsX() + 2);
+  h_correct_trueVertex_eta->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trueVertex_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trueVertex_eta->GetName() + ".jpeg");
+
+  h_all_trueVertex_eta->Sumw2();
+  h_correct_trueVertex_eta->Sumw2();
+  TH1F* h_eff_trueVertex_eta = (TH1F*)h_correct_trueVertex_eta->Clone();
+  h_eff_trueVertex_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_trueVertex_eta->GetXaxis()->SetRange(1, h_eff_trueVertex_eta->GetNbinsX() + 2);
+  h_eff_trueVertex_eta->SetName("eff_trueVertex_eta");
+  h_eff_trueVertex_eta->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_trueVertex_eta->GetYaxis()->SetTitle("Efficiency");
+  h_eff_trueVertex_eta->Divide(h_correct_trueVertex_eta,h_all_trueVertex_eta, 1.0, 1.0, "B");
+  h_eff_trueVertex_eta->Draw();
+  h_eff_trueVertex_eta->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_trueVertex_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_trueVertex_eta->GetName() + ".jpeg");
+  delete h_eff_trueVertex_eta;
+  delete h_all_trueVertex_eta;
+  delete h_correct_trueVertex_eta;
+
+  h_all_oneMatch_trueVertex_eta->Sumw2();
+  h_correct_oneMatch_trueVertex_eta->Sumw2();
+  TH1F* h_eff_oneMatch_trueVertex_eta = (TH1F*)h_correct_oneMatch_trueVertex_eta->Clone();
+  h_eff_oneMatch_trueVertex_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatch_trueVertex_eta->GetXaxis()->SetRange(1, h_eff_oneMatch_trueVertex_eta->GetNbinsX() + 2);
+  h_eff_oneMatch_trueVertex_eta->SetName("eff_oneMatch_trueVertex_eta");
+  h_eff_oneMatch_trueVertex_eta->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_oneMatch_trueVertex_eta->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatch_trueVertex_eta->Divide(h_correct_oneMatch_trueVertex_eta,h_all_oneMatch_trueVertex_eta, 1.0, 1.0, "B");
+  h_eff_oneMatch_trueVertex_eta->Draw();
+  h_eff_oneMatch_trueVertex_eta->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatch_trueVertex_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatch_trueVertex_eta->GetName() + ".jpeg");
+  delete h_eff_oneMatch_trueVertex_eta;
+  delete h_all_oneMatch_trueVertex_eta;
+  delete h_correct_oneMatch_trueVertex_eta;
+
+  h_all_oneMatchAlt_trueVertex_eta->Sumw2();
+  h_correct_oneMatchAlt_trueVertex_eta->Sumw2();
+  TH1F* h_eff_oneMatchAlt_trueVertex_eta = (TH1F*)h_correct_oneMatchAlt_trueVertex_eta->Clone();
+  h_eff_oneMatchAlt_trueVertex_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatchAlt_trueVertex_eta->GetXaxis()->SetRange(1, h_eff_oneMatchAlt_trueVertex_eta->GetNbinsX() + 2);
+  h_eff_oneMatchAlt_trueVertex_eta->SetName("eff_oneMatchAlt_trueVertex_eta");
+  h_eff_oneMatchAlt_trueVertex_eta->GetXaxis()->SetTitle("Tracking Particle #eta");
+  h_eff_oneMatchAlt_trueVertex_eta->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatchAlt_trueVertex_eta->Divide(h_correct_oneMatchAlt_trueVertex_eta,h_all_oneMatchAlt_trueVertex_eta, 1.0, 1.0, "B");
+  h_eff_oneMatchAlt_trueVertex_eta->Draw();
+  h_eff_oneMatchAlt_trueVertex_eta->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatchAlt_trueVertex_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatchAlt_trueVertex_eta->GetName() + ".jpeg");
+  delete h_eff_oneMatchAlt_trueVertex_eta;
+  delete h_all_oneMatchAlt_trueVertex_eta;
+  delete h_correct_oneMatchAlt_trueVertex_eta;
+
+  h_all_trackVertex_eta->Sumw2();
+  h_false_trackVertex_eta->Sumw2();
+  TH1F* h_fake_trackVertex_eta = (TH1F*)h_false_trackVertex_eta->Clone();
+  h_fake_trackVertex_eta->GetYaxis()->SetNoExponent(kTRUE);
+  h_fake_trackVertex_eta->GetXaxis()->SetRange(1, h_fake_trackVertex_eta->GetNbinsX() + 2);
+  h_fake_trackVertex_eta->SetName("fake_trackVertex_eta");
+  h_fake_trackVertex_eta->GetXaxis()->SetTitle("Track #eta");
+  h_fake_trackVertex_eta->GetYaxis()->SetTitle("Fake Rate");
+  h_fake_trackVertex_eta->Divide(h_false_trackVertex_eta,h_all_trackVertex_eta, 1.0, 1.0, "B");
+  h_fake_trackVertex_eta->Draw();
+  h_fake_trackVertex_eta->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_fake_trackVertex_eta->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_fake_trackVertex_eta->GetName() + ".jpeg");
+  delete h_fake_trackVertex_eta;
+  delete h_all_trackVertex_eta;
+  delete h_false_trackVertex_eta;
+
+  h_all_trueVertex_dxy->GetXaxis()->SetRange(1, h_all_trueVertex_dxy->GetNbinsX() + 2);
+  h_all_trueVertex_dxy->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_all_trueVertex_dxy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_all_trueVertex_dxy->GetName() + ".jpeg");
+
+  h_correct_trueVertex_dxy->GetXaxis()->SetRange(1, h_correct_trueVertex_dxy->GetNbinsX() + 2);
+  h_correct_trueVertex_dxy->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_correct_trueVertex_dxy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_correct_trueVertex_dxy->GetName() + ".jpeg");
+   
+  h_all_trueVertex_dxy->Sumw2();
+  h_correct_trueVertex_dxy->Sumw2();
+  TH1F* h_eff_trueVertex_dxy = (TH1F*)h_correct_trueVertex_dxy->Clone();
+  h_eff_trueVertex_dxy->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_trueVertex_dxy->GetXaxis()->SetRange(1, h_eff_trueVertex_dxy->GetNbinsX() + 2);
+  h_eff_trueVertex_dxy->SetName("eff_trueVertex_dxy");
+  h_eff_trueVertex_dxy->GetXaxis()->SetTitle("Vertex d_{xy} (cm)");
+  h_eff_trueVertex_dxy->GetYaxis()->SetTitle("Efficiency");
+  h_eff_trueVertex_dxy->Divide(h_correct_trueVertex_dxy,h_all_trueVertex_dxy, 1.0, 1.0, "B");
+  h_eff_trueVertex_dxy->Draw();
+  h_eff_trueVertex_dxy->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_trueVertex_dxy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_trueVertex_dxy->GetName() + ".jpeg");
+  delete h_eff_trueVertex_dxy;
+  delete h_all_trueVertex_dxy;
+  delete h_correct_trueVertex_dxy;
+
+  h_all_oneMatch_trueVertex_dxy->Sumw2();
+  h_correct_oneMatch_trueVertex_dxy->Sumw2();
+  TH1F* h_eff_oneMatch_trueVertex_dxy = (TH1F*)h_correct_oneMatch_trueVertex_dxy->Clone();
+  h_eff_oneMatch_trueVertex_dxy->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatch_trueVertex_dxy->GetXaxis()->SetRange(1, h_eff_oneMatch_trueVertex_dxy->GetNbinsX() + 2);
+  h_eff_oneMatch_trueVertex_dxy->SetName("eff_oneMatch_trueVertex_dxy");
+  h_eff_oneMatch_trueVertex_dxy->GetXaxis()->SetTitle("Vertex d_{xy} (cm)");
+  h_eff_oneMatch_trueVertex_dxy->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatch_trueVertex_dxy->Divide(h_correct_oneMatch_trueVertex_dxy,h_all_oneMatch_trueVertex_dxy, 1.0, 1.0, "B");
+  h_eff_oneMatch_trueVertex_dxy->Draw();
+  h_eff_oneMatch_trueVertex_dxy->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatch_trueVertex_dxy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatch_trueVertex_dxy->GetName() + ".jpeg");
+  delete h_eff_oneMatch_trueVertex_dxy;
+  delete h_all_oneMatch_trueVertex_dxy;
+  delete h_correct_oneMatch_trueVertex_dxy;
+
+  h_all_oneMatchAlt_trueVertex_dxy->Sumw2();
+  h_correct_oneMatchAlt_trueVertex_dxy->Sumw2();
+  TH1F* h_eff_oneMatchAlt_trueVertex_dxy = (TH1F*)h_correct_oneMatchAlt_trueVertex_dxy->Clone();
+  h_eff_oneMatchAlt_trueVertex_dxy->GetYaxis()->SetNoExponent(kTRUE);
+  h_eff_oneMatchAlt_trueVertex_dxy->GetXaxis()->SetRange(1, h_eff_oneMatchAlt_trueVertex_dxy->GetNbinsX() + 2);
+  h_eff_oneMatchAlt_trueVertex_dxy->SetName("eff_oneMatchAlt_trueVertex_dxy");
+  h_eff_oneMatchAlt_trueVertex_dxy->GetXaxis()->SetTitle("Vertex d_{xy} (cm)");
+  h_eff_oneMatchAlt_trueVertex_dxy->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatchAlt_trueVertex_dxy->Divide(h_correct_oneMatchAlt_trueVertex_dxy,h_all_oneMatchAlt_trueVertex_dxy, 1.0, 1.0, "B");
+  h_eff_oneMatchAlt_trueVertex_dxy->Draw();
+  h_eff_oneMatchAlt_trueVertex_dxy->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatchAlt_trueVertex_dxy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatchAlt_trueVertex_dxy->GetName() + ".jpeg");
+  delete h_eff_oneMatchAlt_trueVertex_dxy;
+  delete h_all_oneMatchAlt_trueVertex_dxy;
+  delete h_correct_oneMatchAlt_trueVertex_dxy;
+   
+  h_all_trackVertex_dxy->Sumw2();
+  h_false_trackVertex_dxy->Sumw2();
+  TH1F* h_fake_trackVertex_dxy = (TH1F*)h_false_trackVertex_dxy->Clone();
+  h_fake_trackVertex_dxy->GetYaxis()->SetNoExponent(kTRUE);
+  h_fake_trackVertex_dxy->GetXaxis()->SetRange(1, h_fake_trackVertex_dxy->GetNbinsX() + 2);
+  h_fake_trackVertex_dxy->SetName("fake_trackVertex_dxy");
+  h_fake_trackVertex_dxy->GetXaxis()->SetTitle("Vertex d_{xy} (cm)");
+  h_fake_trackVertex_dxy->GetYaxis()->SetTitle("Fake Rate");
+  h_fake_trackVertex_dxy->Divide(h_false_trackVertex_dxy,h_all_trackVertex_dxy, 1.0, 1.0, "B");
+  h_fake_trackVertex_dxy->Draw();
+  h_fake_trackVertex_dxy->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_fake_trackVertex_dxy->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_fake_trackVertex_dxy->GetName() + ".jpeg");
+  delete h_fake_trackVertex_dxy;
+  delete h_all_trackVertex_dxy;
+  delete h_false_trackVertex_dxy;
+   
+  std::stringstream txt;
+  float rate;
+  if(inputFile.Contains("NeutrinoGun")){
+    rate = 40000.0;
+    txt << " kHz ";
+  }
+  else{
+    rate = 100.0;
+    txt << " % ";
+  }
+
+  for(int k=0;k<5;k++){
+    for (int l=0; l < 5; l++){
+      h_Count_trk_pt_d0->SetBinContent(l+1,k+1,(h_Count_trk_pt_d0->GetBinContent(l+1,k+1) * rate/nevt));
+      h_Count_trk_pt_d0_dv->SetBinContent(l+1,k+1,(h_Count_trk_pt_d0_dv->GetBinContent(l+1,k+1) * rate/nevt));
+    }
+  }
+   
+  h_Count_trk_pt_d0->Draw("colz");
+  h_Count_trk_pt_d0->SetMarkerSize(2);
+  h_Count_trk_pt_d0->Draw("textsame");
+  h_Count_trk_pt_d0->GetXaxis()->SetNdivisions(5);
+  h_Count_trk_pt_d0->GetYaxis()->SetNdivisions(5);
+  h_Count_trk_pt_d0->GetXaxis()->CenterLabels();
+  h_Count_trk_pt_d0->GetYaxis()->CenterLabels();
+  h_Count_trk_pt_d0->GetYaxis()->SetTitle("Transverse Momentum p_T (GeV)");
+  h_Count_trk_pt_d0->GetXaxis()->SetTitle("Transverse Impact Parameter d_0 (cm)");
+  h_Count_trk_pt_d0->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_Count_trk_pt_d0->GetName() + ".pdf");
+  delete h_Count_trk_pt_d0;
+
+  h_Count_trk_pt_d0_dv->Draw("colz");
+  h_Count_trk_pt_d0_dv->SetMarkerSize(2);
+  h_Count_trk_pt_d0_dv->Draw("textsame");
+  h_Count_trk_pt_d0_dv->GetXaxis()->SetNdivisions(5);
+  h_Count_trk_pt_d0_dv->GetYaxis()->SetNdivisions(5);
+  h_Count_trk_pt_d0_dv->GetXaxis()->CenterLabels();
+  h_Count_trk_pt_d0_dv->GetYaxis()->CenterLabels();
+  h_Count_trk_pt_d0_dv->GetYaxis()->SetTitle("Transverse Momentum p_T (GeV)");
+  h_Count_trk_pt_d0_dv->GetXaxis()->SetTitle("(DV selection) Transverse Impact Parameter d_0 (cm)");
+  h_Count_trk_pt_d0_dv->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_Count_trk_pt_d0_dv->GetName() + ".pdf");
+  delete h_Count_trk_pt_d0_dv;
+
+  fout->Close();
+}
+
+
+Double_t dist_TPs(Track_Parameters a, Track_Parameters b){  
+  float x1 = a.x0; //   Centers of the circles
+  float y1 = a.y0; // 
+  float x2 = b.x0; // 
+  float y2 = b.y0; // 
+  float R1 = a.rho;   // Radii of the circles
+  float R2 = b.rho;
+  float R = dist(x1,y1,x2,y2); // Distance between centers
+  if((R>=(R1-R2)) && (R<=(R1+R2))){
+    return (0);
+  }
+  else if(R==0){
+    return (-99999.0);
+  }
+  else{
+
+    return(R-R1-R2);
+  }
+}
+
+Int_t Vertex(Track_Parameters a, Track_Parameters b, Double_t &x_vtx, Double_t &y_vtx, Double_t &z_vtx){
+  float x1 = a.x0; //   Centers of the circles
+  float y1 = a.y0; // 
+  float x2 = b.x0; // 
+  float y2 = b.y0; // 
+  float R1 = a.rho;   // Radii of the circles
+  float R2 = b.rho;
+  float del1, del2, x_11, x_12, x_21, x_22, y_11, y_12, y_21, y_22;
+  float R = dist(x1,y1,x2,y2); // Distance between centers
+  float centerdx = x1 - x2;
+  float centerdy = y1 - y2;
+  int retval = -1;
+
+  if((R>=(R1-R2)) && (R<=(R1+R2))){
+    // Circles Intersect
+    float R4 = R*R*R*R;
+    float A = (R1*R1 - R2*R2) / (2 * R*R);
+    float r2r2 = (R1*R1 - R2*R2);
+    float C = TMath::Sqrt(2 * (R1*R1 + R2*R2) / (R*R) - (r2r2 * r2r2) / R4 - 1);
+      
+    float fx = (x1+x2) / 2 + A * (x2 - x1);
+    float gx = C * (y2 - y1) / 2;
+    float ix1 = fx + gx;
+    float ix2 = fx - gx;
+
+    float fy = (y1+y2) / 2 + A * (y2 - y1);
+    float gy = C * (x1 - x2) / 2;
+    float iy1 = fy + gy;
+    float iy2 = fy - gy;
+      
+      
+    float ap1 = a.phi_T(ix1,iy1);
+    float bp1 = b.phi_T(ix1,iy1);
+    float ap2 = a.phi_T(ix2,iy2);
+    float bp2 = b.phi_T(ix2,iy2);/*
+				   float z11 = a->z(ap1);
+				   float z21 = b->z(bp1);
+				   float z12 = a->z(ap2);
+				   float z22 = b->z(bp2);
+				 */
+    float z11 = a.z(ix1,iy1);
+    float z21 = b.z(ix1,iy1);
+    float z12 = a.z(ix2,iy2);
+    float z22 = b.z(ix2,iy2);
+      
+    float delz1 = fabs(z11 - z21);//fabs(fabs(ap1 - bp1)-TMath::Pi());// fabs(dist3(ix1,iy1,z11)-dist3(ix1,iy1,z21));
+    float delz2 = fabs(z12 - z22);//fabs(fabs(ap2 - bp2)-TMath::Pi());// fabs(dist3(ix2,iy2,z12)-dist3(ix2,iy2,z22));
+      
+    if(VERBOSE[3]){// &&(fabs(z11-z_vtx)>0.1 && fabs(z12-z_vtx)>0.1 && fabs(z21-z_vtx)>0.1 && fabs(z22-z_vtx)>0.1)){
+      std::cout<<Form("ix1 = %5.2f    |   iy1 = %5.2f    |  ix2 = %5.2f    |   iy2 = %5.2f",ix1,iy1,ix2,iy2)<<endl;
+      // std::cout<<Form("ap1 = %5.2f    |   bp1 = %5.2f    |  ap2 = %5.2f    |   bp2 = %5.2f",ap1,bp1,ap2,bp2)<<endl;
+      std::cout<<Form("z11 = %5.2f    |   z21 = %5.2f    |  z12 = %5.2f    |   z22 = %5.2f    |   delz1 = %5.2f    |   delz2 = %5.2f",z11,z21,z12,z22,delz1,delz2)<<endl;//<<" dxy = "<<tp_dxy->at(it)<<"\t \t dist = "<<TMath::Sqrt((*selectedTPs)[j]->x*(*selectedTPs)[j]->x + (*selectedTPs)[j]->y*(*selectedTPs)[j]->y)<<" \t eta = "<<tp_eta->at(it)<<" \t phi = "<<tp_phi->at(it)<<" \t pt = "<<tp_pt->at(it)<<endl;
+    }
+    retval = 0;
+    if(gx==0 && gy==0){ // Only 1 intersection
+      x_vtx = ix1;
+      y_vtx = iy1;
+      if(delz1<CUTOFF){//(fabs(z11-tp_z)<1.0 || fabs(z21-tp_z)<1.0){//
+	retval = 1;
+      }
+      z_vtx = z11;//fabs(z11)<fabs(z21)?z11:z21;//fabs(a->z0-z11)<fabs(a->z0-z21)?z11:z21;
+      // cout<<"----1 intersection ----";
+      return retval;//true;
+    }
+      
+    if(dist(ix1,iy1)>20){
+      x_vtx = ix2;
+      y_vtx = iy2;
+      if(delz2<CUTOFF){//(fabs(z12-tp_z)<1.0 || fabs(z22-tp_z)<1.0){//
+	retval = 2;
+      }
+      z_vtx = z12;//fabs(z12)<fabs(z22)?z12:z22;//fabs(a->z0-z12)<fabs(a->z0-z22)?z12:z22;// dist3(ix2,iy2,z12)<dist3(ix2,iy2,z22)?z12:z22;//fabs(a->z0-z12)<fabs(b->z0-z22)?z12:z22;//z12;
+      return retval;//true;
+    }
+    if(dist(ix2,iy2)>20){
+      x_vtx = ix1;
+      y_vtx = iy1;
+      if(delz1<CUTOFF){//(fabs(z11-tp_z)<1.0 || fabs(z21-tp_z)<1.0){//
+	retval = 2;
+      }
+      z_vtx = z11;//fabs(z11)<fabs(z21)?z11:z21;//fabs(a->z0-z11)<fabs(a->z0-z21)?z11:z21;//dist3(ix1,iy1,z11)<dist3(ix1,iy1,z21)?z11:z21;//fabs(a->z0-z11)<fabs(b->z0-z21)?z11:z21;//z11;
+      return retval;//true;
+    }
+      
+    // Finding minimum z distance to decide between the 2 intersection vertex
+
+    // if((fabs(z11-tp_z)<1.0 || fabs(z12-tp_z)<1.0 || fabs(z21-tp_z)<1.0 || fabs(z22-tp_z)>1.0)){
+    retval = 3;
+    // }
+ 
+    if (delz1<=delz2){
+      x_vtx = ix1;
+      y_vtx = iy1;
+      z_vtx = z11;//fabs(z11)<fabs(z21)?z11:z21;// fabs(a->z0-z11)<fabs(a->z0-z21)?z11:z21;
+      // cout<<"----2 intersection ----";
+      return retval;//true;         
+    }
+    else{
+      x_vtx = ix2;
+      y_vtx = iy2;
+      z_vtx = z12;//fabs(z12)<fabs(z22)?z12:z22;// fabs(a->z0-z12)<fabs(a->z0-z22)?z12:z22;
+      return retval;//true;
+    }
+      
+
+  }
+  else if(R==0){
+    // Circles with Same center. 
+    x_vtx = -999.0;//a->x();  // Considering First track coordinates as vertex
+    y_vtx = -999.0;//a->y();
+    return -2;
+  }/*
+     x_vtx = -99999.0;
+     y_vtx = -99999.0;
+     z_vtx = -99999.0;
+     return false;
+     else{
+     x_vtx = -9999.0;
+     y_vtx = -9999.0;
+     return;
+     }
+   */
+   //* Circles don't intersect. 
+
+  if(x1==x2){
+    if(y1==y2){
+      // Circles with Same center. 
+      //x_vtx = a->x();  // Considering First track coordinates as vertex
+      // y_vtx = a->y();
+      return -2;
+    }
+    x_11 = x1;
+    x_12 = x1;
+
+    x_21 = x2;
+    x_22 = x2;
+
+    y_11 = y1 + R1;
+    y_12 = y1 - R1;
+
+    y_21 = y2 + R2;
+    y_22 = y2 - R2;
+
+  }
+  else{
+
+    del1 = R1 / (TMath::Sqrt(1+((y1-y2)*(y1-y2)/((x1-x2)*(x1-x2)))));
+    del2 = R2 / (TMath::Sqrt(1+((y1-y2)*(y1-y2)/((x1-x2)*(x1-x2)))));
+
+    x_11 = x1 + del1;
+    x_12 = x1 - del1;
+
+    x_21 = x2 + del2;
+    x_22 = x2 - del2;
+
+    y_11 = y1 + (x_11-x1) * ((y1-y2)/(x1-x2));
+    y_12 = y1 + (x_12-x1) * ((y1-y2)/(x1-x2));
+
+    y_21 = y2 + (x_21-x2) * ((y1-y2)/(x1-x2));
+    y_22 = y2 + (x_22-x2) * ((y1-y2)/(x1-x2));
+  }
+
+  if(dist(x_11,y_11,x2,y2) <= dist(x_12,y_12,x2,y2)){
+    x_vtx = x_11;
+    y_vtx = y_11;
+  }
+  else{
+    x_vtx = x_12;
+    y_vtx = y_12;
+  }
+
+  if(dist(x_21,y_21,x1,y1) <= dist(x_22,y_22,x1,y1)){
+    x_vtx = (x_vtx + x_21)/2;
+    y_vtx = (y_vtx + y_21)/2;
+  }
+  else{
+    x_vtx = (x_vtx + x_22)/2;
+    y_vtx = (y_vtx + y_22)/2;
+  }
+  //! Does this make sense for no intersection case???
+  float az = a.z(x_vtx,y_vtx);
+  float bz = b.z(x_vtx,y_vtx);
+  z_vtx = (az+bz)/2.0;
+  if(VERBOSE[3]){
+    std::cout<<Form("z_vtx = %5.1f  |  az = %5.1f  |  bz = %5.1f",z_vtx,az,bz)<<endl;
+  }
+  return -1;
+}
+
+void SetPlotStyle()
+{
+  // from ATLAS plot style macro
+
+  // use plain black on white colors
+  gStyle->SetFrameBorderMode(0);
+  gStyle->SetFrameFillColor(0);
+  gStyle->SetCanvasBorderMode(0);
+  gStyle->SetCanvasColor(0);
+  gStyle->SetPadBorderMode(0);
+  gStyle->SetPadColor(0);
+  gStyle->SetStatColor(0);
+  gStyle->SetHistLineColor(1);
+
+  gStyle->SetPalette(1);
+
+  // set the paper & margin sizes
+  gStyle->SetPaperSize(20, 26);
+  gStyle->SetPadTopMargin(0.05);
+  gStyle->SetPadRightMargin(0.15);
+  gStyle->SetPadBottomMargin(0.16);
+  gStyle->SetPadLeftMargin(0.16);
+
+  // set title offsets (for axis label)
+  gStyle->SetTitleXOffset(1.4);
+  gStyle->SetTitleYOffset(1.4);
+
+  // use large fonts
+  gStyle->SetTextFont(42);
+  gStyle->SetTextSize(0.05);
+  gStyle->SetLabelFont(42, "x");
+  gStyle->SetTitleFont(42, "x");
+  gStyle->SetLabelFont(42, "y");
+  gStyle->SetTitleFont(42, "y");
+  gStyle->SetLabelFont(42, "z");
+  gStyle->SetTitleFont(42, "z");
+  gStyle->SetLabelSize(0.05, "x");
+  gStyle->SetTitleSize(0.05, "x");
+  gStyle->SetLabelSize(0.05, "y");
+  gStyle->SetTitleSize(0.05, "y");
+  gStyle->SetLabelSize(0.05, "z");
+  gStyle->SetTitleSize(0.05, "z");
+
+  // use bold lines and markers
+  gStyle->SetMarkerStyle(20);
+  gStyle->SetMarkerSize(1.2);
+  gStyle->SetHistLineWidth(2.);
+  gStyle->SetLineStyleString(2, "[12 12]");
+
+  // get rid of error bar caps
+  gStyle->SetEndErrorSize(0.);
+
+  // do not display any of the standard histogram decorations
+  gStyle->SetOptTitle(0);
+  //gStyle->SetOptStat(0);
+  gStyle->SetOptFit(0);
+
+  // put tick marks on top and RHS of plots
+  gStyle->SetPadTickX(1);
+  gStyle->SetPadTickY(1);
+}
+
+void mySmallText(Double_t x, Double_t y, Color_t color, char *text)
+{
+  Double_t tsize = 0.044;
+  TLatex l;
+  l.SetTextSize(tsize);
+  l.SetNDC();
+  l.SetTextColor(color);
+  l.DrawLatex(x, y, text);
+}
+
