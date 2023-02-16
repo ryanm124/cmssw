@@ -120,6 +120,7 @@ public:
     x0 =  (d0 + charge * rho)*TMath::Sin(phi);
     y0 = -(d0 + charge * rho)*TMath::Cos(phi);
   }
+  Track_Parameters(){};
   ~Track_Parameters(){};
 };
 
@@ -134,6 +135,7 @@ public:
   Track_Parameters b;
   bool matched = false;
   int errorCode = 0;
+  std::vector<Track_Parameters> tracks = {};
   Vertex_Parameters(Double_t x_dv_in, Double_t y_dv_in, Double_t z_dv_in, Track_Parameters a_in, Track_Parameters b_in, float score_in=-1):   
     a(a_in),
     b(b_in)
@@ -142,6 +144,8 @@ public:
     y_dv = y_dv_in;
     z_dv = z_dv_in;
     score = score_in;
+    tracks.push_back(a_in);
+    tracks.push_back(b_in);
   }
   ~Vertex_Parameters(){};
 };
@@ -610,7 +614,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_d0_primary_noCuts_H = new TH1F("h_trk_d0_primary_noCuts_H","h_trk_d0_primary_noCuts_H; Track d_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_primary_noCuts_L = new TH1F("h_trk_d0_primary_noCuts_L","h_trk_d0_primary_noCuts_L; Track d_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_primary_qualCuts = new TH1F("h_trk_d0_primary_qualCuts","h_trk_d0_primary_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_qualCuts = new TH1F("h_trk_d0_primary_qualCuts","h_trk_d0_primary_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_primary_allCuts = new TH1F("h_trk_d0_primary_allCuts","h_trk_d0_primary_allCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_ptWeightedD0_primary_qualCuts = new TH1F("h_trk_ptWeightedD0_primary_qualCuts","h_trk_ptWeightedD0_primary_qualCuts; Track p_{T}*d_{0} Distribution (GeV cm) ; Events / 0.02 GeV cm",200,-2,2);
   // np = not primary
   TH1F *h_trk_d0_np = new TH1F("h_trk_d0_np","h_trk_d0_np; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
@@ -621,6 +625,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_d0_PU_noCuts = new TH1F("h_trk_d0_PU_noCuts","h_trk_d0_PU_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_notHiggs_noCuts = new TH1F("h_trk_d0_notHiggs_noCuts","h_trk_d0_notHiggs_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_np_qualCuts = new TH1F("h_trk_d0_np_qualCuts","h_trk_d0_np_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
+  TH1F *h_trk_d0_np_allCuts = new TH1F("h_trk_d0_np_allCuts","h_trk_d0_np_allCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_ptWeightedD0_np_qualCuts = new TH1F("h_trk_ptWeightedD0_np_qualCuts","h_trk_ptWeightedD0_np_qualCuts; Track p_{T}*d_{0} Distribution (GeV cm) ; Events / 0.02 GeV cm",200,-2,2);
   TH1F *h_trk_d0_fake_qualCuts = new TH1F("h_trk_d0_fake_qualCuts","h_trk_d0_fake_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_PU_qualCuts = new TH1F("h_trk_d0_PU_qualCuts","h_trk_d0_PU_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
@@ -680,6 +685,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F* h_trk_z0_primary_noCuts_H = new TH1F("h_trk_z0_primary_noCuts_H","h_trk_z0_primary_noCuts_H; Track z_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_primary_noCuts_L = new TH1F("h_trk_z0_primary_noCuts_L","h_trk_z0_primary_noCuts_L; Track z_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_primary_qualCuts = new TH1F("h_trk_z0_primary_qualCuts","h_trk_z0_primary_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_primary_allCuts = new TH1F("h_trk_z0_primary_allCuts","h_trk_z0_primary_allCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_np = new TH1F("h_trk_z0_np","h_trk_z0_np; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_np_noCuts = new TH1F("h_trk_z0_np_noCuts","h_trk_z0_np_noCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_np_noCuts_H = new TH1F("h_trk_z0_np_noCuts_H","h_trk_z0_np_noCuts_H; Track z_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.1 cm", 200, 0, 20);
@@ -691,12 +697,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F* h_trk_z0_fake_qualCuts = new TH1F("h_trk_z0_fake_qualCuts","h_trk_z0_fake_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_PU_qualCuts = new TH1F("h_trk_z0_PU_qualCuts","h_trk_z0_PU_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
   TH1F* h_trk_z0_notHiggs_qualCuts = new TH1F("h_trk_z0_notHiggs_qualCuts","h_trk_z0_notHiggs_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
+  TH1F* h_trk_z0_np_allCuts = new TH1F("h_trk_z0_np_allCuts","h_trk_z0_np_allCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
   TH1F *h_trk_phi = new TH1F("h_trk_phi","h_trk_phi; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_primary = new TH1F("h_trk_phi_primary","h_trk_phi_primary; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_primary_noCuts = new TH1F("h_trk_phi_primary_noCuts","h_trk_phi_primary_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_primary_noCuts_H = new TH1F("h_trk_phi_primary_noCuts_H","h_trk_phi_primary_noCuts_H; Track #phi_{0} Distribution (p_{T}>10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_primary_noCuts_L = new TH1F("h_trk_phi_primary_noCuts_L","h_trk_phi_primary_noCuts_L; Track #phi_{0} Distribution (p_{T}<10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_primary_qualCuts = new TH1F("h_trk_phi_primary_qualCuts","h_trk_phi_primary_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_primary_allCuts = new TH1F("h_trk_phi_primary_allCuts","h_trk_phi_primary_allCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_np = new TH1F("h_trk_phi_np","h_trk_phi_np; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_np_noCuts = new TH1F("h_trk_phi_np_noCuts","h_trk_phi_np_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_np_noCuts_H = new TH1F("h_trk_phi_np_noCuts_H","h_trk_phi_np_noCuts_H; Track #phi_{0} Distribution (p_{T}>10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
@@ -708,12 +716,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_phi_fake_qualCuts = new TH1F("h_trk_phi_fake_qualCuts","h_trk_phi_fake_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_PU_qualCuts = new TH1F("h_trk_phi_PU_qualCuts","h_trk_phi_PU_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_phi_notHiggs_qualCuts = new TH1F("h_trk_phi_notHiggs_qualCuts","h_trk_phi_notHiggs_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
+  TH1F *h_trk_phi_np_allCuts = new TH1F("h_trk_phi_np_allCuts","h_trk_phi_np_allCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
   TH1F *h_trk_sectorPhi = new TH1F("h_trk_sectorPhi","h_trk_sectorPhi; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_primary = new TH1F("h_trk_sectorPhi_primary","h_trk_sectorPhi_primary; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_primary_noCuts = new TH1F("h_trk_sectorPhi_primary_noCuts","h_trk_sectorPhi_primary_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_primary_noCuts_H = new TH1F("h_trk_sectorPhi_primary_noCuts_H","h_trk_sectorPhi_primary_noCuts_H; Track #sectorPhi_{0} Distribution (p_{T}>10 GeV); Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_primary_noCuts_L = new TH1F("h_trk_sectorPhi_primary_noCuts_L","h_trk_sectorPhi_primary_noCuts_L; Track #sectorPhi_{0} Distribution (p_{T}<10 GeV); Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_primary_qualCuts = new TH1F("h_trk_sectorPhi_primary_qualCuts","h_trk_sectorPhi_primary_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+  TH1F *h_trk_sectorPhi_primary_allCuts = new TH1F("h_trk_sectorPhi_primary_allCuts","h_trk_sectorPhi_primary_allCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_np = new TH1F("h_trk_sectorPhi_np","h_trk_sectorPhi_np; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_np_noCuts = new TH1F("h_trk_sectorPhi_np_noCuts","h_trk_sectorPhi_np_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_np_noCuts_H = new TH1F("h_trk_sectorPhi_np_noCuts_H","h_trk_sectorPhi_np_noCuts_H; Track #sectorPhi_{0} Distribution (p_{T}>10 GeV); Events / 0.02",100,-1,1);
@@ -725,7 +735,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_sectorPhi_fake_qualCuts = new TH1F("h_trk_sectorPhi_fake_qualCuts","h_trk_sectorPhi_fake_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_PU_qualCuts = new TH1F("h_trk_sectorPhi_PU_qualCuts","h_trk_sectorPhi_PU_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
   TH1F *h_trk_sectorPhi_notHiggs_qualCuts = new TH1F("h_trk_sectorPhi_notHiggs_qualCuts","h_trk_sectorPhi_notHiggs_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-   
+  TH1F *h_trk_sectorPhi_np_allCuts = new TH1F("h_trk_sectorPhi_np_allCuts","h_trk_sectorPhi_np_allCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
+
   TH1F *h_tp_pt = new TH1F("h_tp_pt", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
   TH1F *h_tp_eta = new TH1F("h_tp_eta", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
   TH1F *h_tp_d0 = new TH1F("h_tp_d0", ";Tracking particle d_{0} [cm]; Tracking particles / 0.01 cm", 50, -2, 2);
@@ -770,6 +781,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_MVA1_primary_noCuts_H = new TH1F("h_trk_MVA1_primary_noCuts_H","h_trk_MVA1_primary_noCuts_H; Track MVA Score (p_{T}>10 GeV); Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_primary_noCuts_L = new TH1F("h_trk_MVA1_primary_noCuts_L","h_trk_MVA1_primary_noCuts_L; Track MVA Score (p_{T}<10 GeV); Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_primary_qualCuts = new TH1F("h_trk_MVA1_primary_qualCuts","h_trk_MVA1_primary_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_primary_allCuts = new TH1F("h_trk_MVA1_primary_allCuts","h_trk_MVA1_primary_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_np_noCuts = new TH1F("h_trk_MVA1_np_noCuts","h_trk_MVA1_np_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_np_noCuts_H = new TH1F("h_trk_MVA1_np_noCuts_H","h_trk_MVA1_np_noCuts_H; Track MVA Score (p_{T}>10 GeV); Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_np_noCuts_L = new TH1F("h_trk_MVA1_np_noCuts_L","h_trk_MVA1_np_noCuts_L; Track MVA Score (p_{T}<10 GeV); Events / 0.01",100,0,1);
@@ -780,6 +792,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_MVA1_fake_qualCuts = new TH1F("h_trk_MVA1_fake_qualCuts","h_trk_MVA1_fake_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_PU_qualCuts = new TH1F("h_trk_MVA1_PU_qualCuts","h_trk_MVA1_PU_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_notHiggs_qualCuts = new TH1F("h_trk_MVA1_notHiggs_qualCuts","h_trk_MVA1_notHiggs_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA1_np_allCuts = new TH1F("h_trk_MVA1_np_allCuts","h_trk_MVA1_np_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
   // Chi2 plots
   TH1F *h_trk_chi2rphidof = new TH1F("h_trk_chi2rphidof","h_trk_chi2rphidof; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.1",50,0,5);
   TH1F *h_trk_chi2rphidof_primary = new TH1F("h_trk_chi2rphidof_primary","h_trk_chi2rphidof_primary; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
@@ -787,6 +800,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_chi2rphidof_primary_noCuts_H = new TH1F("h_trk_chi2rphidof_primary_noCuts_H","h_trk_chi2rphidof_primary_noCuts_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_primary_noCuts_L = new TH1F("h_trk_chi2rphidof_primary_noCuts_L","h_trk_chi2rphidof_primary_noCuts_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_primary_qualCuts = new TH1F("h_trk_chi2rphidof_primary_qualCuts","h_trk_chi2rphidof_primary_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_primary_allCuts = new TH1F("h_trk_chi2rphidof_primary_allCuts","h_trk_chi2rphidof_primary_allCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_np = new TH1F("h_trk_chi2rphidof_np","h_trk_chi2rphidof_np; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_np_noCuts = new TH1F("h_trk_chi2rphidof_np_noCuts","h_trk_chi2rphidof_np_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_np_noCuts_H = new TH1F("h_trk_chi2rphidof_np_noCuts_H","h_trk_chi2rphidof_np_noCuts_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
@@ -798,6 +812,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_chi2rphidof_fake_qualCuts = new TH1F("h_trk_chi2rphidof_fake_qualCuts","h_trk_chi2rphidof_fake_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_PU_qualCuts = new TH1F("h_trk_chi2rphidof_PU_qualCuts","h_trk_chi2rphidof_PU_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_notHiggs_qualCuts = new TH1F("h_trk_chi2rphidof_notHiggs_qualCuts","h_trk_chi2rphidof_notHiggs_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rphidof_np_allCuts = new TH1F("h_trk_chi2rphidof_np_allCuts","h_trk_chi2rphidof_np_allCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rphidof_H = new TH1F("h_trk_chi2rphidof_H","h_trk_chi2rphidof_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>8 GeV); Events / 0.1",50,0,5);   
   TH1F *h_trk_chi2rphidof_L = new TH1F("h_trk_chi2rphidof_L","h_trk_chi2rphidof_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<8 GeV); Events / 0.1",50,0,5);   
   TH1F *h_trk_chi2rphidof_C = new TH1F("h_trk_chi2rphidof_C","h_trk_chi2rphidof_C; Track #chi^{2}_{r#phi}/d.o.f (|#eta|<0.8); Events / 0.1",50,0,5);   
@@ -811,6 +826,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_chi2rzdof_primary_noCuts_H = new TH1F("h_trk_chi2rzdof_primary_noCuts_H","h_trk_chi2rzdof_primary_noCuts_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_primary_noCuts_L = new TH1F("h_trk_chi2rzdof_primary_noCuts_L","h_trk_chi2rzdof_primary_noCuts_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_primary_qualCuts = new TH1F("h_trk_chi2rzdof_primary_qualCuts","h_trk_chi2rzdof_primary_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_primary_allCuts = new TH1F("h_trk_chi2rzdof_primary_allCuts","h_trk_chi2rzdof_primary_allCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_np = new TH1F("h_trk_chi2rzdof_np","h_trk_chi2rzdof_np; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_np_noCuts = new TH1F("h_trk_chi2rzdof_np_noCuts","h_trk_chi2rzdof_np_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_np_noCuts_H = new TH1F("h_trk_chi2rzdof_np_noCuts_H","h_trk_chi2rzdof_np_noCuts_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
@@ -822,6 +838,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_chi2rzdof_fake_qualCuts = new TH1F("h_trk_chi2rzdof_fake_qualCuts","h_trk_chi2rzdof_fake_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_PU_qualCuts = new TH1F("h_trk_chi2rzdof_PU_qualCuts","h_trk_chi2rzdof_PU_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_notHiggs_qualCuts = new TH1F("h_trk_chi2rzdof_notHiggs_qualCuts","h_trk_chi2rzdof_notHiggs_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
+  TH1F *h_trk_chi2rzdof_np_allCuts = new TH1F("h_trk_chi2rzdof_np_allCuts","h_trk_chi2rzdof_np_allCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
   TH1F *h_trk_chi2rzdof_H = new TH1F("h_trk_chi2rzdof_H","h_trk_chi2rzdof_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>8 GeV); Events / 0.1",50,0,5);
   TH1F *h_trk_chi2rzdof_L = new TH1F("h_trk_chi2rzdof_L","h_trk_chi2rzdof_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<8 GeV); Events / 0.1",50,0,5);
   TH1F *h_trk_chi2rzdof_C = new TH1F("h_trk_chi2rzdof_C","h_trk_chi2rzdof_C; Track #chi^{2}_{rz}/d.o.f (|#eta|<0.8); Events / 0.1",50,0,5);
@@ -835,6 +852,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_bendchi2_primary_noCuts_H = new TH1F("h_trk_bendchi2_primary_noCuts_H","h_trk_bendchi2_primary_noCuts_H; Track bend #chi^{2} (p_{T}>10 GeV); Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_primary_noCuts_L = new TH1F("h_trk_bendchi2_primary_noCuts_L","h_trk_bendchi2_primary_noCuts_L; Track bend #chi^{2} (p_{T}<10 GeV); Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_primary_qualCuts = new TH1F("h_trk_bendchi2_primary_qualCuts","h_trk_bendchi2_primary_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_primary_allCuts = new TH1F("h_trk_bendchi2_primary_allCuts","h_trk_bendchi2_primary_allCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_np = new TH1F("h_trk_bendchi2_np","h_trk_bendchi2_np; Track bend #chi^{2} ; Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_np_noCuts = new TH1F("h_trk_bendchi2_np_noCuts","h_trk_bendchi2_np_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_np_noCuts_H = new TH1F("h_trk_bendchi2_np_noCuts_H","h_trk_bendchi2_np_noCuts_H; Track bend #chi^{2} (p_{T}>10 GeV); Events / 0.1",100,0,10);
@@ -846,6 +864,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_bendchi2_fake_qualCuts = new TH1F("h_trk_bendchi2_fake_qualCuts","h_trk_bendchi2_fake_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_PU_qualCuts = new TH1F("h_trk_bendchi2_PU_qualCuts","h_trk_bendchi2_PU_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_notHiggs_qualCuts = new TH1F("h_trk_bendchi2_notHiggs_qualCuts","h_trk_bendchi2_notHiggs_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
+  TH1F *h_trk_bendchi2_np_allCuts = new TH1F("h_trk_bendchi2_np_allCuts","h_trk_bendchi2_np_allCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
   TH1F *h_trk_bendchi2_H = new TH1F("h_trk_bendchi2_H","h_trk_bendchi2_H; Track bend #chi^{2} (p_{T}>8 GeV); Events / 0.1",50,0,5);
   TH1F *h_trk_bendchi2_L = new TH1F("h_trk_bendchi2_L","h_trk_bendchi2_L; Track bend #chi^{2} (p_{T}<8 GeV); Events / 0.1",50,0,5);
   TH1F *h_trk_bendchi2_C = new TH1F("h_trk_bendchi2_C","h_trk_bendchi2_C; Track bend #chi^{2} (|#eta|<0.8); Events / 0.1",50,0,5);
@@ -1031,6 +1050,13 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH2F *h_trk_pt_vs_eta_np_qualCuts = new TH2F("h_trk_pt_vs_eta_np_qualCuts","h_trk_pt_vs_eta_np_qualCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
   TH2F *h_trk_eta_vs_d0_primary_qualCuts = new TH2F("h_trk_eta_vs_d0_primary_qualCuts","h_trk_eta_vs_d0_primary_qualCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
   TH2F *h_trk_eta_vs_d0_np_qualCuts = new TH2F("h_trk_eta_vs_d0_np_qualCuts","h_trk_eta_vs_d0_np_qualCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
+  
+  TH2F *h_trk_pt_vs_d0_primary_allCuts = new TH2F("h_trk_pt_vs_d0_primary_allCuts","h_trk_pt_vs_d0_primary_allCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
+  TH2F *h_trk_pt_vs_d0_np_allCuts = new TH2F("h_trk_pt_vs_d0_np_allCuts","h_trk_pt_vs_d0_np_allCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
+  TH2F *h_trk_pt_vs_eta_primary_allCuts = new TH2F("h_trk_pt_vs_eta_primary_allCuts","h_trk_pt_vs_eta_primary_allCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
+  TH2F *h_trk_pt_vs_eta_np_allCuts = new TH2F("h_trk_pt_vs_eta_np_allCuts","h_trk_pt_vs_eta_np_allCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
+  TH2F *h_trk_eta_vs_d0_primary_allCuts = new TH2F("h_trk_eta_vs_d0_primary_allCuts","h_trk_eta_vs_d0_primary_allCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
+  TH2F *h_trk_eta_vs_d0_np_allCuts = new TH2F("h_trk_eta_vs_d0_np_allCuts","h_trk_eta_vs_d0_np_allCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
 
   std::string binVariable = "";
   std::vector<std::vector<double>> track_bins = {{-1,1}};
@@ -1136,7 +1162,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       binnedSelectedTracks.push_back({});
     }
     std::deque<Track_Parameters> selectedTracks;      // Tracks 
-    std::vector<Track_Parameters> selectedTPs;         // Tracking particles
+    std::deque<Track_Parameters> selectedTPs;         // Tracking particles
     std::vector<Vertex_Parameters> trueVertices;
     std::vector<Vertex_Parameters> trackVertices;
     std::vector<Vertex_Parameters> tempVertices;
@@ -1387,6 +1413,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
       if (fabs(trk_eta->at(it)) > TP_maxEta)
 	continue;
+      
       h_trk_pt->Fill(trk_pt->at(it));
       if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
 	h_trk_pt_primary->Fill(trk_pt->at(it));
@@ -1409,10 +1436,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_d0_np->Fill(trk_d0->at(it));
 	h_trk_pt_np_ptCuts->Fill(trk_pt->at(it));
       }
-#if 0
+
       if (std::fabs(trk_d0->at(it))>TP_maxD0)
 	continue;
-#endif
+
 
       if ( (trk_pt->at(it)<=10 && std::fabs(pow(trk_pt->at(it),1.8)*trk_d0->at(it))<TP_minD0_L) || (trk_pt->at(it)>10 && std::fabs(pow(trk_pt->at(it),1.8)*trk_d0->at(it))<TP_minD0_H) )
 	continue;
@@ -1490,12 +1517,34 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       h_trk_pt_allCuts->Fill(trk_pt->at(it));
 
       if(trk_fake->at(it)==1 && trk_matchtp_isHToB->at(it)){
-	h_trk_pt_primary_allCuts->Fill(trk_pt->at(it));
 	h_trk_eta_primary_allCuts->Fill(trk_eta->at(it));
+	h_trk_pt_primary_allCuts->Fill(trk_pt->at(it));
+	h_trk_d0_primary_allCuts->Fill(trk_d0->at(it));
+	h_trk_z0_primary_allCuts->Fill(trk_z0->at(it));
+	h_trk_phi_primary_allCuts->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_primary_allCuts->Fill(sectorphi);
+	h_trk_chi2rphidof_primary_allCuts->Fill(chi2rphidof);
+	h_trk_MVA1_primary_allCuts->Fill(trk_MVA1->at(it));
+	h_trk_chi2rzdof_primary_allCuts->Fill(chi2rzdof);
+	h_trk_bendchi2_primary_allCuts->Fill(trk_bendchi2->at(it));
+	h_trk_pt_vs_d0_primary_allCuts->Fill(trk_d0->at(it),trk_pt->at(it));
+	h_trk_pt_vs_eta_primary_allCuts->Fill(trk_eta->at(it),trk_pt->at(it));
+	h_trk_eta_vs_d0_primary_allCuts->Fill(trk_d0->at(it),trk_eta->at(it));
       }
       else{
-	h_trk_pt_np_allCuts->Fill(trk_pt->at(it));
 	h_trk_eta_np_allCuts->Fill(trk_eta->at(it));
+	h_trk_pt_np_allCuts->Fill(trk_pt->at(it));
+	h_trk_d0_np_allCuts->Fill(trk_d0->at(it));
+	h_trk_z0_np_allCuts->Fill(trk_z0->at(it));
+	h_trk_phi_np_allCuts->Fill(trk_phi->at(it));
+	h_trk_sectorPhi_np_allCuts->Fill(sectorphi);
+	h_trk_chi2rphidof_np_allCuts->Fill(chi2rphidof);
+	h_trk_MVA1_np_allCuts->Fill(trk_MVA1->at(it));
+	h_trk_chi2rzdof_np_allCuts->Fill(chi2rzdof);
+	h_trk_bendchi2_np_allCuts->Fill(trk_bendchi2->at(it));
+	h_trk_pt_vs_d0_np_allCuts->Fill(trk_d0->at(it),trk_pt->at(it));
+	h_trk_pt_vs_eta_np_allCuts->Fill(trk_eta->at(it),trk_pt->at(it));
+	h_trk_eta_vs_d0_np_allCuts->Fill(trk_d0->at(it),trk_eta->at(it));
       }
 
       for(uint i=0; i<track_bins.size(); i++){
@@ -1561,8 +1610,12 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     // tracking particle loop
     float tpH_T = 0.0;
     std::valarray<float> tpMET = {0.0,0.0};
+    std::cout<<"tp_pt size: "<<tp_pt->size()<<std::endl;
     for (int it = 0; it < (int)tp_pt->size(); it++){
-	 
+      if(tp_isHToB->at(it)==true && tp_eventid->at(it)==0){
+	std::cout<<"tp pos: "<<tp_x->at(it)<<" "<<tp_y->at(it)<<" "<<tp_z->at(it)<<" pdgid: "<<tp_pdgid->at(it)<<std::endl;
+      }
+      
       float tmp_d0 = -tp_d0->at(it);	// Sign difference in the NTupleMaker
       float tmp_z0 = tp_z0->at(it);
 	
@@ -1600,10 +1653,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
 	 
       h_tp_d0->Fill(tp_d0->at(it));
-#if 0
+
       if (std::fabs(tmp_d0) > TP_maxD0)
 	continue;
-#endif	 
+
       h_tp_pt_maxD0Cut->Fill(tp_pt->at(it));
       h_tp_eta_maxD0Cut->Fill(tp_eta->at(it));
       h_tp_d0_maxD0Cut->Fill(tp_d0->at(it));
@@ -1687,7 +1740,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  h_match_tp_pt_allCuts_trkCuts->Fill(tp_pt->at(it));
 	}
       }
-
       selectedTPs.push_back(Track_Parameters(tp_pt->at(it), tmp_d0, tmp_z0, tp_eta->at(it), tp_phi->at(it), tp_charge->at(it), it, abs(tp_pdgid->at(it))));
       tpH_T += tp_pt->at(it);
       std::valarray<float> tpPtVec = {tp_pt->at(it)*cos(tp_phi->at(it)),tp_pt->at(it)*sin(tp_phi->at(it))};
@@ -1740,10 +1792,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     double_t x_dv = -9999.0;// (tp_x->at((*selectedTPs)[0]->index));//+tp_x->at((*selectedTPs)[1]->index))/2.0;
     double_t y_dv = -9999.0;// (tp_y->at((*selectedTPs)[0]->index));//+tp_y->at((*selectedTPs)[1]->index))/2.0;
     double_t z_dv = -9999.0;// (tp_z->at((*selectedTPs)[0]->index));//+tp_z->at((*selectedTPs)[1]->index))/2.0;
-            
-    int selected_track_j0 = -1;
-    int selected_track_j1 = -1;
-    std::vector<int> selected_tps_j;
 
     double_t x_tmp = x_dv;
     double_t y_tmp = y_dv;
@@ -1753,56 +1801,70 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     
     if(selectedTPs.size()>=2){
       //std::cout<<"selectedTPs size: "<<selectedTPs.size()<<std::endl;
-      sort(selectedTPs.begin(), selectedTPs.end(), [&](Track_Parameters a, Track_Parameters b) {
-	  return tp_x->at(a.index) > tp_x->at(b.index);
-	});
-	
-      for( uint i=0; i<(selectedTPs.size() - 1); i++ ){
-	int index0 = selectedTPs[i].index;
-	int index1 = selectedTPs[i+1].index;
-	if( fabs(tp_x->at(index0)-tp_x->at(index1))<d0_res && fabs(tp_y->at(index0)-tp_y->at(index1))<d0_res && fabs(tp_z->at(index0)-tp_z->at(index1))<z0_res ){
-	  //std::cout<<"tp1 pos: "<<tp_x->at(index0)<<" "<<tp_y->at(index0)<<" "<<tp_z->at(index0)<<" tp2 pos: "<<tp_x->at(index1)<<" "<<tp_y->at(index1)<<" "<<tp_z->at(index1)<<std::endl;
-	  x_dv = (tp_x->at(index0) + tp_x->at(index1))/2;
-	  y_dv = (tp_y->at(index0) + tp_y->at(index1))/2;
-	  z_dv = (tp_z->at(index0) + tp_z->at(index1))/2;
-	  h_trueVertex_x->Fill(x_dv);
-	  h_trueVertex_y->Fill(y_dv);
-	  h_trueVertex_z->Fill(z_dv);
-	  h_trueVertex_sumPt->Fill(selectedTPs[i].pt+selectedTPs[i+1].pt);
-	  if(selectedTPs[i].pt>selectedTPs[i+1].pt){
-	    h_trueVertex_lowPt->Fill(selectedTPs[i+1].pt);
-	    h_trueVertex_highPt->Fill(selectedTPs[i].pt);
-	  }
-	  else{
-	    h_trueVertex_lowPt->Fill(selectedTPs[i].pt);
-	    h_trueVertex_highPt->Fill(selectedTPs[i+1].pt);
-	  }
-	  noCuts_trueVertices++;
-	  if(dist(x_dv,y_dv)>d0_res && dist(x_dv,y_dv)<20){
-	    //std::cout<<"true vertex: "<<x_dv<<" "<<y_dv<<" "<<z_dv<<" tp_pt: "<<selectedTPs[i].pt<<" "<<selectedTPs[i+1].pt<<" eventid's: "<<tp_eventid->at(selectedTPs[i].index)<<" "<<tp_eventid->at(selectedTPs[i+1].index)<<std::endl;
-	    if(selectedTPs[i].pt>selectedTPs[i+1].pt){
-	      trueVertices.push_back(Vertex_Parameters(x_dv, y_dv, z_dv, selectedTPs[i], selectedTPs[i+1]) );
+      sort(selectedTPs.begin(), selectedTPs.end(), ComparePtTrack);
+      std::vector<Track_Parameters> copyTPs;
+      for (uint i=0; i<selectedTPs.size(); i++){
+	copyTPs.push_back(selectedTPs[i]);
+      }
+      
+      std::cout<<"Selected TPs"<<std::endl;
+      for( uint i=0; i<selectedTPs.size(); i++ ){
+	std::cout<<"tp pos: "<<tp_x->at(selectedTPs[i].index)<<" "<<tp_y->at(selectedTPs[i].index)<<" "<<tp_z->at(selectedTPs[i].index)<<" pdgid: "<<tp_pdgid->at(selectedTPs[i].index)<<std::endl;
+      }
+      
+      while(selectedTPs.size()>1){
+	bool foundTrueVertex = false;
+	for( uint i=1; i<selectedTPs.size();){
+	  int index0 = selectedTPs[0].index;
+	  int index1 = selectedTPs[i].index;
+	  if( fabs(tp_x->at(index0)-tp_x->at(index1))<0.0001 && fabs(tp_y->at(index0)-tp_y->at(index1))<0.0001 && fabs(tp_z->at(index0)-tp_z->at(index1))<0.0001 ){
+	    //std::cout<<"tp1 pos: "<<tp_x->at(index0)<<" "<<tp_y->at(index0)<<" "<<tp_z->at(index0)<<" pdgid: "<<tp_pdgid->at(index0)<<" tp2 pos: "<<tp_x->at(index1)<<" "<<tp_y->at(index1)<<" "<<tp_z->at(index1)<<" pdgid: "<<tp_pdgid->at(index1)<<std::endl;
+	    x_dv = tp_x->at(index0);
+	    y_dv = tp_y->at(index0);
+	    z_dv = tp_z->at(index0);
+	    noCuts_trueVertices++;
+	    if(dist(x_dv,y_dv)>d0_res && dist(x_dv,y_dv)<20){
+	      
+	      //std::cout<<"true vertex: "<<x_dv<<" "<<y_dv<<" "<<z_dv<<" tp_pt: "<<selectedTPs[i].pt<<" "<<selectedTPs[i+1].pt<<" eventid's: "<<tp_eventid->at(selectedTPs[i].index)<<" "<<tp_eventid->at(selectedTPs[i+1].index)<<std::endl;
+	      if(!foundTrueVertex){
+		h_trueVertex_x->Fill(x_dv);
+		h_trueVertex_y->Fill(y_dv);
+		h_trueVertex_z->Fill(z_dv);
+		h_trueVertex_sumPt->Fill(selectedTPs[0].pt+selectedTPs[i].pt);
+		h_trueVertex_lowPt->Fill(selectedTPs[i].pt);
+		h_trueVertex_highPt->Fill(selectedTPs[0].pt);
+		trueVertices.push_back(Vertex_Parameters(x_dv, y_dv, z_dv, selectedTPs[0], selectedTPs[i]) );
+		foundTrueVertex = true;
+	      }
+	      else{
+		trueVertices.back().tracks.push_back(selectedTPs[i]);
+	      }
+	      selectedTPs.erase(selectedTPs.begin()+i);
 	    }
 	    else{
-	      trueVertices.push_back(Vertex_Parameters(x_dv, y_dv, z_dv, selectedTPs[i+1], selectedTPs[i]) );
+	      i++;
 	    }
-	    selected_tps_j.push_back(i);
+	  }
+	  else{
 	    i++;
 	  }
 	}
+	selectedTPs.pop_front();
       }
-
       h_trueVertex_numNoCuts->Fill(noCuts_trueVertices);
       h_trueVertex_numAllCuts->Fill(trueVertices.size());
       true_vertices += trueVertices.size();
       float maxPT = 0.0;
-      sort(selectedTPs.begin(), selectedTPs.end(), ComparePtTrack);
       for(uint i=0; i<trueVertices.size(); i++){
 	if(trueVertices[i].a.pt>maxPT){
 	  maxPT = trueVertices[i].a.pt;
 	  maxPT_i = i;
 	}
-
+	
+	for(uint j=0; j<trueVertices[i].tracks.size(); j++){
+	  std::cout<<"vertex "<<i<<" tp pos: "<<tp_x->at(trueVertices[i].tracks[j].index)<<" "<<tp_y->at(trueVertices[i].tracks[j].index)<<" "<<tp_z->at(trueVertices[i].tracks[j].index)<<" pdgid: "<<tp_pdgid->at(trueVertices[i].tracks[j].index)<<std::endl;
+	}
+	
 	std::valarray<float> p_trk_1 = calcPVec(trueVertices[i].a,trueVertices[i].x_dv,trueVertices[i].y_dv);
 	std::valarray<float> p_trk_2 = calcPVec(trueVertices[i].b,trueVertices[i].x_dv,trueVertices[i].y_dv);
 	std::valarray<float> p_tot = p_trk_1+p_trk_2;
@@ -1823,11 +1885,11 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
 	int i_pt = 9999;
 	int j_pt = 9999;
-	for( uint j=0; j<selectedTPs.size();j++ ){
-	  if(trueVertices[i].a.index == selectedTPs[j].index){
+	for( uint j=0; j<copyTPs.size();j++ ){
+	  if(trueVertices[i].a.index == copyTPs[j].index){
 	    i_pt = j;
 	  }
-	  if(trueVertices[i].b.index == selectedTPs[j].index){
+	  if(trueVertices[i].b.index == copyTPs[j].index){
 	    j_pt = j;
 	  }
 	}	
@@ -1870,7 +1932,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_all_oneMatch_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
       }
     }
-    
+    continue;
     // --------------------------------------------------------------------------------------------
     //                Vertex finding in Tracks
     // --------------------------------------------------------------------------------------------
@@ -2761,6 +2823,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_signalVsBG_d0_qualCuts.jpeg");
   delete h_trk_d0_np_qualCutsNorm;
 
+  h_trk_d0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_primary_allCuts->GetXaxis()->SetRange(1, h_trk_d0_primary_allCuts->GetNbinsX() + 2);
+  h_trk_d0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_d0_np_allCuts->GetXaxis()->SetRange(1, h_trk_d0_np_allCuts->GetNbinsX() + 2);
+  h_trk_d0_primary_allCuts->Scale(1./h_trk_d0_primary_allCuts->Integral());
+  h_trk_d0_primary_allCuts->SetLineColor(1);
+  h_trk_d0_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_d0_np_allCutsNorm = (TH1F*)h_trk_d0_np_allCuts->Clone(); 
+  h_trk_d0_np_allCutsNorm->Scale(1./h_trk_d0_np_allCutsNorm->Integral());
+  h_trk_d0_np_allCutsNorm->SetLineColor(2);
+  h_trk_d0_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_d0_np_allCutsNorm->Draw("HIST");
+  h_trk_d0_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_d0_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_d0_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_d0_allCuts.jpeg");
+  delete h_trk_d0_np_allCutsNorm;
+
   h_trk_pt_vs_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_pt_vs_d0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_d0_primary_qualCuts->GetNbinsX() + 2);
   h_trk_pt_vs_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
@@ -2783,6 +2866,23 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_trk_pt_vs_d0_primary_qualCuts;
   delete h_trk_pt_vs_d0_np_qualCuts;
 
+  h_trk_pt_vs_d0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_d0_primary_allCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_d0_primary_allCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_d0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_d0_np_allCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_d0_np_allCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_d0_primary_allCuts->SetLineColor(1);
+  h_trk_pt_vs_d0_primary_allCuts->SetMarkerColor(1);
+  h_trk_pt_vs_d0_np_allCuts->SetLineColor(2);
+  h_trk_pt_vs_d0_np_allCuts->SetMarkerColor(2);
+  h_trk_pt_vs_d0_np_allCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_d0_np_allCuts.jpeg");
+  h_trk_pt_vs_d0_primary_allCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_d0_primary_allCuts.jpeg");
+  delete h_trk_pt_vs_d0_primary_allCuts;
+  delete h_trk_pt_vs_d0_np_allCuts;
+
   h_trk_pt_vs_eta_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_pt_vs_eta_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_eta_primary_qualCuts->GetNbinsX() + 2);
   h_trk_pt_vs_eta_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
@@ -2800,6 +2900,23 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_trk_pt_vs_eta_primary_qualCuts;
   delete h_trk_pt_vs_eta_np_qualCuts;
 
+  h_trk_pt_vs_eta_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_eta_primary_allCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_eta_primary_allCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_eta_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_pt_vs_eta_np_allCuts->GetXaxis()->SetRange(1, h_trk_pt_vs_eta_np_allCuts->GetNbinsX() + 2);
+  h_trk_pt_vs_eta_primary_allCuts->SetLineColor(1);
+  h_trk_pt_vs_eta_primary_allCuts->SetMarkerColor(1);
+  h_trk_pt_vs_eta_np_allCuts->SetLineColor(2);
+  h_trk_pt_vs_eta_np_allCuts->SetMarkerColor(2);
+  h_trk_pt_vs_eta_np_allCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_eta_np_allCuts.jpeg");
+  h_trk_pt_vs_eta_primary_allCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_pt_vs_eta_primary_allCuts.jpeg");
+  delete h_trk_pt_vs_eta_primary_allCuts;
+  delete h_trk_pt_vs_eta_np_allCuts;
+
   h_trk_eta_vs_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_eta_vs_d0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_eta_vs_d0_primary_qualCuts->GetNbinsX() + 2);
   h_trk_eta_vs_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
@@ -2816,6 +2933,23 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_trk_eta_vs_d0_primary_qualCuts.jpeg");
   delete h_trk_eta_vs_d0_primary_qualCuts;
   delete h_trk_eta_vs_d0_np_qualCuts;
+
+  h_trk_eta_vs_d0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_vs_d0_primary_allCuts->GetXaxis()->SetRange(1, h_trk_eta_vs_d0_primary_allCuts->GetNbinsX() + 2);
+  h_trk_eta_vs_d0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_eta_vs_d0_np_allCuts->GetXaxis()->SetRange(1, h_trk_eta_vs_d0_np_allCuts->GetNbinsX() + 2);
+  h_trk_eta_vs_d0_primary_allCuts->SetLineColor(1);
+  h_trk_eta_vs_d0_primary_allCuts->SetMarkerColor(1);
+  h_trk_eta_vs_d0_np_allCuts->SetLineColor(2);
+  h_trk_eta_vs_d0_np_allCuts->SetMarkerColor(2);
+  h_trk_eta_vs_d0_np_allCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_eta_vs_d0_np_allCuts.jpeg");
+  h_trk_eta_vs_d0_primary_allCuts->Draw("COLZ");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/h_trk_eta_vs_d0_primary_allCuts.jpeg");
+  delete h_trk_eta_vs_d0_primary_allCuts;
+  delete h_trk_eta_vs_d0_np_allCuts;
 
   h_trk_ptWeightedD0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_ptWeightedD0_primary_qualCuts->GetXaxis()->SetRange(1, h_trk_ptWeightedD0_primary_qualCuts->GetNbinsX() + 2);
@@ -3128,6 +3262,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_signalVsBG_z0_qualCuts.jpeg");
   delete h_trk_z0_np_qualCutsNorm;
 
+  h_trk_z0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_primary_allCuts->GetXaxis()->SetRange(1, h_trk_z0_primary_allCuts->GetNbinsX() + 2);
+  h_trk_z0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_z0_np_allCuts->GetXaxis()->SetRange(1, h_trk_z0_np_allCuts->GetNbinsX() + 2);
+  h_trk_z0_primary_allCuts->Scale(1./h_trk_z0_primary_allCuts->Integral());
+  h_trk_z0_primary_allCuts->SetLineColor(1);
+  h_trk_z0_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_z0_np_allCutsNorm = (TH1F*)h_trk_z0_np_allCuts->Clone(); 
+  h_trk_z0_np_allCutsNorm->Scale(1./h_trk_z0_np_allCutsNorm->Integral());
+  h_trk_z0_np_allCutsNorm->SetLineColor(2);
+  h_trk_z0_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_z0_np_allCutsNorm->Draw("HIST");
+  h_trk_z0_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_z0_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_z0_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_z0_allCuts.jpeg");
+  delete h_trk_z0_np_allCutsNorm;
+
   TH1F *h_trk_z0_fake_qualCutsNorm = (TH1F*)h_trk_z0_fake_qualCuts->Clone(); 
   h_trk_z0_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_z0_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_z0_fake_qualCutsNorm->GetNbinsX() + 2);
@@ -3386,6 +3541,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_signalVsBG_phi_qualCuts.jpeg");
   delete h_trk_phi_np_qualCutsNorm;
 
+  h_trk_phi_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_primary_allCuts->GetXaxis()->SetRange(1, h_trk_phi_primary_allCuts->GetNbinsX() + 2);
+  h_trk_phi_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_phi_np_allCuts->GetXaxis()->SetRange(1, h_trk_phi_np_allCuts->GetNbinsX() + 2);
+  h_trk_phi_primary_allCuts->Scale(1./h_trk_phi_primary_allCuts->Integral());
+  h_trk_phi_primary_allCuts->SetLineColor(1);
+  h_trk_phi_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_phi_np_allCutsNorm = (TH1F*)h_trk_phi_np_allCuts->Clone(); 
+  h_trk_phi_np_allCutsNorm->Scale(1./h_trk_phi_np_allCutsNorm->Integral());
+  h_trk_phi_np_allCutsNorm->SetLineColor(2);
+  h_trk_phi_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_phi_np_allCutsNorm->Draw("HIST");
+  h_trk_phi_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_phi_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_phi_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_phi_allCuts.jpeg");
+  delete h_trk_phi_np_allCutsNorm;
+
   TH1F *h_trk_phi_fake_qualCutsNorm = (TH1F*)h_trk_phi_fake_qualCuts->Clone(); 
   h_trk_phi_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_phi_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_phi_fake_qualCutsNorm->GetNbinsX() + 2);
@@ -3643,6 +3819,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->Draw();
   c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_qualCuts.jpeg");
   delete h_trk_sectorPhi_np_qualCutsNorm;
+
+  h_trk_sectorPhi_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_primary_allCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_primary_allCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_sectorPhi_np_allCuts->GetXaxis()->SetRange(1, h_trk_sectorPhi_np_allCuts->GetNbinsX() + 2);
+  h_trk_sectorPhi_primary_allCuts->Scale(1./h_trk_sectorPhi_primary_allCuts->Integral());
+  h_trk_sectorPhi_primary_allCuts->SetLineColor(1);
+  h_trk_sectorPhi_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_sectorPhi_np_allCutsNorm = (TH1F*)h_trk_sectorPhi_np_allCuts->Clone(); 
+  h_trk_sectorPhi_np_allCutsNorm->Scale(1./h_trk_sectorPhi_np_allCutsNorm->Integral());
+  h_trk_sectorPhi_np_allCutsNorm->SetLineColor(2);
+  h_trk_sectorPhi_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_sectorPhi_np_allCutsNorm->Draw("HIST");
+  h_trk_sectorPhi_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_sectorPhi_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_sectorPhi_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_allCuts.jpeg");
+  delete h_trk_sectorPhi_np_allCutsNorm;
 
   TH1F *h_trk_sectorPhi_fake_qualCutsNorm = (TH1F*)h_trk_sectorPhi_fake_qualCuts->Clone(); 
   h_trk_sectorPhi_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
@@ -5128,6 +5325,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_qualCuts.jpeg");
   delete h_trk_chi2rphidof_np_qualCutsNorm;
 
+  h_trk_chi2rphidof_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_primary_allCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_primary_allCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rphidof_np_allCuts->GetXaxis()->SetRange(1, h_trk_chi2rphidof_np_allCuts->GetNbinsX() + 2);
+  h_trk_chi2rphidof_primary_allCuts->Scale(1./h_trk_chi2rphidof_primary_allCuts->Integral());
+  h_trk_chi2rphidof_primary_allCuts->SetLineColor(1);
+  h_trk_chi2rphidof_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_chi2rphidof_np_allCutsNorm = (TH1F*)h_trk_chi2rphidof_np_allCuts->Clone(); 
+  h_trk_chi2rphidof_np_allCutsNorm->Scale(1./h_trk_chi2rphidof_np_allCutsNorm->Integral());
+  h_trk_chi2rphidof_np_allCutsNorm->SetLineColor(2);
+  h_trk_chi2rphidof_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rphidof_np_allCutsNorm->Draw("HIST");
+  h_trk_chi2rphidof_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rphidof_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rphidof_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_allCuts.jpeg");
+  delete h_trk_chi2rphidof_np_allCutsNorm;
+
   TH1F *h_trk_chi2rphidof_fake_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_fake_qualCuts->Clone(); 
   h_trk_chi2rphidof_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_chi2rphidof_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rphidof_fake_qualCutsNorm->GetNbinsX() + 2);
@@ -5347,6 +5565,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->Draw();
   c.SaveAs(DIR + "/h_signalVsBG_MVA1_qualCuts.jpeg");
   delete h_trk_MVA1_np_qualCutsNorm;
+
+  h_trk_MVA1_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_primary_allCuts->GetXaxis()->SetRange(1, h_trk_MVA1_primary_allCuts->GetNbinsX() + 2);
+  h_trk_MVA1_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_MVA1_np_allCuts->GetXaxis()->SetRange(1, h_trk_MVA1_np_allCuts->GetNbinsX() + 2);
+  h_trk_MVA1_primary_allCuts->Scale(1./h_trk_MVA1_primary_allCuts->Integral());
+  h_trk_MVA1_primary_allCuts->SetLineColor(1);
+  h_trk_MVA1_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_MVA1_np_allCutsNorm = (TH1F*)h_trk_MVA1_np_allCuts->Clone(); 
+  h_trk_MVA1_np_allCutsNorm->Scale(1./h_trk_MVA1_np_allCutsNorm->Integral());
+  h_trk_MVA1_np_allCutsNorm->SetLineColor(2);
+  h_trk_MVA1_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_MVA1_np_allCutsNorm->Draw("HIST");
+  h_trk_MVA1_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA1_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA1_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA1_allCuts.jpeg");
+  delete h_trk_MVA1_np_allCutsNorm;
 
   TH1F *h_trk_MVA1_fake_qualCutsNorm = (TH1F*)h_trk_MVA1_fake_qualCuts->Clone(); 
   h_trk_MVA1_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
@@ -5606,6 +5845,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_qualCuts.jpeg");
   delete h_trk_chi2rzdof_np_qualCutsNorm;
 
+  h_trk_chi2rzdof_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_primary_allCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_primary_allCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_chi2rzdof_np_allCuts->GetXaxis()->SetRange(1, h_trk_chi2rzdof_np_allCuts->GetNbinsX() + 2);
+  h_trk_chi2rzdof_primary_allCuts->Scale(1./h_trk_chi2rzdof_primary_allCuts->Integral());
+  h_trk_chi2rzdof_primary_allCuts->SetLineColor(1);
+  h_trk_chi2rzdof_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_chi2rzdof_np_allCutsNorm = (TH1F*)h_trk_chi2rzdof_np_allCuts->Clone(); 
+  h_trk_chi2rzdof_np_allCutsNorm->Scale(1./h_trk_chi2rzdof_np_allCutsNorm->Integral());
+  h_trk_chi2rzdof_np_allCutsNorm->SetLineColor(2);
+  h_trk_chi2rzdof_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_chi2rzdof_np_allCutsNorm->Draw("HIST");
+  h_trk_chi2rzdof_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_chi2rzdof_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_chi2rzdof_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_allCuts.jpeg");
+  delete h_trk_chi2rzdof_np_allCutsNorm;
+
   TH1F *h_trk_chi2rzdof_fake_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_fake_qualCuts->Clone(); 
   h_trk_chi2rzdof_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
   h_trk_chi2rzdof_fake_qualCutsNorm->GetXaxis()->SetRange(1, h_trk_chi2rzdof_fake_qualCutsNorm->GetNbinsX() + 2);
@@ -5863,6 +6123,27 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->Draw();
   c.SaveAs(DIR + "/h_signalVsBG_bendchi2_qualCuts.jpeg");
   delete h_trk_bendchi2_np_qualCutsNorm;
+
+  h_trk_bendchi2_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_primary_allCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_primary_allCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
+  h_trk_bendchi2_np_allCuts->GetXaxis()->SetRange(1, h_trk_bendchi2_np_allCuts->GetNbinsX() + 2);
+  h_trk_bendchi2_primary_allCuts->Scale(1./h_trk_bendchi2_primary_allCuts->Integral());
+  h_trk_bendchi2_primary_allCuts->SetLineColor(1);
+  h_trk_bendchi2_primary_allCuts->SetMarkerColor(1);
+  TH1F *h_trk_bendchi2_np_allCutsNorm = (TH1F*)h_trk_bendchi2_np_allCuts->Clone(); 
+  h_trk_bendchi2_np_allCutsNorm->Scale(1./h_trk_bendchi2_np_allCutsNorm->Integral());
+  h_trk_bendchi2_np_allCutsNorm->SetLineColor(2);
+  h_trk_bendchi2_np_allCutsNorm->SetMarkerColor(2);
+  h_trk_bendchi2_np_allCutsNorm->Draw("HIST");
+  h_trk_bendchi2_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_bendchi2_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_bendchi2_np_allCutsNorm,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_allCuts.jpeg");
+  delete h_trk_bendchi2_np_allCutsNorm;
 
   TH1F *h_trk_bendchi2_fake_qualCutsNorm = (TH1F*)h_trk_bendchi2_fake_qualCuts->Clone(); 
   h_trk_bendchi2_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
