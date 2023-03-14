@@ -1041,6 +1041,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trueVertexAssoc_delz = new TH1F("h_trueVertexAssoc_delz","h_trueVertexAssoc_delz; Distance between TP and trueVertex in z (cm) ; Events / 0.04 cm",100,0,4);
   TH1F *h_trackVertexAssoc_delxy = new TH1F("h_trackVertexAssoc_delxy","h_trackVertexAssoc_delxy; Distance between track and trackVertex in x-y (cm) ; Events / 0.04 cm",100,0,4);
   TH1F *h_trackVertexAssoc_delz = new TH1F("h_trackVertexAssoc_delz","h_trackVertexAssoc_delz; Distance between track and trackVertex in z (cm) ; Events / 0.04 cm",100,0,4);
+  TH1F* h_tpAssoc_pt = new TH1F("h_tpAssoc_pt", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
+  TH1F* h_tpAssoc_pt_matched = new TH1F("h_tpAssoc_pt_matched", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
 
   TH1I *h_trk_Counter_TPcombination = new TH1I("h_trk_Counter_TPcombination","h_trk_Counter_TPcombination; Track combination chosen; Events / 1.0",6,0,6);
   TH1F *h_trk_delta_dist_xy = new TH1F("h_trk_delta_dist_xy","h_trk_delta_dist_xy; Distance between chosen Tracks in x-y (cm) ; Events / 2E-8 cm",50,0,0.000001);
@@ -2131,15 +2133,30 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_findable_trueVertex_pt->Fill(trueVertices[i].a.pt);
 	if(numMatched>=3){
 	  sort(matchedTracks.begin(),matchedTracks.end(),ComparePtTrack);
-	  Double_t x_dv_trk = -9999.0;
-	  Double_t y_dv_trk = -9999.0;
-	  Double_t z_dv_trk = -9999.0;
-	  calcVertex(matchedTracks[0],matchedTracks[1],x_dv_trk,y_dv_trk,z_dv_trk);
-	  for(uint itrack=2; itrack<matchedTracks.size(); itrack++){
-	    float delxy = dist_Vertex(x_dv_trk,y_dv_trk,matchedTracks[itrack]);
-	    float delz = fabs(matchedTracks[itrack].z(x_dv_trk,y_dv_trk)-z_dv_trk);
-	    h_trackVertexAssoc_delxy->Fill(delxy);
-	    h_trackVertexAssoc_delz->Fill(delz);
+	  uint itrack = 0;
+	  bool foundVert = false;
+	  while(itrack<matchedTracks.size()-1 && !foundVert){
+	    for(uint jtrack=itrack+1; jtrack<matchedTracks.size(); jtrack++){
+	      if(dist_TPs(matchedTracks[itrack],matchedTracks[jtrack])==0){
+		Double_t x_dv_trk = -9999.0;
+		Double_t y_dv_trk = -9999.0;
+		Double_t z_dv_trk = -9999.0;
+		calcVertex(matchedTracks[itrack],matchedTracks[jtrack],x_dv_trk,y_dv_trk,z_dv_trk);
+		Vertex_Parameters matchedVert(x_dv_trk,y_dv_trk,z_dv_trk,matchedTracks[itrack],matchedTracks[jtrack]);
+		if(dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && matchedVert.bendchi2Sum<bendChi2Max && matchedVert.chi2rphidofSum<chi2RPhiMax && matchedVert.cos_T>cosTMin && matchedVert.delta_z<deltaZMax){
+		  foundVert = true;
+		  for(uint ktrack=0; ktrack<matchedTracks.size(); ktrack++){
+		    if(ktrack==itrack || ktrack==jtrack) continue;
+		    float delxy = dist_Vertex(x_dv_trk,y_dv_trk,matchedTracks[ktrack]);
+		    float delz = fabs(matchedTracks[ktrack].z(x_dv_trk,y_dv_trk)-z_dv_trk);
+		    h_trackVertexAssoc_delxy->Fill(delxy);
+		    h_trackVertexAssoc_delz->Fill(delz);
+		  }
+		  break;
+		}
+	      }
+	    }
+	    itrack++; 
 	  }
 	}
       }
