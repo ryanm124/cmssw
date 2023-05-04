@@ -95,6 +95,7 @@ public:
   ~L1TrackNtupleMaker() override;
 
   bool findHiggsToBAncestor(const TrackingVertexRef parentVertex);
+  bool findHiggsToBAncestorTight(edm::Ptr<TrackingParticle> particle)
   // Mandatory methods
   void beginJob() override;
   void endJob() override;
@@ -380,6 +381,22 @@ bool L1TrackNtupleMaker::findHiggsToBAncestor(const TrackingVertexRef parentVert
     TrackingParticleRefVector sourceTPs = parentVertex->sourceTracks();
     return findHiggsToBAncestor(sourceTPs[0]->parentVertex());
   }
+}
+
+bool L1TrackNtupleMaker::findHiggsToBAncestorTight(edm::Ptr<TrackingParticle> particle){
+  reco::GenParticleRef genPart = particle->genParticles()[0];
+  reco::GenParticleRefVector parentParts = genPart->motherRefVector();
+  for( auto parentPart: parentParts ){
+    if(parentPart->pdgId()==5) genPart = parentPart;
+  }
+  int pdgid = genPart->pdgId();
+  if(pdgid==5){
+    reco::GenParticleRefVector genGrandMothers = genPart->motherRefVector()[0]->motherRefVector();
+    for( auto genGrandMother: genGrandMother){
+      if(genGrandMother->pdgId()==25) return true; 
+    }
+  }
+  return false;
 }
 
 ////////////
