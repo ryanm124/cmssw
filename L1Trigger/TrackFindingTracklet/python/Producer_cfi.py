@@ -18,5 +18,8 @@ TrackFindingTrackletProducer_params = cms.PSet (
   EnableTruncation     = cms.bool    ( True  ),                                            # enable emulation of truncation for TBout, KF, KFin, lost stubs are filled in BranchLost
   PrintKFDebug         = cms.bool    ( False ),                                            # print end job internal unused MSB
   UseTTStubResiduals   = cms.bool    ( False ),                                            # stub residuals are recalculated from seed parameter and TTStub position
+  TrackQualityPSet     = cms.PSet    ( TrackQualityParams ),
+  TrackQualityDispPSet = cms.PSet    ( TrackQualityDispParams )
 
 )
+
