@@ -95,7 +95,8 @@ public:
   ~L1TrackNtupleMaker() override;
 
   bool findHiggsToBAncestor(const TrackingVertexRef parentVertex);
-  bool findHiggsToBAncestorTight(edm::Ptr<TrackingParticle> particle)
+  template <typename T>
+  bool findHiggsToBAncestorTight(T particle);
   // Mandatory methods
   void beginJob() override;
   void endJob() override;
@@ -194,6 +195,7 @@ private:
   std::vector<float>* m_trk_MVA1;
   std::vector<int>* m_trk_matchtp_pdgid;
   std::vector<bool>* m_trk_matchtp_isHToB;
+  std::vector<bool>* m_trk_matchtp_isHToBTight;
   std::vector<float>* m_trk_matchtp_pt;
   std::vector<float>* m_trk_matchtp_eta;
   std::vector<float>* m_trk_matchtp_phi;
@@ -218,6 +220,7 @@ private:
   std::vector<float>* m_tp_z0_prod;
   std::vector<int>* m_tp_pdgid;
   std::vector<bool>* m_tp_isHToB;
+  std::vector<bool>* m_tp_isHToBTight;
   std::vector<int>* m_tp_nmatch;
   std::vector<int>* m_tp_nstub;
   std::vector<int>* m_tp_eventid;
@@ -383,17 +386,20 @@ bool L1TrackNtupleMaker::findHiggsToBAncestor(const TrackingVertexRef parentVert
   }
 }
 
-bool L1TrackNtupleMaker::findHiggsToBAncestorTight(edm::Ptr<TrackingParticle> particle){
-  reco::GenParticleRef genPart = particle->genParticles()[0];
-  reco::GenParticleRefVector parentParts = genPart->motherRefVector();
-  for( auto parentPart: parentParts ){
-    if(parentPart->pdgId()==5) genPart = parentPart;
-  }
-  int pdgid = genPart->pdgId();
-  if(pdgid==5){
-    reco::GenParticleRefVector genGrandMothers = genPart->motherRefVector()[0]->motherRefVector();
-    for( auto genGrandMother: genGrandMother){
-      if(genGrandMother->pdgId()==25) return true; 
+template <typename T>
+bool L1TrackNtupleMaker::findHiggsToBAncestorTight(T particle){
+  if(particle->genParticles().size()>0){
+    reco::GenParticleRef genPart = particle->genParticles()[0];
+    reco::GenParticleRefVector parentParts = genPart->motherRefVector();
+    for( auto parentPart: parentParts ){
+      if(parentPart->pdgId()==5) genPart = parentPart;
+    }
+    int pdgid = genPart->pdgId();
+    if(pdgid==5){
+      reco::GenParticleRefVector genGrandMothers = genPart->motherRefVector()[0]->motherRefVector();
+      for( auto genGrandMother: genGrandMothers){
+	if(genGrandMother->pdgId()==25) return true; 
+      }
     }
   }
   return false;
@@ -446,6 +452,7 @@ void L1TrackNtupleMaker::beginJob() {
   m_trk_MVA1 = new std::vector<float>;
   m_trk_matchtp_pdgid = new std::vector<int>;
   m_trk_matchtp_isHToB = new std::vector<bool>;
+  m_trk_matchtp_isHToBTight = new std::vector<bool>;
   m_trk_matchtp_pt = new std::vector<float>;
   m_trk_matchtp_eta = new std::vector<float>;
   m_trk_matchtp_phi = new std::vector<float>;
@@ -469,6 +476,7 @@ void L1TrackNtupleMaker::beginJob() {
   m_tp_z0_prod = new std::vector<float>;
   m_tp_pdgid = new std::vector<int>;
   m_tp_isHToB = new std::vector<bool>;
+  m_tp_isHToBTight = new std::vector<bool>;
   m_tp_nmatch = new std::vector<int>;
   m_tp_nstub = new std::vector<int>;
   m_tp_eventid = new std::vector<int>;
@@ -581,6 +589,7 @@ void L1TrackNtupleMaker::beginJob() {
     eventTree->Branch("trk_MVA1", &m_trk_MVA1);
     eventTree->Branch("trk_matchtp_pdgid", &m_trk_matchtp_pdgid);
     eventTree->Branch("trk_matchtp_isHToB", &m_trk_matchtp_isHToB);
+    eventTree->Branch("trk_matchtp_isHToBTight", &m_trk_matchtp_isHToBTight);
     eventTree->Branch("trk_matchtp_pt", &m_trk_matchtp_pt);
     eventTree->Branch("trk_matchtp_eta", &m_trk_matchtp_eta);
     eventTree->Branch("trk_matchtp_phi", &m_trk_matchtp_phi);
@@ -607,6 +616,7 @@ void L1TrackNtupleMaker::beginJob() {
   eventTree->Branch("tp_z0_prod", &m_tp_z0_prod);
   eventTree->Branch("tp_pdgid", &m_tp_pdgid);
   eventTree->Branch("tp_isHToB", &m_tp_isHToB);
+  eventTree->Branch("tp_isHToBTight", &m_tp_isHToBTight);
   eventTree->Branch("tp_nmatch", &m_tp_nmatch);
   eventTree->Branch("tp_nstub", &m_tp_nstub);
   eventTree->Branch("tp_eventid", &m_tp_eventid);
@@ -744,6 +754,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     m_trk_MVA1->clear();
     m_trk_matchtp_pdgid->clear();
     m_trk_matchtp_isHToB->clear();
+    m_trk_matchtp_isHToBTight->clear();
     m_trk_matchtp_pt->clear();
     m_trk_matchtp_eta->clear();
     m_trk_matchtp_phi->clear();
@@ -768,6 +779,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
   m_tp_z0_prod->clear();
   m_tp_pdgid->clear();
   m_tp_isHToB->clear();
+  m_tp_isHToBTight->clear();
   m_tp_nmatch->clear();
   m_tp_nstub->clear();
   m_tp_eventid->clear();
@@ -1230,6 +1242,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
 
       int tmp_matchtp_pdgid = -999;
       bool tmp_matchtp_isHToB = false;
+      bool tmp_matchtp_isHToBTight = false;
       float tmp_matchtp_pt = -999;
       float tmp_matchtp_eta = -999;
       float tmp_matchtp_phi = -999;
@@ -1250,6 +1263,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
         tmp_matchtp_pdgid = my_tp->pdgId();
 	const TrackingVertexRef parentVertex = my_tp->parentVertex();
 	tmp_matchtp_isHToB = findHiggsToBAncestor(parentVertex);
+	tmp_matchtp_isHToBTight = findHiggsToBAncestorTight(my_tp);
         tmp_matchtp_pt = my_tp->pt();
         tmp_matchtp_eta = my_tp->eta();
         tmp_matchtp_phi = my_tp->phi();
@@ -1297,6 +1311,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
 
       m_trk_matchtp_pdgid->push_back(tmp_matchtp_pdgid);
       m_trk_matchtp_isHToB->push_back(tmp_matchtp_isHToB);
+      m_trk_matchtp_isHToBTight->push_back(tmp_matchtp_isHToBTight);
       m_trk_matchtp_pt->push_back(tmp_matchtp_pt);
       m_trk_matchtp_eta->push_back(tmp_matchtp_eta);
       m_trk_matchtp_phi->push_back(tmp_matchtp_phi);
@@ -1425,6 +1440,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     //put pdgid func here
     const TrackingVertexRef parentVertex = iterTP->parentVertex();
     bool tmp_tp_isHToB = findHiggsToBAncestor(parentVertex);
+    bool tmp_tp_isHToBTight = findHiggsToBAncestorTight(iterTP);
 
     if (DebugMode)
       edm::LogVerbatim("Tracklet") << "Tracking particle, pt: " << tmp_tp_pt << " eta: " << tmp_tp_eta
@@ -1689,6 +1705,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     m_tp_d0_prod->push_back(tmp_tp_d0_prod);
     m_tp_pdgid->push_back(tmp_tp_pdgid);
     m_tp_isHToB->push_back(tmp_tp_isHToB);
+    m_tp_isHToBTight->push_back(tmp_tp_isHToBTight);
     m_tp_nmatch->push_back(nMatch);
     m_tp_nstub->push_back(nStubTP);
     m_tp_eventid->push_back(tmp_eventid);
