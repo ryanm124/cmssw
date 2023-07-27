@@ -27,7 +27,6 @@
 #include "DataFormats/L1TrackTrigger/interface/TTCluster.h"
 #include "DataFormats/L1TrackTrigger/interface/TTStub.h"
 #include "DataFormats/L1TrackTrigger/interface/TTTrack.h"
-#include "DataFormats/L1Trigger/interface/DisplacedVertex.h"
 #include "SimDataFormats/TrackingAnalysis/interface/TrackingParticle.h"
 #include "SimDataFormats/TrackingAnalysis/interface/TrackingVertex.h"
 #include "SimDataFormats/TrackingHit/interface/PSimHitContainer.h"
@@ -57,7 +56,7 @@
 
 ////////////////
 // PHYSICS TOOLS
-#include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
+#include "L1Trigger/TrackFindingTracklet/interface/HitPatternHelper.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
 #include "CLHEP/Units/PhysicalConstants.h"
 
@@ -93,17 +92,16 @@ public:
   // Constructor/destructor
   explicit L1TrackNtupleMaker(const edm::ParameterSet& iConfig);
   ~L1TrackNtupleMaker() override;
-
-  bool findHiggsToBAncestor(const TrackingVertexRef parentVertex);
   template <typename T>
-  bool findHiggsToBAncestorTight(T particle);
+  bool findHiggsToMuAncestor(T particle);
+  template <typename T>
+  bool findHiggsToBAncestor(T particle);
   // Mandatory methods
   void beginJob() override;
   void endJob() override;
   void analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) override;
   void beginRun(const Run& iEvent, const EventSetup& iSetup) override {}
   void endRun(const Run& iEvent, const EventSetup& iSetup) override {}
-  
 
 protected:
 private:
@@ -132,7 +130,6 @@ private:
   edm::InputTag MCTruthStubInputTag;
   edm::InputTag TrackingParticleInputTag;
   edm::InputTag TrackingVertexInputTag;
-  edm::InputTag DisplacedVertexInputTag;
   edm::InputTag GenJetInputTag;
 
   edm::EDGetTokenT<edmNew::DetSetVector<TTCluster<Ref_Phase2TrackerDigi_> > > ttClusterToken_;
@@ -145,7 +142,6 @@ private:
 
   edm::EDGetTokenT<std::vector<TrackingParticle> > TrackingParticleToken_;
   edm::EDGetTokenT<std::vector<TrackingVertex> > TrackingVertexToken_;
-  edm::EDGetTokenT<l1t::DisplacedVertexCollection> DisplacedVertexToken_;
 
   edm::EDGetTokenT<std::vector<reco::GenJet> > GenJetToken_;
 
@@ -159,7 +155,6 @@ private:
   bool available_;  // ROOT file for histograms is open.
 
   TTree* eventTree;
-  TTree* dispVertTree;
 
   // all L1 tracks
   std::vector<float>* m_trk_pt;
@@ -193,15 +188,19 @@ private:
   std::vector<int>* m_trk_combinatoric;
   std::vector<int>* m_trk_fake;  //0 fake, 1 track from primary interaction, 2 secondary track
   std::vector<float>* m_trk_MVA1;
+  std::vector<float>* m_trk_MVA2;
   std::vector<int>* m_trk_matchtp_pdgid;
+  std::vector<bool>* m_trk_matchtp_isHToMu;
   std::vector<bool>* m_trk_matchtp_isHToB;
-  std::vector<bool>* m_trk_matchtp_isHToBTight;
   std::vector<float>* m_trk_matchtp_pt;
   std::vector<float>* m_trk_matchtp_eta;
   std::vector<float>* m_trk_matchtp_phi;
   std::vector<float>* m_trk_matchtp_z0;
   std::vector<float>* m_trk_matchtp_dxy;
   std::vector<float>* m_trk_matchtp_d0;
+  std::vector<float>* m_trk_matchtp_x;
+  std::vector<float>* m_trk_matchtp_y;
+  std::vector<float>* m_trk_matchtp_z;
   std::vector<int>* m_trk_injet;          //is the track within dR<0.4 of a genjet with pt > 30 GeV?
   std::vector<int>* m_trk_injet_highpt;   //is the track within dR<0.4 of a genjet with pt > 100 GeV?
   std::vector<int>* m_trk_injet_vhighpt;  //is the track within dR<0.4 of a genjet with pt > 200 GeV?
@@ -219,8 +218,8 @@ private:
   std::vector<float>* m_tp_d0_prod;
   std::vector<float>* m_tp_z0_prod;
   std::vector<int>* m_tp_pdgid;
+  std::vector<bool>* m_tp_isHToMu;
   std::vector<bool>* m_tp_isHToB;
-  std::vector<bool>* m_tp_isHToBTight;
   std::vector<int>* m_tp_nmatch;
   std::vector<int>* m_tp_nstub;
   std::vector<int>* m_tp_eventid;
@@ -241,6 +240,7 @@ private:
   std::vector<float>* m_matchtrk_chi2rz;
   std::vector<float>* m_matchtrk_bendchi2;
   std::vector<float>* m_matchtrk_MVA1;
+  std::vector<float>* m_matchtrk_MVA2;
   std::vector<int>* m_matchtrk_nstub;
   std::vector<int>* m_matchtrk_lhits;
   std::vector<int>* m_matchtrk_dhits;
@@ -279,27 +279,6 @@ private:
   std::vector<float>* m_jet_tp_sumpt;
   std::vector<float>* m_jet_trk_sumpt;
   std::vector<float>* m_jet_matchtrk_sumpt;
-
-  //displaced vertex variables
-  std::vector<float>* m_vert_pt;
-  std::vector<float>* m_vert_z0;
-  std::vector<float>* m_vert_d0;
-  std::vector<float>* m_vert_eta;
-  std::vector<float>* m_vert_phi;
-  std::vector<float>* m_vert_delta_z;
-  std::vector<float>* m_vert_R_T;
-  std::vector<float>* m_vert_cos_T;
-  std::vector<float>* m_vert_d_T;
-  std::vector<float>* m_vert_chi2rzdofSum;
-  std::vector<int>* m_vert_numStubsSum;
-  std::vector<float>* m_vert_chi2rphidofSum;
-  std::vector<float>* m_vert_minD0;
-  std::vector<float>* m_vert_sumPt;
-  std::vector<float>* m_vert_score;
-  std::vector<float>* m_vert_x;
-  std::vector<float>* m_vert_y;
-  std::vector<float>* m_vert_z;
-  std::vector<bool>* m_vert_isPV;
 };
 
 //////////////////////////////////
@@ -333,7 +312,6 @@ L1TrackNtupleMaker::L1TrackNtupleMaker(edm::ParameterSet const& iConfig) : confi
   MCTruthStubInputTag = iConfig.getParameter<edm::InputTag>("MCTruthStubInputTag");
   TrackingParticleInputTag = iConfig.getParameter<edm::InputTag>("TrackingParticleInputTag");
   TrackingVertexInputTag = iConfig.getParameter<edm::InputTag>("TrackingVertexInputTag");
-  DisplacedVertexInputTag = iConfig.getParameter<edm::InputTag>("DisplacedVertexInputTag");
   GenJetInputTag = iConfig.getParameter<edm::InputTag>("GenJetInputTag");
 
   ttTrackToken_ = consumes<std::vector<TTTrack<Ref_Phase2TrackerDigi_> > >(L1TrackInputTag);
@@ -344,7 +322,6 @@ L1TrackNtupleMaker::L1TrackNtupleMaker(edm::ParameterSet const& iConfig) : confi
 
   TrackingParticleToken_ = consumes<std::vector<TrackingParticle> >(TrackingParticleInputTag);
   TrackingVertexToken_ = consumes<std::vector<TrackingVertex> >(TrackingVertexInputTag);
-  DisplacedVertexToken_ = consumes<l1t::DisplacedVertexCollection>(DisplacedVertexInputTag);
   GenJetToken_ = consumes<std::vector<reco::GenJet> >(GenJetInputTag);
 
   getTokenTrackerGeom_ = esConsumes<TrackerGeometry, TrackerDigiGeometryRecord>();
@@ -362,6 +339,35 @@ L1TrackNtupleMaker::~L1TrackNtupleMaker() {}
 void L1TrackNtupleMaker::endJob() {
   // things to be done at the exit of the event Loop
   edm::LogVerbatim("Tracklet") << "L1TrackNtupleMaker::endJob";
+}
+
+template <typename T>
+bool L1TrackNtupleMaker::findHiggsToMuAncestor(T particle){
+  if((particle->pdgId()==13 || particle->pdgId()==-13) && particle->genParticles().size()>0){
+    reco::GenParticleRef genPart = particle->genParticles()[0];
+    reco::GenParticleRefVector parentParts = genPart->motherRefVector();
+    if(parentParts.size()>0){
+      while(parentParts[0]->pdgId()==13 || parentParts[0]->pdgId()==-13) parentParts = parentParts[0]->motherRefVector();
+      reco::GenParticleRefVector daughters = parentParts[0]->daughterRefVector();
+      bool hasMuon = false;
+      bool hasAntiMuon = false;
+      for(auto daughter : daughters){
+	if(daughter->pdgId()==13) hasMuon = true;
+	if(daughter->pdgId()==-13) hasAntiMuon = true;
+      }
+      if(hasMuon&&hasAntiMuon){
+	bool hAncestor = false;
+	while(parentParts.size()>0){
+	  if(parentParts[0]->pdgId()==25) hAncestor = true;
+	  parentParts = parentParts[0]->motherRefVector();
+	}
+	if(hAncestor){
+	  return true;
+	}
+      } 
+    }
+  } //mu or anti mu
+  return false;
 }
 
 bool L1TrackNtupleMaker::findHiggsToBAncestor(const TrackingVertexRef parentVertex){
@@ -386,24 +392,7 @@ bool L1TrackNtupleMaker::findHiggsToBAncestor(const TrackingVertexRef parentVert
   }
 }
 
-template <typename T>
-bool L1TrackNtupleMaker::findHiggsToBAncestorTight(T particle){
-  if(particle->genParticles().size()>0){
-    reco::GenParticleRef genPart = particle->genParticles()[0];
-    reco::GenParticleRefVector parentParts = genPart->motherRefVector();
-    for( auto parentPart: parentParts ){
-      if(parentPart->pdgId()==5) genPart = parentPart;
-    }
-    int pdgid = genPart->pdgId();
-    if(pdgid==5){
-      reco::GenParticleRefVector genGrandMothers = genPart->motherRefVector()[0]->motherRefVector();
-      for( auto genGrandMother: genGrandMothers){
-	if(genGrandMother->pdgId()==25) return true; 
-      }
-    }
-  }
-  return false;
-}
+
 
 ////////////
 // BEGIN JOB
@@ -450,15 +439,19 @@ void L1TrackNtupleMaker::beginJob() {
   m_trk_combinatoric = new std::vector<int>;
   m_trk_fake = new std::vector<int>;
   m_trk_MVA1 = new std::vector<float>;
+  m_trk_MVA2 = new std::vector<float>;
   m_trk_matchtp_pdgid = new std::vector<int>;
+  m_trk_matchtp_isHToMu = new std::vector<bool>;
   m_trk_matchtp_isHToB = new std::vector<bool>;
-  m_trk_matchtp_isHToBTight = new std::vector<bool>;
   m_trk_matchtp_pt = new std::vector<float>;
   m_trk_matchtp_eta = new std::vector<float>;
   m_trk_matchtp_phi = new std::vector<float>;
   m_trk_matchtp_z0 = new std::vector<float>;
   m_trk_matchtp_dxy = new std::vector<float>;
   m_trk_matchtp_d0 = new std::vector<float>;
+  m_trk_matchtp_x = new std::vector<float>;
+  m_trk_matchtp_y = new std::vector<float>;
+  m_trk_matchtp_z = new std::vector<float>;
   m_trk_injet = new std::vector<int>;
   m_trk_injet_highpt = new std::vector<int>;
   m_trk_injet_vhighpt = new std::vector<int>;
@@ -475,8 +468,8 @@ void L1TrackNtupleMaker::beginJob() {
   m_tp_d0_prod = new std::vector<float>;
   m_tp_z0_prod = new std::vector<float>;
   m_tp_pdgid = new std::vector<int>;
+  m_tp_isHToMu = new std::vector<bool>;
   m_tp_isHToB = new std::vector<bool>;
-  m_tp_isHToBTight = new std::vector<bool>;
   m_tp_nmatch = new std::vector<int>;
   m_tp_nstub = new std::vector<int>;
   m_tp_eventid = new std::vector<int>;
@@ -496,6 +489,7 @@ void L1TrackNtupleMaker::beginJob() {
   m_matchtrk_chi2rz = new std::vector<float>;
   m_matchtrk_bendchi2 = new std::vector<float>;
   m_matchtrk_MVA1 = new std::vector<float>;
+  m_matchtrk_MVA2 = new std::vector<float>;
   m_matchtrk_nstub = new std::vector<int>;
   m_matchtrk_dhits = new std::vector<int>;
   m_matchtrk_lhits = new std::vector<int>;
@@ -531,29 +525,8 @@ void L1TrackNtupleMaker::beginJob() {
   m_jet_trk_sumpt = new std::vector<float>;
   m_jet_matchtrk_sumpt = new std::vector<float>;
 
-  m_vert_pt = new std::vector<float>; 
-  m_vert_z0 = new std::vector<float>;
-  m_vert_d0 = new std::vector<float>;
-  m_vert_eta = new std::vector<float>;
-  m_vert_phi = new std::vector<float>;
-  m_vert_delta_z = new std::vector<float>;
-  m_vert_R_T = new std::vector<float>;
-  m_vert_cos_T = new std::vector<float>;
-  m_vert_d_T = new std::vector<float>;
-  m_vert_chi2rzdofSum = new std::vector<float>;
-  m_vert_numStubsSum = new std::vector<int>;
-  m_vert_chi2rphidofSum = new std::vector<float>;
-  m_vert_minD0 = new std::vector<float>;
-  m_vert_sumPt = new std::vector<float>;
-  m_vert_score = new std::vector<float>;
-  m_vert_x = new std::vector<float>;
-  m_vert_y = new std::vector<float>;
-  m_vert_z = new std::vector<float>;
-  m_vert_isPV = new std::vector<bool>;
-
   // ntuple
   eventTree = fs->make<TTree>("eventTree", "Event tree");
-  dispVertTree = fs->make<TTree>("dispVertTree", "Displaced Vertex tree");
 
   if (SaveAllTracks) {
     eventTree->Branch("trk_pt", &m_trk_pt);
@@ -587,15 +560,19 @@ void L1TrackNtupleMaker::beginJob() {
     eventTree->Branch("trk_combinatoric", &m_trk_combinatoric);
     eventTree->Branch("trk_fake", &m_trk_fake);
     eventTree->Branch("trk_MVA1", &m_trk_MVA1);
+    eventTree->Branch("trk_MVA2", &m_trk_MVA2);
     eventTree->Branch("trk_matchtp_pdgid", &m_trk_matchtp_pdgid);
     eventTree->Branch("trk_matchtp_isHToB", &m_trk_matchtp_isHToB);
-    eventTree->Branch("trk_matchtp_isHToBTight", &m_trk_matchtp_isHToBTight);
+    eventTree->Branch("trk_matchtp_isHToMu", &m_trk_matchtp_isHToMu);
     eventTree->Branch("trk_matchtp_pt", &m_trk_matchtp_pt);
     eventTree->Branch("trk_matchtp_eta", &m_trk_matchtp_eta);
     eventTree->Branch("trk_matchtp_phi", &m_trk_matchtp_phi);
     eventTree->Branch("trk_matchtp_z0", &m_trk_matchtp_z0);
     eventTree->Branch("trk_matchtp_dxy", &m_trk_matchtp_dxy);
     eventTree->Branch("trk_matchtp_d0", &m_trk_matchtp_d0);
+    eventTree->Branch("trk_matchtp_x", &m_trk_matchtp_x);
+    eventTree->Branch("trk_matchtp_y", &m_trk_matchtp_y);
+    eventTree->Branch("trk_matchtp_z", &m_trk_matchtp_z);
     if (TrackingInJets) {
       eventTree->Branch("trk_injet", &m_trk_injet);
       eventTree->Branch("trk_injet_highpt", &m_trk_injet_highpt);
@@ -616,7 +593,7 @@ void L1TrackNtupleMaker::beginJob() {
   eventTree->Branch("tp_z0_prod", &m_tp_z0_prod);
   eventTree->Branch("tp_pdgid", &m_tp_pdgid);
   eventTree->Branch("tp_isHToB", &m_tp_isHToB);
-  eventTree->Branch("tp_isHToBTight", &m_tp_isHToBTight);
+  eventTree->Branch("tp_isHToMu", &m_tp_isHToMu);
   eventTree->Branch("tp_nmatch", &m_tp_nmatch);
   eventTree->Branch("tp_nstub", &m_tp_nstub);
   eventTree->Branch("tp_eventid", &m_tp_eventid);
@@ -638,6 +615,7 @@ void L1TrackNtupleMaker::beginJob() {
   eventTree->Branch("matchtrk_chi2rz", &m_matchtrk_chi2rz);
   eventTree->Branch("matchtrk_bendchi2", &m_matchtrk_bendchi2);
   eventTree->Branch("matchtrk_MVA1", &m_matchtrk_MVA1);
+  eventTree->Branch("matchtrk_MVA2", &m_matchtrk_MVA2);
   eventTree->Branch("matchtrk_nstub", &m_matchtrk_nstub);
   eventTree->Branch("matchtrk_lhits", &m_matchtrk_lhits);
   eventTree->Branch("matchtrk_dhits", &m_matchtrk_dhits);
@@ -679,26 +657,6 @@ void L1TrackNtupleMaker::beginJob() {
     eventTree->Branch("jet_trk_sumpt", &m_jet_trk_sumpt);
     eventTree->Branch("jet_matchtrk_sumpt", &m_jet_matchtrk_sumpt);
   }
-
-  dispVertTree->Branch("vert_pt", &m_vert_pt);
-  dispVertTree->Branch("vert_z0", &m_vert_z0);
-  dispVertTree->Branch("vert_d0", &m_vert_d0);
-  dispVertTree->Branch("vert_eta", &m_vert_eta);
-  dispVertTree->Branch("vert_phi", &m_vert_phi);
-  dispVertTree->Branch("vert_delta_z", &m_vert_delta_z);
-  dispVertTree->Branch("vert_R_T", &m_vert_R_T);
-  dispVertTree->Branch("vert_cos_T", &m_vert_cos_T);
-  dispVertTree->Branch("vert_d_T", &m_vert_d_T);
-  dispVertTree->Branch("vert_chi2rzdofSum", &m_vert_chi2rzdofSum);
-  dispVertTree->Branch("vert_numStubsSum", &m_vert_numStubsSum);
-  dispVertTree->Branch("vert_chi2rphidofSum", &m_vert_chi2rphidofSum);
-  dispVertTree->Branch("vert_minD0", &m_vert_minD0);
-  dispVertTree->Branch("vert_sumPt", &m_vert_sumPt);
-  dispVertTree->Branch("vert_score", &m_vert_score);
-  dispVertTree->Branch("vert_x", &m_vert_x);
-  dispVertTree->Branch("vert_y", &m_vert_y);
-  dispVertTree->Branch("vert_z", &m_vert_z);
-  dispVertTree->Branch("vert_isPV", &m_vert_isPV);
 }
 
 //////////
@@ -752,15 +710,19 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     m_trk_combinatoric->clear();
     m_trk_fake->clear();
     m_trk_MVA1->clear();
+    m_trk_MVA2->clear();
     m_trk_matchtp_pdgid->clear();
     m_trk_matchtp_isHToB->clear();
-    m_trk_matchtp_isHToBTight->clear();
+    m_trk_matchtp_isHToMu->clear();
     m_trk_matchtp_pt->clear();
     m_trk_matchtp_eta->clear();
     m_trk_matchtp_phi->clear();
     m_trk_matchtp_z0->clear();
     m_trk_matchtp_dxy->clear();
     m_trk_matchtp_d0->clear();
+    m_trk_matchtp_x->clear();
+    m_trk_matchtp_y->clear();
+    m_trk_matchtp_z->clear();
     m_trk_injet->clear();
     m_trk_injet_highpt->clear();
     m_trk_injet_vhighpt->clear();
@@ -779,7 +741,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
   m_tp_z0_prod->clear();
   m_tp_pdgid->clear();
   m_tp_isHToB->clear();
-  m_tp_isHToBTight->clear();
+  m_tp_isHToMu->clear();
   m_tp_nmatch->clear();
   m_tp_nstub->clear();
   m_tp_eventid->clear();
@@ -799,6 +761,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
   m_matchtrk_chi2rz->clear();
   m_matchtrk_bendchi2->clear();
   m_matchtrk_MVA1->clear();
+  m_matchtrk_MVA2->clear();
   m_matchtrk_nstub->clear();
   m_matchtrk_lhits->clear();
   m_matchtrk_dhits->clear();
@@ -837,26 +800,6 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
   m_jet_trk_sumpt->clear();
   m_jet_matchtrk_sumpt->clear();
 
-  m_vert_pt->clear();
-  m_vert_z0->clear();
-  m_vert_d0->clear();
-  m_vert_eta->clear();
-  m_vert_phi->clear();
-  m_vert_delta_z->clear();
-  m_vert_R_T->clear();
-  m_vert_cos_T->clear();
-  m_vert_d_T->clear();
-  m_vert_chi2rzdofSum->clear();
-  m_vert_numStubsSum->clear();
-  m_vert_chi2rphidofSum->clear();
-  m_vert_minD0->clear();
-  m_vert_sumPt->clear();
-  m_vert_score->clear();
-  m_vert_x->clear();
-  m_vert_y->clear();
-  m_vert_z->clear();
-  m_vert_isPV->clear();
-
   // -----------------------------------------------------------------------------------------------
   // retrieve various containers
   // -----------------------------------------------------------------------------------------------
@@ -883,9 +826,6 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
   edm::Handle<std::vector<TrackingVertex> > TrackingVertexHandle;
   iEvent.getByToken(TrackingParticleToken_, TrackingParticleHandle);
   //iEvent.getByToken(TrackingVertexToken_, TrackingVertexHandle);
-  edm::Handle<l1t::DisplacedVertexCollection> DisplacedVertexHandle;
-  iEvent.getByToken(DisplacedVertexToken_, DisplacedVertexHandle);
-
 
   // -----------------------------------------------------------------------------------------------
   // more for TTStubs
@@ -1120,6 +1060,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
       float tmp_trk_chi2rz = iterL1Track->chi2Z();
       float tmp_trk_bendchi2 = iterL1Track->stubPtConsistency();
       float tmp_trk_MVA1 = iterL1Track->trkMVA1();
+      float tmp_trk_MVA2 = iterL1Track->trkMVA2();
 
       std::vector<edm::Ref<edmNew::DetSetVector<TTStub<Ref_Phase2TrackerDigi_> >, TTStub<Ref_Phase2TrackerDigi_> > >
           stubRefs = iterL1Track->getStubRefs();
@@ -1212,6 +1153,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
       m_trk_chi2rz->push_back(tmp_trk_chi2rz);
       m_trk_bendchi2->push_back(tmp_trk_bendchi2);
       m_trk_MVA1->push_back(tmp_trk_MVA1);
+      m_trk_MVA2->push_back(tmp_trk_MVA2);
       m_trk_nstub->push_back(tmp_trk_nstub);
       m_trk_dhits->push_back(tmp_trk_dhits);
       m_trk_lhits->push_back(tmp_trk_lhits);
@@ -1241,14 +1183,17 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
       int myFake = 0;
 
       int tmp_matchtp_pdgid = -999;
+      bool tmp_matchtp_isHToMu = false;
       bool tmp_matchtp_isHToB = false;
-      bool tmp_matchtp_isHToBTight = false;
       float tmp_matchtp_pt = -999;
       float tmp_matchtp_eta = -999;
       float tmp_matchtp_phi = -999;
       float tmp_matchtp_z0 = -999;
       float tmp_matchtp_dxy = -999;
       float tmp_matchtp_d0 = -999;
+      float tmp_matchtp_vx = -999;
+      float tmp_matchtp_vy = -999;
+      float tmp_matchtp_vz = -999;
 
       if (my_tp.isNull())
         myFake = 0;
@@ -1261,16 +1206,17 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
           myFake = 1;
 
         tmp_matchtp_pdgid = my_tp->pdgId();
+	//std::cout<<"event id: "<<tmp_eventid<<" matchtp vertex x y z: "<<my_tp->vx()<<" "<<my_tp->vy()<<" "<<my_tp->vz()<<std::endl;
+	tmp_matchtp_isHToMu = findHiggsToMuAncestor(my_tp);
 	const TrackingVertexRef parentVertex = my_tp->parentVertex();
 	tmp_matchtp_isHToB = findHiggsToBAncestor(parentVertex);
-	tmp_matchtp_isHToBTight = findHiggsToBAncestorTight(my_tp);
         tmp_matchtp_pt = my_tp->pt();
         tmp_matchtp_eta = my_tp->eta();
         tmp_matchtp_phi = my_tp->phi();
 
-        float tmp_matchtp_vz = my_tp->vz();
-        float tmp_matchtp_vx = my_tp->vx();
-        float tmp_matchtp_vy = my_tp->vy();
+        tmp_matchtp_vz = my_tp->vz();
+        tmp_matchtp_vx = my_tp->vx();
+        tmp_matchtp_vy = my_tp->vy();
         tmp_matchtp_dxy = sqrt(tmp_matchtp_vx * tmp_matchtp_vx + tmp_matchtp_vy * tmp_matchtp_vy);
 
         // ----------------------------------------------------------------------------------------------
@@ -1310,14 +1256,17 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
       m_trk_fake->push_back(myFake);
 
       m_trk_matchtp_pdgid->push_back(tmp_matchtp_pdgid);
+      m_trk_matchtp_isHToMu->push_back(tmp_matchtp_isHToMu);
       m_trk_matchtp_isHToB->push_back(tmp_matchtp_isHToB);
-      m_trk_matchtp_isHToBTight->push_back(tmp_matchtp_isHToBTight);
       m_trk_matchtp_pt->push_back(tmp_matchtp_pt);
       m_trk_matchtp_eta->push_back(tmp_matchtp_eta);
       m_trk_matchtp_phi->push_back(tmp_matchtp_phi);
       m_trk_matchtp_z0->push_back(tmp_matchtp_z0);
       m_trk_matchtp_dxy->push_back(tmp_matchtp_dxy);
       m_trk_matchtp_d0->push_back(tmp_matchtp_d0);
+      m_trk_matchtp_x->push_back(tmp_matchtp_vx);
+      m_trk_matchtp_y->push_back(tmp_matchtp_vy);
+      m_trk_matchtp_z->push_back(tmp_matchtp_vz);
 
       // ----------------------------------------------------------------------------------------------
       // for tracking in jets
@@ -1437,10 +1386,9 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     if (MyProcess == 6 && (dxy > 1.0))
       continue;
 
-    //put pdgid func here
+    bool tmp_tp_isHToMu = findHiggsToMuAncestor(iterTP);
     const TrackingVertexRef parentVertex = iterTP->parentVertex();
     bool tmp_tp_isHToB = findHiggsToBAncestor(parentVertex);
-    bool tmp_tp_isHToBTight = findHiggsToBAncestorTight(iterTP);
 
     if (DebugMode)
       edm::LogVerbatim("Tracklet") << "Tracking particle, pt: " << tmp_tp_pt << " eta: " << tmp_tp_eta
@@ -1630,6 +1578,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     float tmp_matchtrk_chi2rz = -999;
     float tmp_matchtrk_bendchi2 = -999;
     float tmp_matchtrk_MVA1 = -999;
+    float tmp_matchtrk_MVA2 = -999;
     int tmp_matchtrk_nstub = -999;
     int tmp_matchtrk_dhits = -999;
     int tmp_matchtrk_lhits = -999;
@@ -1656,6 +1605,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
       tmp_matchtrk_chi2rz = matchedTracks.at(i_track)->chi2Z();
       tmp_matchtrk_bendchi2 = matchedTracks.at(i_track)->stubPtConsistency();
       tmp_matchtrk_MVA1 = matchedTracks.at(i_track)->trkMVA1();
+      tmp_matchtrk_MVA2 = matchedTracks.at(i_track)->trkMVA2();
       tmp_matchtrk_nstub = (int)matchedTracks.at(i_track)->getStubRefs().size();
       tmp_matchtrk_seed = (int)matchedTracks.at(i_track)->trackSeedType();
       tmp_matchtrk_hitpattern = (int)matchedTracks.at(i_track)->hitPattern();
@@ -1704,8 +1654,8 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     m_tp_z0_prod->push_back(tmp_tp_z0_prod);
     m_tp_d0_prod->push_back(tmp_tp_d0_prod);
     m_tp_pdgid->push_back(tmp_tp_pdgid);
+    m_tp_isHToMu->push_back(tmp_tp_isHToMu);
     m_tp_isHToB->push_back(tmp_tp_isHToB);
-    m_tp_isHToBTight->push_back(tmp_tp_isHToBTight);
     m_tp_nmatch->push_back(nMatch);
     m_tp_nstub->push_back(nStubTP);
     m_tp_eventid->push_back(tmp_eventid);
@@ -1722,6 +1672,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     m_matchtrk_chi2rz->push_back(tmp_matchtrk_chi2rz);
     m_matchtrk_bendchi2->push_back(tmp_matchtrk_bendchi2);
     m_matchtrk_MVA1->push_back(tmp_matchtrk_MVA1);
+    m_matchtrk_MVA2->push_back(tmp_matchtrk_MVA2);
     m_matchtrk_nstub->push_back(tmp_matchtrk_nstub);
     m_matchtrk_dhits->push_back(tmp_matchtrk_dhits);
     m_matchtrk_lhits->push_back(tmp_matchtrk_lhits);
@@ -1801,33 +1752,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
     }
   }
 
-  
-  l1t::DisplacedVertexCollection::const_iterator iterDispVert;
-  for (iterDispVert = DisplacedVertexHandle->begin(); iterDispVert != DisplacedVertexHandle->end(); iterDispVert++) { 
-    m_vert_pt->push_back(iterDispVert->pt());
-    m_vert_z0->push_back(iterDispVert->z0());
-    m_vert_d0->push_back(iterDispVert->d0());
-    m_vert_eta->push_back(iterDispVert->eta());
-    m_vert_phi->push_back(iterDispVert->phi());
-    m_vert_delta_z->push_back(iterDispVert->delta_z());
-    m_vert_R_T->push_back(iterDispVert->R_T());
-    m_vert_cos_T->push_back(iterDispVert->cos_T());
-    m_vert_d_T->push_back(iterDispVert->d_T());
-    m_vert_chi2rzdofSum->push_back(iterDispVert->chi2rzdofSum());
-    m_vert_numStubsSum->push_back(iterDispVert->numStubsSum());
-    m_vert_chi2rphidofSum->push_back(iterDispVert->chi2rphidofSum());
-    m_vert_minD0->push_back(iterDispVert->minD0());
-    m_vert_sumPt->push_back(iterDispVert->sumPt());
-    m_vert_score->push_back(iterDispVert->score());
-    m_vert_x->push_back(iterDispVert->pos()[0]);
-    m_vert_y->push_back(iterDispVert->pos()[1]);
-    m_vert_z->push_back(iterDispVert->pos()[2]);
-    m_vert_isPV->push_back(iterDispVert->isPV());
-  }
-
-
   eventTree->Fill();
-  dispVertTree->Fill();
 
 }  // end of analyze()
 
