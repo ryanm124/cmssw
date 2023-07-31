@@ -411,7 +411,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vector<int>     *trk_unknown;
   vector<int>     *trk_combinatoric;
   vector<int>     *trk_fake;
-  vector<int>     *trk_MVA1;
+  vector<float>     *trk_MVA1;
+  vector<float>     *trk_MVA2;
   vector<int>     *trk_matchtp_pdgid;
   vector<bool>     *trk_matchtp_isHToMu;
   vector<bool>     *trk_matchtp_isHToB;
@@ -453,6 +454,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vector<float>   *matchtrk_chi2rz;
   vector<float>   *matchtrk_bendchi2;
   vector<float>   *matchtrk_MVA1;
+  vector<float>   *matchtrk_MVA2;
   vector<int>     *matchtrk_nstub;
   vector<int>     *matchtrk_lhits;
   vector<int>     *matchtrk_dhits;
@@ -500,6 +502,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TBranch        *b_trk_combinatoric;
   TBranch        *b_trk_fake;
   TBranch        *b_trk_MVA1;
+  TBranch        *b_trk_MVA2;
   TBranch        *b_trk_matchtp_pdgid;
   TBranch        *b_trk_matchtp_isHToMu;
   TBranch        *b_trk_matchtp_isHToB;
@@ -541,6 +544,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TBranch        *b_matchtrk_chi2rz;
   TBranch        *b_matchtrk_bendchi2;
   TBranch        *b_matchtrk_MVA1;
+  TBranch        *b_matchtrk_MVA2;
   TBranch        *b_matchtrk_nstub;
   TBranch        *b_matchtrk_lhits;
   TBranch        *b_matchtrk_dhits;
@@ -588,6 +592,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   trk_combinatoric = 0;
   trk_fake = 0;
   trk_MVA1 = 0;
+  trk_MVA2 = 0;
   trk_matchtp_pdgid = 0;
   trk_matchtp_isHToMu = 0;
   trk_matchtp_isHToB = 0;
@@ -629,6 +634,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   matchtrk_chi2rz = 0;
   matchtrk_bendchi2 = 0;
   matchtrk_MVA1 = 0;
+  matchtrk_MVA2 = 0;
   matchtrk_nstub = 0;
   matchtrk_lhits = 0;
   matchtrk_dhits = 0;
@@ -677,6 +683,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   tree->SetBranchAddress("trk_combinatoric", &trk_combinatoric, &b_trk_combinatoric);
   tree->SetBranchAddress("trk_fake", &trk_fake, &b_trk_fake);
   tree->SetBranchAddress("trk_MVA1", &trk_MVA1, &b_trk_MVA1);
+  tree->SetBranchAddress("trk_MVA2", &trk_MVA2, &b_trk_MVA2);
   tree->SetBranchAddress("trk_matchtp_pdgid", &trk_matchtp_pdgid, &b_trk_matchtp_pdgid);
   tree->SetBranchAddress("trk_matchtp_isHToMu", &trk_matchtp_isHToMu, &b_trk_matchtp_isHToMu);
   tree->SetBranchAddress("trk_matchtp_isHToB", &trk_matchtp_isHToB, &b_trk_matchtp_isHToB);
@@ -718,6 +725,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   tree->SetBranchAddress("matchtrk_chi2rz", &matchtrk_chi2rz, &b_matchtrk_chi2rz);
   tree->SetBranchAddress("matchtrk_bendchi2", &matchtrk_bendchi2, &b_matchtrk_bendchi2);
   tree->SetBranchAddress("matchtrk_MVA1", &matchtrk_MVA1, &b_matchtrk_MVA1);
+  tree->SetBranchAddress("matchtrk_MVA2", &matchtrk_MVA2, &b_matchtrk_MVA2);
   tree->SetBranchAddress("matchtrk_nstub", &matchtrk_nstub, &b_matchtrk_nstub);
   tree->SetBranchAddress("matchtrk_lhits", &matchtrk_lhits, &b_matchtrk_lhits);
   tree->SetBranchAddress("matchtrk_dhits", &matchtrk_dhits, &b_matchtrk_dhits);
@@ -989,6 +997,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trk_MVA1_PU_qualCuts = new TH1F("h_trk_MVA1_PU_qualCuts","h_trk_MVA1_PU_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_notHiggs_qualCuts = new TH1F("h_trk_MVA1_notHiggs_qualCuts","h_trk_MVA1_notHiggs_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
   TH1F *h_trk_MVA1_np_allCuts = new TH1F("h_trk_MVA1_np_allCuts","h_trk_MVA1_np_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA2_primary_noCuts = new TH1F("h_trk_MVA2_primary_noCuts","h_trk_MVA2_primary_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA2_primary_allCuts = new TH1F("h_trk_MVA2_primary_allCuts","h_trk_MVA2_primary_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA2_np_noCuts = new TH1F("h_trk_MVA2_np_noCuts","h_trk_MVA2_np_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
+  TH1F *h_trk_MVA2_np_allCuts = new TH1F("h_trk_MVA2_np_allCuts","h_trk_MVA2_np_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
   // Chi2 plots
   TH1F *h_trk_chi2rphidof = new TH1F("h_trk_chi2rphidof","h_trk_chi2rphidof; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.1",50,0,5);
   TH1F *h_trk_chi2rphidof_primary = new TH1F("h_trk_chi2rphidof_primary","h_trk_chi2rphidof_primary; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
@@ -1548,6 +1560,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_chi2rphidof_primary_noCuts->Fill(chi2rphidof);
 	h_trk_chi2rphidof_primary_noCuts_zoomOut->Fill(chi2rphidof);
 	h_trk_MVA1_primary_noCuts->Fill(trk_MVA1->at(it));
+	h_trk_MVA2_primary_noCuts->Fill(trk_MVA2->at(it));
 	h_trk_chi2rzdof_primary_noCuts->Fill(chi2rzdof);
 	h_trk_chi2rzdof_primary_noCuts_zoomOut->Fill(chi2rzdof);
 	h_trk_bendchi2_primary_noCuts->Fill(trk_bendchi2->at(it));
@@ -1620,6 +1633,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_chi2rphidof_np_noCuts->Fill(chi2rphidof);
 	h_trk_chi2rphidof_np_noCuts_zoomOut->Fill(chi2rphidof);
 	h_trk_MVA1_np_noCuts->Fill(trk_MVA1->at(it));
+	h_trk_MVA2_np_noCuts->Fill(trk_MVA2->at(it));
 	h_trk_chi2rzdof_np_noCuts->Fill(chi2rzdof);
 	h_trk_chi2rzdof_np_noCuts_zoomOut->Fill(chi2rzdof);
 	h_trk_bendchi2_np_noCuts->Fill(trk_bendchi2->at(it));
@@ -1975,6 +1989,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_chi2rphidof_primary_allCuts->Fill(chi2rphidof);
 	h_trk_chi2rphidof_primary_allCuts_zoomOut->Fill(chi2rphidof);
 	h_trk_MVA1_primary_allCuts->Fill(trk_MVA1->at(it));
+	h_trk_MVA2_primary_allCuts->Fill(trk_MVA2->at(it));
 	h_trk_chi2rzdof_primary_allCuts->Fill(chi2rzdof);
 	h_trk_chi2rzdof_primary_allCuts_zoomOut->Fill(chi2rzdof);
 	h_trk_bendchi2_primary_allCuts->Fill(trk_bendchi2->at(it));
@@ -2016,6 +2031,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_chi2rphidof_np_allCuts->Fill(chi2rphidof);
 	h_trk_chi2rphidof_np_allCuts_zoomOut->Fill(chi2rphidof);
 	h_trk_MVA1_np_allCuts->Fill(trk_MVA1->at(it));
+	h_trk_MVA2_np_allCuts->Fill(trk_MVA2->at(it));
 	h_trk_chi2rzdof_np_allCuts->Fill(chi2rzdof);
 	h_trk_chi2rzdof_np_allCuts_zoomOut->Fill(chi2rzdof);
 	h_trk_bendchi2_np_allCuts->Fill(trk_bendchi2->at(it));
@@ -7944,6 +7960,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_trk_chi2rphidof_PU_qualCuts;
   delete h_trk_chi2rphidof_notHiggs_qualCuts;
 
+  removeFlows(h_trk_MVA1_primary_noCuts);
   h_trk_MVA1_primary_noCuts->Scale(1./h_trk_MVA1_primary_noCuts->Integral());
   h_trk_MVA1_primary_noCuts->SetLineColor(1);
   h_trk_MVA1_primary_noCuts->SetMarkerColor(1);
@@ -7960,6 +7977,28 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->Draw();
   c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts.pdf");
   delete h_trk_MVA1_np_noCutsNorm;
+
+  removeFlows(h_trk_MVA2_primary_noCuts);
+  h_trk_MVA2_primary_noCuts->Scale(1./h_trk_MVA2_primary_noCuts->Integral());
+  h_trk_MVA2_primary_noCuts->SetLineColor(1);
+  h_trk_MVA2_primary_noCuts->SetMarkerColor(1);
+  h_trk_MVA2_primary_noCuts->SetStats(0);
+  removeFlows(h_trk_MVA2_np_noCuts);
+  h_trk_MVA2_np_noCuts->Scale(1./h_trk_MVA2_np_noCuts->Integral());
+  h_trk_MVA2_np_noCuts->SetLineColor(2);
+  h_trk_MVA2_np_noCuts->SetMarkerColor(2);
+  h_trk_MVA2_np_noCuts->SetStats(0);
+  raiseMax(h_trk_MVA2_np_noCuts,h_trk_MVA2_primary_noCuts);
+  h_trk_MVA2_np_noCuts->Draw("HIST");
+  h_trk_MVA2_primary_noCuts->Draw("HIST,SAME");
+  mySmallText(0.3, 0.9, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA2_primary_noCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA2_np_noCuts,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA2_noCuts.pdf");
+  delete h_trk_MVA2_primary_noCuts;
+  delete h_trk_MVA2_np_noCuts;
 
   TH1F *h_trk_MVA1_fake_noCutsNorm = (TH1F*)h_trk_MVA1_fake_noCuts->Clone(); 
   h_trk_MVA1_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
@@ -8114,6 +8153,28 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->Draw();
   c.SaveAs(DIR + "/h_signalVsBG_MVA1_allCuts.pdf");
   delete h_trk_MVA1_np_allCutsNorm;
+
+  removeFlows(h_trk_MVA2_primary_allCuts);
+  h_trk_MVA2_primary_allCuts->Scale(1./h_trk_MVA2_primary_allCuts->Integral());
+  h_trk_MVA2_primary_allCuts->SetLineColor(1);
+  h_trk_MVA2_primary_allCuts->SetMarkerColor(1);
+  h_trk_MVA2_primary_allCuts->SetStats(0);
+  removeFlows(h_trk_MVA2_np_allCuts);
+  h_trk_MVA2_np_allCuts->Scale(1./h_trk_MVA2_np_allCuts->Integral());
+  h_trk_MVA2_np_allCuts->SetLineColor(2);
+  h_trk_MVA2_np_allCuts->SetMarkerColor(2);
+  h_trk_MVA2_np_allCuts->SetStats(0);
+  raiseMax(h_trk_MVA2_np_allCuts,h_trk_MVA2_primary_allCuts);
+  h_trk_MVA2_np_allCuts->Draw("HIST");
+  h_trk_MVA2_primary_allCuts->Draw("HIST,SAME");
+  mySmallText(0.3, 0.9, 1, ctxt);
+  l->Clear();
+  l->AddEntry(h_trk_MVA2_primary_allCuts,"Primary","l");
+  l->AddEntry(h_trk_MVA2_np_allCuts,"NP","l");
+  l->Draw();
+  c.SaveAs(DIR + "/h_signalVsBG_MVA2_allCuts.pdf");
+  delete h_trk_MVA2_primary_allCuts;
+  delete h_trk_MVA2_np_allCuts;
 
   TH1F *h_trk_MVA1_fake_qualCutsNorm = (TH1F*)h_trk_MVA1_fake_qualCuts->Clone(); 
   h_trk_MVA1_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
