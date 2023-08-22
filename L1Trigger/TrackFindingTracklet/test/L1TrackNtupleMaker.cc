@@ -56,7 +56,7 @@
 
 ////////////////
 // PHYSICS TOOLS
-#include "L1Trigger/TrackFindingTracklet/interface/HitPatternHelper.h"
+#include "L1Trigger/TrackTrigger/interface/HitPatternHelper.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
 #include "CLHEP/Units/PhysicalConstants.h"
 
@@ -94,8 +94,7 @@ public:
   ~L1TrackNtupleMaker() override;
   template <typename T>
   bool findHiggsToMuAncestor(T particle);
-  template <typename T>
-  bool findHiggsToBAncestor(T particle);
+  bool findHiggsToBAncestor(const TrackingVertexRef parentVertex);
   // Mandatory methods
   void beginJob() override;
   void endJob() override;
@@ -378,16 +377,22 @@ bool L1TrackNtupleMaker::findHiggsToBAncestor(const TrackingVertexRef parentVert
       bool bAncestor = false;
       bool hAncestor = false;
       while(genPart.size()>0){
+	std::cout<<"genPart loop pdgid: "<<genPart[0]->pdgId()<<std::endl;
 	if(hAncestor==false && genPart[0]->pdgId()==5) bAncestor = true;
 	if(genPart[0]->pdgId()==25) hAncestor = true;
 	genPart = genPart[0]->motherRefVector();
       }
-      if(bAncestor && hAncestor) return true;
+      if(bAncestor && hAncestor){
+	std::cout<<"returning true"<<std::endl;
+	return true;
+      }
     }
+    std::cout<<"returning false"<<std::endl;
     return false;
   }
   else{
     TrackingParticleRefVector sourceTPs = parentVertex->sourceTracks();
+    std::cout<<"recursive pdgid: "<<sourceTPs[0]->pdgId()<<std::endl;
     return findHiggsToBAncestor(sourceTPs[0]->parentVertex());
   }
 }
@@ -1209,6 +1214,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
 	//std::cout<<"event id: "<<tmp_eventid<<" matchtp vertex x y z: "<<my_tp->vx()<<" "<<my_tp->vy()<<" "<<my_tp->vz()<<std::endl;
 	tmp_matchtp_isHToMu = findHiggsToMuAncestor(my_tp);
 	const TrackingVertexRef parentVertex = my_tp->parentVertex();
+	std::cout<<"match tp find ancestor call"<<std::endl;
 	tmp_matchtp_isHToB = findHiggsToBAncestor(parentVertex);
         tmp_matchtp_pt = my_tp->pt();
         tmp_matchtp_eta = my_tp->eta();
@@ -1388,6 +1394,7 @@ void L1TrackNtupleMaker::analyze(const edm::Event& iEvent, const edm::EventSetup
 
     bool tmp_tp_isHToMu = findHiggsToMuAncestor(iterTP);
     const TrackingVertexRef parentVertex = iterTP->parentVertex();
+    std::cout<<"tp find ancestor call"<<std::endl;
     bool tmp_tp_isHToB = findHiggsToBAncestor(parentVertex);
 
     if (DebugMode)
