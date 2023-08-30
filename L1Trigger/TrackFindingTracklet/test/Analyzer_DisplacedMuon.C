@@ -45,14 +45,14 @@ bool detailedPlots = false;
 //float d0_res = 0.0554; //cm
 float d0_res = 0.02152; //cm
 float CUTOFF = 1.0; // Common z cut off in cm for Displaced Vertex and verification
-float bendChi2Max = 14.0;
+float bendChi2Max = 10000.0;
 float chi2RPhiMax = 6.0;
-//float chi2RZMax = 2.5;
-float cosTMin = 0.96;
-//float dTMax = 1.0;
-float deltaZMax = 0.5;
-float deltaEtaMax = 2.0;
-//float deltaEtaMin = 0.05;
+float chi2RZMax = 2.5;
+float cosTMin = 0.99;
+float dTMax = 0.3;
+float deltaZMax = 1.4;
+float deltaEtaMax = 1.8;
+float deltaEtaMin = 0.1;
 //float d0Min = 0.025;
 float delxyMax = 0.1;
 float delzMax = 0.5;
@@ -404,31 +404,31 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
   SetPlotStyle();
 
-  //float TP_minPt = 9.0;
-  //TP_maxD0 = 1.5;
+  float TP_minPt = 9.0;
+  TP_maxD0 = 2.0;
   //TP_minD0 = 0.08;
-  //float TP_maxZ0 = 14.0;
+  float TP_maxZ0 = 15.0;
   //float maxChi2rzdof = 5.0;
   //float maxChi2rphidof = 5.00;
   float barrelEta = 0.95;
 
   //general preselection cuts
   float TP_maxEta = 2.4;
-  //float trk_maxBendChi2 = 9.0;
-  float maxChi2rzdof = 3.0;
-  float minMVA2 = 0.2;
+  float trk_maxBendChi2 = 9.0;
+  float maxChi2rzdof = 2.0;
+  //float minMVA2 = 0.2;
   //float minMVA2_D = 0.95;
-  float minMVA1 = 0.2;
-  float minMVA1_D = 0.8;
-  float TP_minPt = 3.0;
+  //float minMVA1 = 0.2;
+  //float minMVA1_D = 0.8;
+  //float TP_minPt = 3.0;
   //float TP_maxZ0 = 20.0;
   //TP_maxD0 = 2.0;
   //barrel preselection cuts
-  float TP_minD0_barrel = 0.06;
-  float maxChi2rphidof_barrel = 5.0;
+  float TP_minD0_barrel = 0.05;
+  float maxChi2rphidof_barrel = 4.0;
   //disk preselection cuts
-  float TP_minD0_disk = 0.08;
-  //float minChi2rphidof_disk = 10000.0;
+  float TP_minD0_disk = 0.1;
+  float maxChi2rphidof_disk = 40.0;
 
   vector<float>   *trk_pt;
   vector<float>   *trk_eta;
@@ -1294,13 +1294,13 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trueVertex_delta_dist_indexPt = new TH1F("h_trueVertex_delta_dist_indexPt","h_trueVertex_delta_dist_indexPt; Distance in pt index btwn two hardest TPs from vertex ; Events / 1.0",20,0,20);
   TH1F *h_trueVertex_delta_dist_pt = new TH1F("h_trueVertex_delta_dist_pt","h_trueVertex_delta_dist_pt; Distance in pt btwn two hardest TPs from vertex (GeV); Events / 1.0",50,0,50);
   
-  TH1F *h_res_tp_trk_x = new TH1F("h_res_tp_trk_x","h_res_tp_trk_x; x residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
-  TH1F *h_res_tp_trk_y = new TH1F("h_res_tp_trk_y","h_res_tp_trk_y; y residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
+  TH1F *h_res_tp_trk_x = new TH1F("h_res_tp_trk_x","h_res_tp_trk_x; x residual of vertex position (true - calculated)(cm) ; Events / 0.02 cm",100,-1,1);
+  TH1F *h_res_tp_trk_y = new TH1F("h_res_tp_trk_y","h_res_tp_trk_y; y residual of vertex position (true - calculated)(cm) ; Events / 0.02 cm",100,-1,1);
   TH1F *h_res_tp_trk_x_zoomOut = new TH1F("h_res_tp_trk_x_zoomOut","h_res_tp_trk_x_zoomOut; x residual of vertex (cm) ; Events / 0.022 cm",500,-1,10);
   TH1F *h_res_tp_trk_y_zoomOut = new TH1F("h_res_tp_trk_y_zoomOut","h_res_tp_trk_y_zoomOut; y residual of vertex (cm) ; Events / 0.022 cm",500,-1,10);
   TH1F *h_res_tp_trk_x_findVert = new TH1F("h_res_tp_trk_x_findVert","h_res_tp_trk_x_findVert; x residual of vertex (cm) ; Events / 0.022 cm",500,-1,10);
   TH1F *h_res_tp_trk_y_findVert = new TH1F("h_res_tp_trk_y_findVert","h_res_tp_trk_y_findVert; y residual of vertex (cm) ; Events / 0.022 cm",500,-1,10);
-  TH1F *h_res_tp_trk_z = new TH1F("h_res_tp_trk_z","h_res_tp_trk_z; z residual of vertex (cm) ; Events / 0.02 cm",1000,-10,10);
+  TH1F *h_res_tp_trk_z = new TH1F("h_res_tp_trk_z","h_res_tp_trk_z; z residual of vertex position (true - calculated)(cm) ; Events / 0.02 cm",1000,-10,10);
   TH1F *h_res_tp_trk_r = new TH1F("h_res_tp_trk_r","h_res_tp_trk_r; r residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
   TH1F *h_res_tp_trk_phi = new TH1F("h_res_tp_trk_phi","h_res_tp_trk_phi; phi residual of vertex ; Events / 0.02",100,-1,1);
 
@@ -1450,6 +1450,31 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH2F *h_trackVertex_rankDt_vs_numVertPerTrack = new TH2F("h_trackVertex_rankDt_vs_numVertPerTrack","h_trackVertex_rankDt_vs_numVertPerTrack; Vertices Associated with Track; Ranking of Vertex d_{T} / 1.0",20,0,20,20,0,20);
   TH2F *h_trackVertex_rankChi2rphidofSum_vs_numVertPerTrack = new TH2F("h_trackVertex_rankChi2rphidofSum_vs_numVertPerTrack","h_trackVertex_rankChi2rphidofSum_vs_numVertPerTrack; Vertices Associated with Track; Ranking of Vertex #Sigma #chi^{2}_{r#phi}/d.o.f / 1.0",20,0,20,20,0,20);
   TH2F *h_trackVertex_rankRt_vs_numVertPerTrack = new TH2F("h_trackVertex_rankRt_vs_numVertPerTrack","h_trackVertex_rankRt_vs_numVertPerTrack; Vertices Associated with Track; Ranking of Vertex R_{T} / 1.0",20,0,20,20,0,20);
+
+  const Int_t nbins = 20;
+  Double_t pt_edges[nbins+1];
+  Double_t logpt_low = log10(2);
+  Double_t logpt_high = log10(100);
+  Double_t logpt_temp = logpt_low;
+  Double_t logpt_step = (logpt_high - logpt_low) / nbins;
+  for(int ct = 0; ct < nbins+1; ct++){
+    pt_edges[ct] = pow(10,logpt_temp);
+    logpt_temp+=logpt_step;
+  }
+  TH1F *h_all_oneMatch_trueVertex_ptLog = new TH1F("h_all_oneMatch_trueVertex_ptLog","h_all_oneMatch_trueVertex_ptLog; p_{T} of Leading p_{T} TP from vertex (GeV); Events",nbins,pt_edges);
+  TH1F *h_correct_oneMatch_trueVertex_ptLog = new TH1F("h_correct_oneMatch_trueVertex_ptLog","h_correct_oneMatch_trueVertex_ptLog; p_{T} of Leading p_{T} TP from vertex (GeV); Events",nbins,pt_edges);
+
+  Double_t dxy_edges[nbins+1];
+  Double_t logdxy_low = log10(0.01);
+  Double_t logdxy_high = log10(20);
+  Double_t logdxy_temp = logdxy_low;
+  Double_t logdxy_step = (logdxy_high - logdxy_low) / nbins;
+  for(int ct = 0; ct < nbins+1; ct++){
+    dxy_edges[ct] = pow(10,logdxy_temp);
+    logdxy_temp+=logdxy_step;
+  }
+  TH1F *h_all_oneMatch_trueVertex_dxyLog = new TH1F("h_all_oneMatch_trueVertex_dxyLog","h_all_oneMatch_trueVertex_dxyLog; dxy of vertex (cm); Events",nbins,dxy_edges);
+  TH1F *h_correct_oneMatch_trueVertex_dxyLog = new TH1F("h_correct_oneMatch_trueVertex_dxyLog","h_correct_oneMatch_trueVertex_dxyLog; dxy of vertex (cm) ; Events",nbins,dxy_edges);
 
   std::string binVariable = "";
   std::vector<std::vector<double>> track_bins = {{-1,1}};
@@ -1833,10 +1858,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
 
       h_trk_bendchi2->Fill(trk_bendchi2->at(it));
-#if 0
+
       if(trk_bendchi2->at(it) > trk_maxBendChi2)
 	continue;
-#endif
+
       if(trk_fake->at(it)==1 && isPrimary){
 	h_trk_pt_primary_bendchi2Cuts->Fill(trk_pt->at(it));
 	h_trk_chi2rphidof_primary->Fill(chi2rphidof);
@@ -1854,7 +1879,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	continue;
 #endif
 
-      if ( fabs(trk_eta->at(it))<=barrelEta && chi2rphidof>maxChi2rphidof_barrel )
+      if ( (fabs(trk_eta->at(it))<=barrelEta && chi2rphidof>maxChi2rphidof_barrel) || (fabs(trk_eta->at(it))>barrelEta && chi2rphidof>maxChi2rphidof_disk) )
 	continue;
 
       if(trk_fake->at(it)==1 && isPrimary){
@@ -1865,20 +1890,20 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_pt_np_chi2rphidofCuts->Fill(trk_pt->at(it));
 	numPart_np_chi2rphidofCuts[partId]++;
       }
-
+#if 0
       if(trk_MVA2->at(it)<minMVA2)
 	continue;
-#if 0
+
       if(trk_MVA2->at(it)<minMVA2_D && fabs(trk_d0->at(it))>1 )
 	continue;
-#endif
+
       if(trk_MVA1->at(it)<minMVA1)
 	continue;
 
       if(trk_MVA1->at(it)<minMVA1_D && fabs(trk_d0->at(it))>1 )
 	continue;
-
-      if(fabs(trk_eta->at(it))>1.1 && fabs(trk_eta->at(it))<1.7 && trk_nstub->at(it)<5)
+#endif
+      if(fabs(trk_eta->at(it))>1.0 && fabs(trk_eta->at(it))<1.7 && trk_nstub->at(it)<5)
 	continue;
 
       //Kinematic Cuts
@@ -1984,10 +2009,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_pt_np_ptCuts->Fill(trk_pt->at(it));
 	numPart_np_ptCuts[partId]++;
       }
-#if 0
+
       if (std::fabs(trk_d0->at(it))>TP_maxD0)
 	continue;
-#endif
+
 
       if ( (fabs(trk_eta->at(it))<=barrelEta && std::fabs(trk_d0->at(it))<TP_minD0_barrel) || (fabs(trk_eta->at(it))>barrelEta && std::fabs(trk_d0->at(it))<TP_minD0_disk) )
 	continue;
@@ -2050,10 +2075,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trk_chi2rzdof_D->Fill(chi2rzdof);
 	h_trk_bendchi2_D->Fill(trk_bendchi2 ->at(it));
       }
-#if 0
+
       if( fabs(trk_z0->at(it))>TP_maxZ0 )
 	continue;
-#endif
+
       if(trk_fake->at(it)==1 && isPrimary){
 	h_trk_pt_primary_z0Cuts->Fill(trk_pt->at(it));
 	numPart_primary_z0Cuts[partId]++;
@@ -2352,10 +2377,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
 	 
       h_tp_d0->Fill(tp_d0->at(it));
-#if 0
+
       if (std::fabs(tmp_d0) > TP_maxD0)
 	continue;
-#endif
+
       h_tp_pt_maxD0Cut->Fill(tp_pt->at(it));
       h_tp_eta_maxD0Cut->Fill(tp_eta->at(it));
       h_tp_d0_maxD0Cut->Fill(tp_d0->at(it));
@@ -2418,10 +2443,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_match_tp_eta_maxEtaCut->Fill(tp_eta->at(it));
 	h_match_tp_d0_maxEtaCut->Fill(tp_d0->at(it));
       }
-#if 0
+
       if( fabs(tp_z0->at(it))>TP_maxZ0 )
 	continue;
-#endif
+
       h_tp_pt_allCuts->Fill(tp_pt->at(it));
       h_tp_eta_allCuts->Fill(tp_eta->at(it));
       h_tp_d0_allCuts->Fill(tp_d0->at(it));
@@ -2656,9 +2681,11 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
       if(trueVertices.size()>0){
 	h_all_oneMatch_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
+	h_all_oneMatch_trueVertex_ptLog->Fill(trueVertices[maxPT_i].a.pt);
 	h_all_oneMatch_trueVertex_lowPt->Fill(trueVertices[maxPT_i].b.pt);
 	h_all_oneMatch_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
 	h_all_oneMatch_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
+	h_all_oneMatch_trueVertex_dxyLog->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
       }
     }
     
@@ -2892,9 +2919,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  //if(fabs(trackBin[0].z(x_dv_trk,y_dv_trk)-trackBin[j].z(x_dv_trk,y_dv_trk))< 1.05 && dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackVertices.size()<2 && cos_T > 0.97 && d_T < .02 && R_T > 0.5 && (trackBin[0].charge+trackBin[j].charge)==0 && chi2rzdofSum<4 && numStubsSum>9 && (fabs(trackBin[0].d0)>0.2 || fabs(trackBin[j].d0)>0.2) ){ //vertex cuts from grid search
 	    Vertex_Parameters trackVert = Vertex_Parameters(x_dv_trk, y_dv_trk, z_dv_trk, trackBin[0], trackBin[j], score, inTraj);
 	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackVert.bendchi2Sum<bendChi2Max && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.cos_T>cosTMin && trackVert.delta_z<deltaZMax && trackVert.R_T>2 && trackBin[0].charge+trackBin[j].charge==0 ){ //vertex cuts go here
-	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.chi2rzdofSum<chi2RZMax && trackVert.cos_T>cosTMin && trackVert.delta_z<deltaZMax && trackVert.delta_eta<deltaEtaMax && trackVert.delta_eta>deltaEtaMin && trackVert.d_T<dTMax){ //vertex cuts go here
+	    if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.chi2rzdofSum<chi2RZMax && trackVert.cos_T>cosTMin && trackVert.delta_z<deltaZMax && trackVert.delta_eta<deltaEtaMax && trackVert.delta_eta>deltaEtaMin && trackVert.d_T<dTMax){ //vertex cuts go here
 	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 ){ //vertex cuts go here
-	    if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 && trackVert.bendchi2Sum<bendChi2Max && trackVert.cos_T>cosTMin && trackVert.delta_eta<deltaEtaMax && trackVert.delta_z<deltaZMax && trackVert.R_T>0.25 && trackVert.a.pt>13.0 && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.numStubsSum>10 && (fabs(trackBin[0].d0)>0.3 || fabs(trackBin[j].d0)>0.3) ){ //vertex cuts go here
+	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 && trackVert.bendchi2Sum<bendChi2Max && trackVert.cos_T>cosTMin && trackVert.delta_eta<deltaEtaMax && trackVert.delta_z<deltaZMax && trackVert.R_T>0.25 && trackVert.a.pt>13.0 && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.numStubsSum>10 && (fabs(trackBin[0].d0)>0.3 || fabs(trackBin[j].d0)>0.3) ){ //vertex cuts go here
 	      for(uint k=1; k<selectedTracks.size(); k++){
 		if(selectedTracks[k]==trackBin[0] || selectedTracks[k]==trackBin[j]) continue;
 		float delxy = dist_Vertex(x_dv_trk,y_dv_trk,selectedTracks[k]);
@@ -2905,7 +2932,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	      }
 
 	      h_trackVertex_inTraj->Fill(inTraj);
-	      trackVertices.push_back(trackVert);
+	      //trackVertices.push_back(trackVert);
 	      vertexCandidates.push_back(trackVert);
 	      //std::cout<<"track vertex candidate: "<<x_dv_trk<<" "<<y_dv_trk<<" "<<z_dv_trk<<" tp_pt: "<<trackBin[0].tp->pt<<" "<<trackBin[j].tp->pt<<std::endl;
 	    }
@@ -2957,6 +2984,18 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  }
 	}
 
+	if(vertexCandidates.size()>0){
+	  trackVertices.push_back(vertexCandidates.back());
+	  for(uint i=0; i<trackBin.size();){
+	    if(trackBin[i]==vertexCandidates[0].b){
+	      trackBin.erase(trackBin.begin()+i);
+	    }
+	    else{
+	      i++;
+	    }
+	  }
+	}
+
 	sort(vertexCandidates.begin(),vertexCandidates.end(),CompareChi2rphidofSumVert);
 	for(uint i=0; i<vertexCandidates.size(); i++){
 	  for(uint j=0; j<trueVertices.size(); j++){
@@ -2977,19 +3016,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    if(numMatched>=2) h_trackVertex_rankRt_vs_numVertPerTrack->Fill(vertexCandidates.size(),i);
 	  }
 	}
-#if 0
-	if(vertexCandidates.size()>0){
-	  trackVertices.push_back(vertexCandidates[0]);
-	  for(uint i=0; i<trackBin.size();){
-	    if(trackBin[i]==vertexCandidates[0].b){
-	      trackBin.erase(trackBin.begin()+i);
-	    }
-	    else{
-	      i++;
-	    }
-	  }
-	}
-#endif	
+
+	
+
       }
     }
     if(binVariable!=""){
@@ -3633,9 +3662,11 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       
     if(oneMatch){
       h_correct_oneMatch_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
+      h_correct_oneMatch_trueVertex_ptLog->Fill(trueVertices[maxPT_i].a.pt);
       h_correct_oneMatch_trueVertex_lowPt->Fill(trueVertices[maxPT_i].b.pt);
       h_correct_oneMatch_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
       h_correct_oneMatch_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
+      h_correct_oneMatch_trueVertex_dxyLog->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
       h_correct_oneMatchAlt_trueVertex_pt->Fill(trueVertices[firstMatch_j].a.pt);
       h_correct_oneMatchAlt_trueVertex_eta->Fill(trueVertices[firstMatch_j].a.eta);
       h_correct_oneMatchAlt_trueVertex_dxy->Fill(dist(trueVertices[firstMatch_j].x_dv,trueVertices[firstMatch_j].y_dv));
@@ -10661,13 +10692,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TF1* fit;
   fit = new TF1("fit", "gaus", -1, 1);
   removeFlows(h_res_tp_trk_x);
+  raiseMax(h_res_tp_trk_x);
   h_res_tp_trk_x->Fit("fit","R");
   h_res_tp_trk_x->SetStats(0);
   h_res_tp_trk_x->Draw();
   rms = fit->GetParameter(2);
   sprintf(res, "RMS = %.4f", rms);
   mySmallText(0.22, 0.82, 1, res);
-  mySmallText(0.4, 0.42, 1, ctxt);
+  mySmallText(0.3, 0.9, 1, ctxt);
   h_res_tp_trk_x->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_res_tp_trk_x->GetName() + ".pdf");
   delete h_res_tp_trk_x;
@@ -10701,13 +10733,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
   fit = new TF1("fit", "gaus", -1, 1);
   removeFlows(h_res_tp_trk_y);
+  raiseMax(h_res_tp_trk_y);
   h_res_tp_trk_y->Fit("fit","R");
   h_res_tp_trk_y->SetStats(0);
   h_res_tp_trk_y->Draw();
   rms = fit->GetParameter(2);
   sprintf(res, "RMS = %.4f", rms);
   mySmallText(0.22, 0.82, 1, res);
-  mySmallText(0.4, 0.42, 1, ctxt);
+  mySmallText(0.3, 0.9, 1, ctxt);
   h_res_tp_trk_y->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_res_tp_trk_y->GetName() + ".pdf");
   delete h_res_tp_trk_y;
@@ -10767,13 +10800,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
   fit = new TF1("fit", "gaus", -10, 10);
   removeFlows(h_res_tp_trk_z);
+  raiseMax(h_res_tp_trk_z);
   h_res_tp_trk_z->Fit("fit");
   h_res_tp_trk_z->SetStats(0);
   h_res_tp_trk_z->Draw();
   rms = fit->GetParameter(2);
   sprintf(res, "RMS = %.4f", rms);
   mySmallText(0.22, 0.82, 1, res);
-  mySmallText(0.4, 0.42, 1, ctxt);
+  mySmallText(0.3, 0.9, 1, ctxt);
   h_res_tp_trk_z->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_res_tp_trk_z->GetName() + ".pdf");
   delete h_res_tp_trk_z;
@@ -11105,6 +11139,46 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_eff_trueVertex_lowPt;
   delete h_all_trueVertex_lowPt;
   delete h_correct_trueVertex_lowPt;
+
+  h_all_oneMatch_trueVertex_ptLog->Sumw2();
+  h_correct_oneMatch_trueVertex_ptLog->Sumw2();
+  TH1F* h_eff_oneMatch_trueVertex_ptLog = (TH1F*)h_correct_oneMatch_trueVertex_ptLog->Clone();
+  h_eff_oneMatch_trueVertex_ptLog->GetYaxis()->SetNoExponent(kTRUE);
+  removeFlows(h_all_oneMatch_trueVertex_ptLog);
+  removeFlows(h_correct_oneMatch_trueVertex_ptLog);
+  h_eff_oneMatch_trueVertex_ptLog->SetName("eff_oneMatch_trueVertex_ptLog");
+  h_eff_oneMatch_trueVertex_ptLog->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
+  h_eff_oneMatch_trueVertex_ptLog->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatch_trueVertex_ptLog->Divide(h_correct_oneMatch_trueVertex_ptLog,h_all_oneMatch_trueVertex_ptLog, 1.0, 1.0, "B");
+  h_eff_oneMatch_trueVertex_ptLog->SetStats(0);
+  h_eff_oneMatch_trueVertex_ptLog->Draw();
+  h_eff_oneMatch_trueVertex_ptLog->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatch_trueVertex_ptLog->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatch_trueVertex_ptLog->GetName() + ".pdf");
+  delete h_eff_oneMatch_trueVertex_ptLog;
+  delete h_all_oneMatch_trueVertex_ptLog;
+  delete h_correct_oneMatch_trueVertex_ptLog;
+
+  h_all_oneMatch_trueVertex_dxyLog->Sumw2();
+  h_correct_oneMatch_trueVertex_dxyLog->Sumw2();
+  TH1F* h_eff_oneMatch_trueVertex_dxyLog = (TH1F*)h_correct_oneMatch_trueVertex_dxyLog->Clone();
+  h_eff_oneMatch_trueVertex_dxyLog->GetYaxis()->SetNoExponent(kTRUE);
+  removeFlows(h_all_oneMatch_trueVertex_dxyLog);
+  removeFlows(h_correct_oneMatch_trueVertex_dxyLog);
+  h_eff_oneMatch_trueVertex_dxyLog->SetName("eff_oneMatch_trueVertex_dxyLog");
+  h_eff_oneMatch_trueVertex_dxyLog->GetXaxis()->SetTitle("Vertex d_{xy} (cm)");
+  h_eff_oneMatch_trueVertex_dxyLog->GetYaxis()->SetTitle("Efficiency");
+  h_eff_oneMatch_trueVertex_dxyLog->Divide(h_correct_oneMatch_trueVertex_dxyLog,h_all_oneMatch_trueVertex_dxyLog, 1.0, 1.0, "B");
+  h_eff_oneMatch_trueVertex_dxyLog->SetStats(0);
+  h_eff_oneMatch_trueVertex_dxyLog->Draw();
+  h_eff_oneMatch_trueVertex_dxyLog->SetAxisRange(0, 1.1, "Y");
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_eff_oneMatch_trueVertex_dxyLog->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_eff_oneMatch_trueVertex_dxyLog->GetName() + ".pdf");
+  delete h_eff_oneMatch_trueVertex_dxyLog;
+  delete h_all_oneMatch_trueVertex_dxyLog;
+  delete h_correct_oneMatch_trueVertex_dxyLog;
 
   h_all_oneMatch_trueVertex_pt->Sumw2();
   h_correct_oneMatch_trueVertex_pt->Sumw2();
