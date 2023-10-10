@@ -37,6 +37,8 @@
 #include <TF2.h>
 #include <TEllipse.h>
 #include <TMarker.h>
+#include <chrono>
+#include <boost/variant.hpp>
 using namespace std;
 
 bool VERBOSE[]={false,false,false,false};
@@ -312,16 +314,57 @@ void displayProgress(long current, long max)
   cerr.flush();
 }
 
-template <typename T>
-void raiseMax(T *hist1, T *hist2=nullptr)
+template <typename T, typename S = TH1F>
+void raiseMax(T *hist1, S *hist2=nullptr, T *hist3=nullptr, T *hist4=nullptr)
 {
   Double_t max = hist1->GetMaximum();
   if(hist2!=nullptr){
     Double_t max2 = hist2->GetMaximum();
     if(max2>max) max = max2;
   }
+  if(hist3!=nullptr){
+    Double_t max3 = hist3->GetMaximum();
+    if(max3>max) max = max3;
+  }
+  if(hist4!=nullptr){
+    Double_t max4 = hist4->GetMaximum();
+    if(max4>max) max = max4;
+  }
   if(max>0.0){
     hist1->GetYaxis()->SetRangeUser(0.,1.2*max);
+    if(hist2!=nullptr) hist2->GetYaxis()->SetRangeUser(0.,1.2*max);
+    if(hist3!=nullptr) hist3->GetYaxis()->SetRangeUser(0.,1.2*max);
+    if(hist4!=nullptr) hist4->GetYaxis()->SetRangeUser(0.,1.2*max);
+  }
+}
+
+template <typename T, typename S>
+void drawSame(T *hist1, S *hist2, T *hist3=nullptr, T *hist4=nullptr)
+{
+  if(hist1->GetMaximum()!=0.0){
+    hist1->Draw("HIST");
+    hist2->Draw("HIST,SAME");
+    if(hist3!=nullptr) hist3->Draw("HIST,SAME");
+    if(hist4!=nullptr) hist4->Draw("HIST,SAME");
+  }
+  else if(hist2->GetMaximum()!=0.0){
+    hist2->Draw("HIST");
+    if(hist3!=nullptr) hist3->Draw("HIST,SAME");
+    if(hist4!=nullptr) hist4->Draw("HIST,SAME");
+  }
+  else if(hist3!=nullptr){
+    if(hist3->GetMaximum()!=0.0){
+      hist3->Draw("HIST");
+      if(hist4!=nullptr) hist4->Draw("HIST,SAME");
+    }
+  }
+  else if(hist4!=nullptr){
+    if(hist4->GetMaximum()!=0.0){
+      hist4->Draw("HIST");
+    }
+  }
+  else{
+    hist1->Draw("HIST");
   }
 }
 
@@ -792,7 +835,130 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertTree->SetBranchAddress("vert_z", &vert_z, &b_vert_z);
   tree->AddFriend(vertTree);
 #endif  
+  using milli = std::chrono::milliseconds;
+  typedef boost::variant<vector<float>**,vector<int>**> boostVector;
+  std::map<TString, std::pair<boostVector, float> > preselCuts{{{"maxEta",{&trk_eta,2.4}}, {"maxChi2rzdof",{&trk_chi2rz,3.0}}, {"maxChi2rphidof_barrel",{&trk_chi2rphi, 5.0}}, {"minMVA2",{&trk_MVA2,0.2}},{"minMVA1",{&trk_MVA1,0.2}}, {"minMVA1_D",{&trk_MVA1,0.8}}, {"minNumStub_overlap",{&trk_nstub,5}}, {"minPt",{&trk_pt,3.0}}, {"minD0_barrel",{&trk_d0,0.06}}, {"minD0_disk",{&trk_d0,0.08}}}};
+  std::map<TString, std::pair<boostVector, float> > preselCutsTP{{{"maxEta",{&tp_eta,2.4}}, {"minPt",{&tp_pt,3.0}}, {"minD0_barrel",{&tp_d0,0.06}}, {"minD0_disk",{&tp_d0,0.08}}}};
 
+  std::map<std::vector<TString>,std::pair<boostVector,std::vector<float>> > varCutFlows = { {{"d0","cm"},{&trk_d0,{200,-2.0,2.0}}},
+													{{"pt","GeV"},{&trk_pt,{200,0.0,100.0}}},
+													{{"eta",""},{&trk_eta,{50,-2.5,2.5}}},
+													{{"z0","cm"},{&trk_z0,{100,-20.0,20.0}}},
+													{{"phi",""},{&trk_phi,{100,-2*TMath::Pi(),2*TMath::Pi()}}},
+													{{"sectorPhi",""},{&trk_phi,{100,-1.0,1.0}}},
+													{{"MVA1",""},{&trk_MVA1,{100,0.0,1.0}}},
+													{{"MVA2",""},{&trk_MVA2,{100,0.0,1.0}}},
+													{{"chi2rphidof",""},{&trk_chi2rphi,{100,0.0,6.0}}},
+													{{"chi2rzdof",""},{&trk_chi2rz,{100,0.0,6.0}}},
+													{{"bendchi2",""},{&trk_bendchi2,{100,0.0,10.0}}}
+  };
+  
+  std::map<std::vector<TString>,std::pair<boostVector,std::vector<float>> > varCutFlowsTP = { {{"d0","cm"},{&tp_d0,{200,-2.0,2.0}}},
+													  {{"pt","GeV"},{&tp_pt,{200,0.0,100.0}}},
+													  {{"eta",""},{&tp_eta,{50,-2.5,2.5}}},
+													  {{"z0","cm"},{&tp_z0,{100,-20.0,20.0}}},
+													  {{"phi",""},{&tp_phi,{100,-2*TMath::Pi(),2*TMath::Pi()}}},
+													  {{"sectorPhi",""},{&tp_phi,{100,-1.0,1.0}}},
+													  {{"dxy","cm"},{&tp_dxy,{50,-2.0,2.0}}}
+  };
+
+  std::map<std::vector<TString>,std::pair<std::vector<boostVector>,std::vector<float>> > varCutFlows2D = { {{"d0","cm","pt","GeV"},{{&trk_d0,&trk_pt},{200,-2.0,2.0,200,0.0,30.0}}},
+														       {{"eta","","pt","GeV"},{{&trk_eta,&trk_pt},{200,-2.4,2.4,200,0.0,30.0}}},
+														       {{"d0","cm","eta",""},{{&trk_d0,&trk_eta},{200,-2.0,2.0,200,-2.4,2.4}}},
+														       {{"eta","","nstub",""},{{&trk_eta,&trk_nstub},{200,-2.4,2.4,7,0.0,7.0}}}
+  };
+
+  std::map<std::vector<TString>,std::pair<std::vector<boostVector>,std::vector<float>> > varCutFlowsTP2D = { {{"d0","cm","pt","GeV"},{{&tp_d0,&tp_pt},{200,-2.0,2.0,200,0.0,30.0}}},
+															 {{"eta","","pt","GeV"},{{&tp_eta,&tp_pt},{200,-2.4,2.4,200,0.0,30.0}}},
+															 {{"d0","cm","eta",""},{{&tp_d0,&tp_eta},{200,-2.0,2.0,200,-2.4,2.4}}},
+															 {{"eta","","nstub",""},{{&tp_eta,&tp_nstub},{200,-2.4,2.4,7,0.0,7.0}}}
+  };
+    
+  std::vector<TString> trackType = {"primary","np","fake","PU","notHiggs"};
+  std::vector<TString> tpType = {"primary","np","PU","notHiggs","match",""};
+  std::vector<TString> plotModifiers = {"","_H","_L","_P","_D","_barrel","_disk"};
+  if(!detailedPlots) plotModifiers = {""};
+  TH1F* preselCutFlows[varCutFlows.size()][trackType.size()][preselCuts.size()][plotModifiers.size()];
+  TH2F* preselCutFlows2D[varCutFlows2D.size()][trackType.size()][preselCuts.size()][plotModifiers.size()];
+  TH1F* preselCutFlowsTP[varCutFlowsTP.size()][tpType.size()][preselCutsTP.size()][plotModifiers.size()];
+  TH2F* preselCutFlowsTP2D[varCutFlowsTP2D.size()][tpType.size()][preselCutsTP.size()][plotModifiers.size()];
+  std::map<string,int> numPartCutFlows[trackType.size()][preselCuts.size()];
+  std::map<string,int> numPartCutFlowsTP[tpType.size()][preselCutsTP.size()];
+  
+  int it_counter = 0;
+  for(auto it=varCutFlows.cbegin(); it!=varCutFlows.cend(); ++it){
+    for(uint i=0; i<trackType.size(); ++i){
+      int jt_counter = 0;
+      for(auto jt=preselCuts.cbegin(); jt!=preselCuts.cend(); ++jt){
+	for(uint j=0; j<plotModifiers.size(); ++j){
+	  TString name = "h_trk_"+it->first.at(0)+"_"+trackType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
+	  float binWidth = (it->second.second.at(2) - it->second.second.at(1)) / it->second.second.at(0);
+	  TString binLabel = std::to_string(binWidth);
+	  TString labels = name+"; Track "+it->first.at(0)+" ("+it->first.at(1)+") ; Events / "+binLabel+" "+it->first.at(1);
+	  TH1F* hist = new TH1F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2));
+	  preselCutFlows[it_counter][i][jt_counter][j] = hist;
+	}
+	jt_counter++;
+      }
+    }
+    it_counter++;
+  }
+  
+  it_counter = 0;
+  for(auto it=varCutFlows2D.cbegin(); it!=varCutFlows2D.cend(); ++it){
+    for(uint i=0; i<trackType.size(); ++i){
+      int jt_counter = 0;
+      for(auto jt=preselCuts.cbegin(); jt!=preselCuts.cend(); ++jt){
+	for(uint j=0; j<plotModifiers.size(); ++j){
+	  TString name = "h_trk_"+it->first.at(2)+"_vs_"+it->first.at(0)+"_"+trackType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
+	  TString labels = name+"; Track "+it->first.at(0)+" ("+it->first.at(1)+") ; Track "+it->first.at(2)+" ("+it->first.at(3)+")";
+	  TH2F* hist = new TH2F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2),it->second.second.at(3),it->second.second.at(4),it->second.second.at(5));
+	  preselCutFlows2D[it_counter][i][jt_counter][j] = hist;	  
+	}
+	jt_counter++;
+      }
+    }
+    it_counter++;
+  }
+  
+  it_counter = 0;
+  for(auto it=varCutFlowsTP.cbegin(); it!=varCutFlowsTP.cend(); ++it){
+    for(uint i=0; i<tpType.size(); ++i){
+      int jt_counter = 0;
+      for(auto jt=preselCutsTP.cbegin(); jt!=preselCutsTP.cend(); ++jt){
+	TString cutName = jt->first;
+	for(uint j=0; j<plotModifiers.size(); ++j){
+	  TString name = "h_tp_"+it->first.at(0)+"_"+tpType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
+	  float binWidth = (it->second.second.at(2) - it->second.second.at(1)) / it->second.second.at(0);
+	  TString binLabel = std::to_string(binWidth);
+	  TString labels = name+"; Tp "+it->first.at(0)+" ("+it->first.at(1)+") ; Events / "+binLabel+" "+it->first.at(1);
+	  TH1F* hist = new TH1F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2));
+	  preselCutFlowsTP[it_counter][i][jt_counter][j] = hist;
+	}
+	jt_counter++;
+      }
+    }
+    it_counter++;
+  }
+  
+  it_counter = 0;
+  for(auto it=varCutFlowsTP2D.cbegin(); it!=varCutFlowsTP2D.cend(); ++it){
+    for(uint i=0; i<tpType.size(); ++i){
+      int jt_counter = 0;
+      for(auto jt=preselCutsTP.cbegin(); jt!=preselCutsTP.cend(); ++jt){
+	TString cutName = jt->first;
+	for(uint j=0; j<plotModifiers.size(); ++j){
+	  TString name = "h_tp_"+it->first.at(2)+"_vs_"+it->first.at(0)+"_"+tpType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
+	  TString labels = name+"; Tp "+it->first.at(0)+" ("+it->first.at(1)+") ; Tp "+it->first.at(2)+" ("+it->first.at(3)+")";
+	  TH2F* hist = new TH2F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2),it->second.second.at(3),it->second.second.at(4),it->second.second.at(5));
+	  preselCutFlowsTP2D[it_counter][i][jt_counter][j] = hist;
+	}
+	jt_counter++;
+      }
+    }
+    it_counter++;
+  }
+  
   TH1F *h_trk_d0 = new TH1F("h_trk_d0","h_trk_d0; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_primary = new TH1F("h_trk_d0_primary","h_trk_d0_primary; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
   TH1F *h_trk_d0_primary_noCuts = new TH1F("h_trk_d0_primary_noCuts","h_trk_d0_primary_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
@@ -1450,7 +1616,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH2F *h_trackVertex_rankDt_vs_numVertPerTrack = new TH2F("h_trackVertex_rankDt_vs_numVertPerTrack","h_trackVertex_rankDt_vs_numVertPerTrack; Vertices Associated with Track; Ranking of Vertex d_{T} / 1.0",20,0,20,20,0,20);
   TH2F *h_trackVertex_rankChi2rphidofSum_vs_numVertPerTrack = new TH2F("h_trackVertex_rankChi2rphidofSum_vs_numVertPerTrack","h_trackVertex_rankChi2rphidofSum_vs_numVertPerTrack; Vertices Associated with Track; Ranking of Vertex #Sigma #chi^{2}_{r#phi}/d.o.f / 1.0",20,0,20,20,0,20);
   TH2F *h_trackVertex_rankRt_vs_numVertPerTrack = new TH2F("h_trackVertex_rankRt_vs_numVertPerTrack","h_trackVertex_rankRt_vs_numVertPerTrack; Vertices Associated with Track; Ranking of Vertex R_{T} / 1.0",20,0,20,20,0,20);
-
+  
   std::string binVariable = "";
   std::vector<std::vector<double>> track_bins = {{-1,1}};
   std::vector<std::vector<double>> z0_bins;
@@ -1571,10 +1737,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     }
   }
   
-
   if (tree == 0) return;
   Long64_t nevt = tree->GetEntries();
-  //nevt = 277;
+  nevt = 1;
   Vertex_Parameters geomTrackVertex;
   Vertex_Parameters geomTrueVertex;
 
@@ -1605,594 +1770,120 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     // ----------------------------------------------------------------------------------------------------------------
     // track loop
     for (int it = 0; it < (int)trk_pt->size(); it++){
-
-      if(trk_matchtp_pt->at(it)!= -999 && find(matchtp_pt_noCuts_vec.begin(),matchtp_pt_noCuts_vec.end(),trk_matchtp_pt->at(it))==matchtp_pt_noCuts_vec.end() ){
-	matchtp_pt_noCuts_vec.push_back(trk_matchtp_pt->at(it));
-      }
-      h_trk_pt_noCuts->Fill(trk_pt->at(it));
-
-      float sectorphi = trk_phi->at(it);                                                                                       
-      while (sectorphi < -TMath::Pi()/9 ) sectorphi += 2*TMath::Pi();                           
-      while (sectorphi > TMath::Pi()*2 ) sectorphi -= 2*TMath::Pi();                                                          
-      while (sectorphi > TMath::Pi()/9) sectorphi -= 2*TMath::Pi()/9;
-      int ndof = 2 * trk_nstub->at(it) - 5;
-      float chi2rphidof = (float)trk_chi2rphi->at(it) / ndof;
-      float chi2rzdof = (float)trk_chi2rz->at(it) / ndof;
       bool isPrimary = true;
       if(inputFile.Contains("DarkPhoton")) isPrimary = trk_matchtp_isHToMu->at(it);
       if(inputFile.Contains("DisplacedTrackJet")) isPrimary = trk_matchtp_isHToB->at(it);
-
-      //tracker acceptance cut, placing here so denominator doesn't include these unphysical tracks
-      if (fabs(trk_eta->at(it)) > TP_maxEta)
-	continue;
-
-      string partId = to_string(trk_matchtp_pdgid->at(it));
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_eta_primary_noCuts->Fill(trk_eta->at(it));
-	h_trk_pt_primary_noCuts->Fill(trk_pt->at(it));
-	h_trk_d0_primary_noCuts->Fill(trk_d0->at(it));
-	h_trk_d0_primary_noCuts_zoomOut->Fill(trk_d0->at(it));
-	h_trk_z0_primary_noCuts->Fill(trk_z0->at(it));
-	h_trk_z0_primary_noCuts_zoomOut->Fill(trk_z0->at(it));
-	h_trk_phi_primary_noCuts->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_primary_noCuts->Fill(sectorphi);
-	h_trk_chi2rphidof_primary_noCuts->Fill(chi2rphidof);
-	h_trk_chi2rphidof_primary_noCuts_zoomOut->Fill(chi2rphidof);
-	h_trk_MVA1_primary_noCuts->Fill(trk_MVA1->at(it));
-	h_trk_MVA2_primary_noCuts->Fill(trk_MVA2->at(it));
-	h_trk_chi2rzdof_primary_noCuts->Fill(chi2rzdof);
-	h_trk_chi2rzdof_primary_noCuts_zoomOut->Fill(chi2rzdof);
-	h_trk_bendchi2_primary_noCuts->Fill(trk_bendchi2->at(it));
-	h_trk_bendchi2_primary_noCuts_zoomOut->Fill(trk_bendchi2->at(it));
-	if(numPart_primary_noCuts.count(partId)){
-	  numPart_primary_noCuts[partId]++;
+      //std::cout<<"track pt: "<<trk_pt->at(it)<<" eta: "<<trk_eta->at(it)<<" d0 : "<<trk_d0->at(it)<<" phi: "<<trk_phi->at(it)<<" z0: "<<trk_z0->at(it)<<" nstub: "<<trk_nstub<<std::endl;
+      uint icut_counter = 0;
+      for(auto icut=preselCuts.cbegin(); icut!=preselCuts.cend(); ++icut){
+	bool mods = true;
+	float param;
+	if(icut->second.first.type() == typeid(std::vector<float>**)){
+	  std::vector<float>** paramVector = boost::get<std::vector<float>**>(icut->second.first);
+	  param = (*paramVector)->at(it);
 	}
 	else{
-	  numPart_primary_noCuts[partId] = 1;
-	  numPart_primary_chi2rzdofCuts[partId] = 0;
-	  numPart_primary_bendchi2Cuts[partId] = 0;
-	  numPart_primary_chi2rphidofCuts[partId] = 0;
-	  numPart_primary_nstubCuts[partId] = 0;
-	  numPart_primary_ptCuts[partId] = 0;
-	  numPart_primary_d0Cuts[partId] = 0;
-	  numPart_primary_z0Cuts[partId] = 0;
+	  std::vector<int>** paramVector = boost::get<std::vector<int>**>(icut->second.first);
+	  int tmp_param = (*paramVector)->at(it);
+	  param = float(tmp_param);
 	}
-	if(trk_pt->at(it) > 10){
-	  h_trk_eta_primary_noCuts_H->Fill(trk_eta->at(it));
-	  h_trk_d0_primary_noCuts_H->Fill(trk_d0->at(it));
-	  h_trk_z0_primary_noCuts_H->Fill(trk_z0->at(it));
-	  h_trk_phi_primary_noCuts_H->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_primary_noCuts_H->Fill(sectorphi);
-	  h_trk_chi2rphidof_primary_noCuts_H->Fill(chi2rphidof);
-	  h_trk_MVA1_primary_noCuts_H->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_primary_noCuts_H->Fill(chi2rzdof);
-	  h_trk_bendchi2_primary_noCuts_H->Fill(trk_bendchi2->at(it));
+	TString cutName = icut->first;
+	float cutValue = icut->second.second;
+	if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
+	//std::cout<<"cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
+	if(cutName.Contains("barrel") && fabs(trk_eta->at(it))>barrelEta) mods = false;
+	if(cutName.Contains("disk") && fabs(trk_eta->at(it))<=barrelEta) mods = false;
+	if(cutName.Contains("_D") && fabs(trk_d0->at(it))<=1 ) mods = false;
+	if(cutName.Contains("overlap") && (fabs(trk_eta->at(it))<=1.1 || fabs(trk_eta->at(it))>=1.7)) mods = false;
+	if(cutName.Contains("dof")) param /= 2*trk_nstub->at(it) - 5;
+	if(mods){
+	  if(cutName.Contains("max") && param>cutValue) break;
+	  if(cutName.Contains("min") && param<cutValue) break;
 	}
-	else{
-	  h_trk_eta_primary_noCuts_L->Fill(trk_eta->at(it));
-	  h_trk_d0_primary_noCuts_L->Fill(trk_d0->at(it));
-	  h_trk_z0_primary_noCuts_L->Fill(trk_z0->at(it));
-	  h_trk_phi_primary_noCuts_L->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_primary_noCuts_L->Fill(sectorphi);
-	  h_trk_chi2rphidof_primary_noCuts_L->Fill(chi2rphidof);
-	  h_trk_MVA1_primary_noCuts_L->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_primary_noCuts_L->Fill(chi2rzdof);
-	  h_trk_bendchi2_primary_noCuts_L->Fill(trk_bendchi2->at(it));
+	//std::cout<<"passed cut"<<std::endl;
+	for(uint i=0; i<trackType.size(); ++i){
+	  bool primary = trk_fake->at(it)==1 && isPrimary;
+	  if(trackType[i]=="primary" && !primary) continue;
+	  if(trackType[i]=="np" && primary) continue;
+	  if(trackType[i]=="fake" && trk_fake->at(it)!=0) continue;
+	  if(trackType[i]=="PU" && trk_fake->at(it)!=2) continue;
+	  if(trackType[i]=="notHiggs" && !(trk_fake->at(it)==1 && !isPrimary)) continue;
+	  string partId = to_string(trk_matchtp_pdgid->at(it));
+	  numPartCutFlows[i][icut_counter][partId]++;
+	  for(uint j=0; j<plotModifiers.size(); ++j){
+	    if(plotModifiers[j]=="_H" && trk_pt->at(it)<=10) continue;
+	    if(plotModifiers[j]=="_L" && trk_pt->at(it)>10) continue;
+	    if(plotModifiers[j]=="_P" && fabs(trk_d0->at(it))>1) continue;
+	    if(plotModifiers[j]=="_D" && fabs(trk_d0->at(it))<=1) continue;
+	    if(plotModifiers[j]=="_barrel" && fabs(trk_eta->at(it))>barrelEta) continue;
+	    if(plotModifiers[j]=="_disk" && fabs(trk_eta->at(it))<=barrelEta) continue;
+	    int ivar_counter = 0;
+	    for(auto ivar=varCutFlows.cbegin(); ivar!=varCutFlows.cend(); ++ivar){
+	      if(ivar->second.first.type() == typeid(std::vector<float>**)){
+		std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar->second.first);
+		param = (*paramVector)->at(it);
+	      }
+	      else{
+		std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar->second.first);
+		int tmp_param = (*paramVector)->at(it);
+		param = float(tmp_param);
+	      }
+	      TString varName = ivar->first.at(0);
+	      if(varName.Contains("dof")) param /= 2*trk_nstub->at(it) - 5;
+	      if(varName.Contains("sector")){
+		while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
+		while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
+		while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
+	      }
+	      preselCutFlows[ivar_counter][i][icut_counter][j]->Fill(param);
+	      ivar_counter++;
+	    }
+	    int ivar2D_counter = 0;
+	    for(auto ivar2D=varCutFlows2D.cbegin(); ivar2D!=varCutFlows2D.cend(); ++ivar2D){
+	      std::vector<float> params;
+	      for(int k=0; k<2; ++k){
+		if(ivar2D->second.first.at(k).type() == typeid(std::vector<float>**)){
+		  std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar2D->second.first.at(k));
+		  param = (*paramVector)->at(it);
+		}
+		else{
+		  std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar2D->second.first.at(k));
+		  int tmp_param = (*paramVector)->at(it);
+		  param = float(tmp_param);
+		}
+		TString varName = ivar2D->first.at(2*k);
+		if(varName.Contains("dof")) param /= 2*trk_nstub->at(it) - 5;
+		if(varName.Contains("sector")){
+		  while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
+		  while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
+		  while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
+		}
+		params.push_back(param);
+	      }
+	      preselCutFlows2D[ivar2D_counter][i][icut_counter][j]->Fill(params[0],params[1]);
+	      ivar2D_counter++;
+	    }
+	  }
 	}
-	if( fabs(trk_eta->at(it))<=barrelEta ){
-	  h_trk_pt_primary_noCuts_barrel->Fill(trk_pt->at(it));
-	  h_trk_d0_primary_noCuts_barrel->Fill(trk_d0->at(it));
-	  h_trk_z0_primary_noCuts_barrel->Fill(trk_z0->at(it));
-	  h_trk_phi_primary_noCuts_barrel->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_primary_noCuts_barrel->Fill(sectorphi);
-	  h_trk_chi2rphidof_primary_noCuts_barrel->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_primary_noCuts_barrel->Fill(chi2rzdof);
-	  h_trk_bendchi2_primary_noCuts_barrel->Fill(trk_bendchi2->at(it));
+	icut_counter++;
+      }
+      if(icut_counter==preselCuts.size()){
+	Track_Parameters* tp_params = new Track_Parameters(trk_matchtp_pt->at(it), -1*trk_matchtp_d0->at(it), trk_matchtp_z0->at(it), trk_matchtp_eta->at(it), trk_matchtp_phi->at(it), trk_matchtp_pdgid->at(it), trk_matchtp_x->at(it), trk_matchtp_y->at(it), trk_matchtp_z->at(it));
+	for(uint i=0; i<track_bins.size(); i++){
+	  float trkVariable = 0.0;
+	  if(binVariable=="phi") trkVariable = trk_phi->at(it);
+	  if (binVariable=="z0") trkVariable = fabs(trk_z0->at(it));
+	  if(trkVariable<track_bins[i][1] && trkVariable>track_bins[i][0] ){
+	    binnedSelectedTracks[i].push_back(Track_Parameters(trk_pt->at(it), trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -99999, -999., -999., -999., trk_rinv->at(it), it, tp_params, trk_nstub->at(it), trk_chi2rphi->at(it), trk_chi2rz->at(it), trk_bendchi2->at(it), trk_MVA1->at(it), trk_MVA2->at(it)));
+	  }
 	}
-	else{
-	  h_trk_pt_primary_noCuts_disk->Fill(trk_pt->at(it));
-	  h_trk_d0_primary_noCuts_disk->Fill(trk_d0->at(it));
-	  h_trk_z0_primary_noCuts_disk->Fill(trk_z0->at(it));
-	  h_trk_phi_primary_noCuts_disk->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_primary_noCuts_disk->Fill(sectorphi);
-	  h_trk_chi2rphidof_primary_noCuts_disk->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_primary_noCuts_disk->Fill(chi2rzdof);
-	  h_trk_bendchi2_primary_noCuts_disk->Fill(trk_bendchi2->at(it));
-	}
+	
+	//std::cout<<"pushed track icut_counter: "<<icut_counter<<std::endl;
+	selectedTracks.push_back(Track_Parameters(trk_pt->at(it), trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -99999, -999., -999., -999., trk_rinv->at(it), it, tp_params, trk_nstub->at(it), trk_chi2rphi->at(it), trk_chi2rz->at(it), trk_bendchi2->at(it), trk_MVA1->at(it), trk_MVA2->at(it) ));
+	trkH_T += trk_pt->at(it);
+	std::valarray<float> trackPtVec = {trk_pt->at(it)*cos(trk_phi->at(it)),trk_pt->at(it)*sin(trk_phi->at(it))};
+	trkMET -= trackPtVec;
       }
-      else{
-	h_trk_eta_np_noCuts->Fill(trk_eta->at(it));
-	h_trk_pt_np_noCuts->Fill(trk_pt->at(it));
-	h_trk_d0_np_noCuts->Fill(trk_d0->at(it));
-	h_trk_d0_np_noCuts_zoomOut->Fill(trk_d0->at(it));
-	h_trk_z0_np_noCuts->Fill(trk_z0->at(it));
-	h_trk_z0_np_noCuts_zoomOut->Fill(trk_z0->at(it));
-	h_trk_phi_np_noCuts->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_np_noCuts->Fill(sectorphi);
-	h_trk_chi2rphidof_np_noCuts->Fill(chi2rphidof);
-	h_trk_chi2rphidof_np_noCuts_zoomOut->Fill(chi2rphidof);
-	h_trk_MVA1_np_noCuts->Fill(trk_MVA1->at(it));
-	h_trk_MVA2_np_noCuts->Fill(trk_MVA2->at(it));
-	h_trk_chi2rzdof_np_noCuts->Fill(chi2rzdof);
-	h_trk_chi2rzdof_np_noCuts_zoomOut->Fill(chi2rzdof);
-	h_trk_bendchi2_np_noCuts->Fill(trk_bendchi2->at(it));
-	h_trk_bendchi2_np_noCuts_zoomOut->Fill(trk_bendchi2->at(it));
-	if(numPart_np_noCuts.count(partId)){
-	  numPart_np_noCuts[partId]++;
-	}
-	else{
-	  numPart_np_noCuts[partId] = 1;
-	  numPart_np_chi2rzdofCuts[partId] = 0;
-	  numPart_np_bendchi2Cuts[partId] = 0;
-	  numPart_np_chi2rphidofCuts[partId] = 0;
-	  numPart_np_nstubCuts[partId] = 0;
-	  numPart_np_ptCuts[partId] = 0;
-	  numPart_np_d0Cuts[partId] = 0;
-	  numPart_np_z0Cuts[partId] = 0;
-	}
-	if(trk_pt->at(it) > 10){
-	  h_trk_eta_np_noCuts_H->Fill(trk_eta->at(it));
-	  h_trk_d0_np_noCuts_H->Fill(trk_d0->at(it));
-	  h_trk_z0_np_noCuts_H->Fill(trk_z0->at(it));
-	  h_trk_phi_np_noCuts_H->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_np_noCuts_H->Fill(sectorphi);
-	  h_trk_chi2rphidof_np_noCuts_H->Fill(chi2rphidof);
-	  h_trk_MVA1_np_noCuts_H->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_np_noCuts_H->Fill(chi2rzdof);
-	  h_trk_bendchi2_np_noCuts_H->Fill(trk_bendchi2->at(it));
-	}
-	else{
-	  h_trk_eta_np_noCuts_L->Fill(trk_eta->at(it));
-	  h_trk_d0_np_noCuts_L->Fill(trk_d0->at(it));
-	  h_trk_z0_np_noCuts_L->Fill(trk_z0->at(it));
-	  h_trk_phi_np_noCuts_L->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_np_noCuts_L->Fill(sectorphi);
-	  h_trk_chi2rphidof_np_noCuts_L->Fill(chi2rphidof);
-	  h_trk_MVA1_np_noCuts_L->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_np_noCuts_L->Fill(chi2rzdof);
-	  h_trk_bendchi2_np_noCuts_L->Fill(trk_bendchi2->at(it));
-	}
-	if(trk_fake->at(it)==0){
-	  h_trk_eta_fake_noCuts->Fill(trk_eta->at(it));
-	  h_trk_pt_fake_noCuts->Fill(trk_pt->at(it));
-	  h_trk_d0_fake_noCuts->Fill(trk_d0->at(it));
-	  h_trk_z0_fake_noCuts->Fill(trk_z0->at(it));
-	  h_trk_phi_fake_noCuts->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_fake_noCuts->Fill(sectorphi);
-	  h_trk_chi2rphidof_fake_noCuts->Fill(chi2rphidof);
-	  h_trk_MVA1_fake_noCuts->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_fake_noCuts->Fill(chi2rzdof);
-	  h_trk_bendchi2_fake_noCuts->Fill(trk_bendchi2->at(it));
-	}
-	if(trk_fake->at(it)==2){
-	  h_trk_eta_PU_noCuts->Fill(trk_eta->at(it));
-	  h_trk_pt_PU_noCuts->Fill(trk_pt->at(it));
-	  h_trk_d0_PU_noCuts->Fill(trk_d0->at(it));
-	  h_trk_z0_PU_noCuts->Fill(trk_z0->at(it));
-	  h_trk_phi_PU_noCuts->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_PU_noCuts->Fill(sectorphi);
-	  h_trk_chi2rphidof_PU_noCuts->Fill(chi2rphidof);
-	  h_trk_MVA1_PU_noCuts->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_PU_noCuts->Fill(chi2rzdof);
-	  h_trk_bendchi2_PU_noCuts->Fill(trk_bendchi2->at(it));
-	}
-	if(trk_fake->at(it)==1 && isPrimary==false){
-	  h_trk_eta_notHiggs_noCuts->Fill(trk_eta->at(it));
-	  h_trk_pt_notHiggs_noCuts->Fill(trk_pt->at(it));
-	  h_trk_d0_notHiggs_noCuts->Fill(trk_d0->at(it));
-	  h_trk_z0_notHiggs_noCuts->Fill(trk_z0->at(it));
-	  h_trk_phi_notHiggs_noCuts->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_notHiggs_noCuts->Fill(sectorphi);
-	  h_trk_chi2rphidof_notHiggs_noCuts->Fill(chi2rphidof);
-	  h_trk_MVA1_notHiggs_noCuts->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_notHiggs_noCuts->Fill(chi2rzdof);
-	  h_trk_bendchi2_notHiggs_noCuts->Fill(trk_bendchi2->at(it));
-	}
-	if( fabs(trk_eta->at(it))<=barrelEta ){
-	  h_trk_pt_np_noCuts_barrel->Fill(trk_pt->at(it));
-	  h_trk_d0_np_noCuts_barrel->Fill(trk_d0->at(it));
-	  h_trk_z0_np_noCuts_barrel->Fill(trk_z0->at(it));
-	  h_trk_phi_np_noCuts_barrel->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_np_noCuts_barrel->Fill(sectorphi);
-	  h_trk_chi2rphidof_np_noCuts_barrel->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_np_noCuts_barrel->Fill(chi2rzdof);
-	  h_trk_bendchi2_np_noCuts_barrel->Fill(trk_bendchi2->at(it));
-	}
-	else{
-	  h_trk_pt_np_noCuts_disk->Fill(trk_pt->at(it));
-	  h_trk_d0_np_noCuts_disk->Fill(trk_d0->at(it));
-	  h_trk_z0_np_noCuts_disk->Fill(trk_z0->at(it));
-	  h_trk_phi_np_noCuts_disk->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_np_noCuts_disk->Fill(sectorphi);
-	  h_trk_chi2rphidof_np_noCuts_disk->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_np_noCuts_disk->Fill(chi2rzdof);
-	  h_trk_bendchi2_np_noCuts_disk->Fill(trk_bendchi2->at(it));
-	}
-      }
-      //Quality cuts
-      
-      h_trk_chi2rzdof->Fill(chi2rzdof);
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_chi2rzdof_primary->Fill(chi2rzdof);
-      }
-      else{
-	h_trk_chi2rzdof_np->Fill(chi2rzdof);
-      }
-      if( chi2rzdof>maxChi2rzdof )
-	continue;
-
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_pt_primary_chi2rzdofCuts->Fill(trk_pt->at(it));
-	h_trk_bendchi2_primary->Fill(trk_bendchi2->at(it));
-	numPart_primary_chi2rzdofCuts[partId]++;
-      }
-      else{
-	h_trk_pt_np_chi2rzdofCuts->Fill(trk_pt->at(it));
-	h_trk_bendchi2_np->Fill(trk_bendchi2->at(it));
-	numPart_np_chi2rzdofCuts[partId]++;
-      }
-
-      h_trk_bendchi2->Fill(trk_bendchi2->at(it));
-#if 0
-      if(trk_bendchi2->at(it) > trk_maxBendChi2)
-	continue;
-#endif
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_pt_primary_bendchi2Cuts->Fill(trk_pt->at(it));
-	h_trk_chi2rphidof_primary->Fill(chi2rphidof);
-	numPart_primary_bendchi2Cuts[partId]++;
-      }
-      else{
-	h_trk_pt_np_bendchi2Cuts->Fill(trk_pt->at(it));
-	h_trk_chi2rphidof_np->Fill(chi2rphidof);
-	numPart_np_bendchi2Cuts[partId]++;
-      }
-
-      h_trk_chi2rphidof->Fill(chi2rphidof);
-#if 0
-      if(chi2rphidof>maxChi2rphidof)
-	continue;
-#endif
-
-      if ( fabs(trk_eta->at(it))<=barrelEta && chi2rphidof>maxChi2rphidof_barrel )
-	continue;
-
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_pt_primary_chi2rphidofCuts->Fill(trk_pt->at(it));
-	numPart_primary_chi2rphidofCuts[partId]++;
-      }
-      else{
-	h_trk_pt_np_chi2rphidofCuts->Fill(trk_pt->at(it));
-	numPart_np_chi2rphidofCuts[partId]++;
-      }
-
-      if(trk_MVA2->at(it)<minMVA2)
-	continue;
-#if 0
-      if(trk_MVA2->at(it)<minMVA2_D && fabs(trk_d0->at(it))>1 )
-	continue;
-#endif
-      if(trk_MVA1->at(it)<minMVA1)
-	continue;
-
-      if(trk_MVA1->at(it)<minMVA1_D && fabs(trk_d0->at(it))>1 )
-	continue;
-
-      if(fabs(trk_eta->at(it))>1.1 && fabs(trk_eta->at(it))<1.7 && trk_nstub->at(it)<5)
-	continue;
-
-      //Kinematic Cuts
-      h_trk_eta->Fill(trk_eta->at(it));
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_pt_primary_nstubCuts->Fill(trk_pt->at(it));
-	numPart_primary_nstubCuts[partId]++;
-	h_trk_eta_primary->Fill(trk_eta->at(it));
-	h_trk_eta_primary_qualCuts->Fill(trk_eta->at(it));
-	h_trk_pt_primary_qualCuts->Fill(trk_pt->at(it));
-	h_trk_d0_primary_qualCuts->Fill(trk_d0->at(it));
-	h_trk_ptWeightedD0_primary_qualCuts->Fill(trk_d0->at(it)*trk_pt->at(it));
-	h_trk_z0_primary_qualCuts->Fill(trk_z0->at(it));
-	h_trk_phi_primary_qualCuts->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_primary_qualCuts->Fill(sectorphi);
-	h_trk_chi2rphidof_primary_qualCuts->Fill(chi2rphidof);
-	h_trk_MVA1_primary_qualCuts->Fill(trk_MVA1->at(it));
-	h_trk_chi2rzdof_primary_qualCuts->Fill(chi2rzdof);
-	h_trk_bendchi2_primary_qualCuts->Fill(trk_bendchi2->at(it));
-	h_trk_pt_vs_d0_primary_qualCuts->Fill(trk_d0->at(it),trk_pt->at(it));
-	h_trk_pt_vs_eta_primary_qualCuts->Fill(trk_eta->at(it),trk_pt->at(it));
-	h_trk_eta_vs_d0_primary_qualCuts->Fill(trk_d0->at(it),trk_eta->at(it));
-      }
-      else{
-	h_trk_pt_np_nstubCuts->Fill(trk_pt->at(it));
-	numPart_np_nstubCuts[partId]++;
-	h_trk_eta_np->Fill(trk_eta->at(it));
-	h_trk_eta_np_qualCuts->Fill(trk_eta->at(it));
-	h_trk_pt_np_qualCuts->Fill(trk_pt->at(it));
-	h_trk_d0_np_qualCuts->Fill(trk_d0->at(it));
-	h_trk_ptWeightedD0_np_qualCuts->Fill(trk_d0->at(it)*trk_pt->at(it));
-	h_trk_z0_np_qualCuts->Fill(trk_z0->at(it));
-	h_trk_phi_np_qualCuts->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_np_qualCuts->Fill(sectorphi);
-	h_trk_chi2rphidof_np_qualCuts->Fill(chi2rphidof);
-	h_trk_MVA1_np_qualCuts->Fill(trk_MVA1->at(it));
-	h_trk_chi2rzdof_np_qualCuts->Fill(chi2rzdof);
-	h_trk_bendchi2_np_qualCuts->Fill(trk_bendchi2->at(it));
-	h_trk_pt_vs_d0_np_qualCuts->Fill(trk_d0->at(it),trk_pt->at(it));
-	h_trk_pt_vs_eta_np_qualCuts->Fill(trk_eta->at(it),trk_pt->at(it));
-	h_trk_eta_vs_d0_np_qualCuts->Fill(trk_d0->at(it),trk_eta->at(it));
-	if(trk_fake->at(it)==0){
-	  h_trk_eta_fake_qualCuts->Fill(trk_eta->at(it));
-	  h_trk_pt_fake_qualCuts->Fill(trk_pt->at(it));
-	  h_trk_d0_fake_qualCuts->Fill(trk_d0->at(it));
-	  h_trk_z0_fake_qualCuts->Fill(trk_z0->at(it));
-	  h_trk_phi_fake_qualCuts->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_fake_qualCuts->Fill(sectorphi);
-	  h_trk_chi2rphidof_fake_qualCuts->Fill(chi2rphidof);
-	  h_trk_MVA1_fake_qualCuts->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_fake_qualCuts->Fill(chi2rzdof);
-	  h_trk_bendchi2_fake_qualCuts->Fill(trk_bendchi2->at(it));
-	}
-	if(trk_fake->at(it)==2){
-	  h_trk_eta_PU_qualCuts->Fill(trk_eta->at(it));
-	  h_trk_pt_PU_qualCuts->Fill(trk_pt->at(it));
-	  h_trk_d0_PU_qualCuts->Fill(trk_d0->at(it));
-	  h_trk_z0_PU_qualCuts->Fill(trk_z0->at(it));
-	  h_trk_phi_PU_qualCuts->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_PU_qualCuts->Fill(sectorphi);
-	  h_trk_chi2rphidof_PU_qualCuts->Fill(chi2rphidof);
-	  h_trk_MVA1_PU_qualCuts->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_PU_qualCuts->Fill(chi2rzdof);
-	  h_trk_bendchi2_PU_qualCuts->Fill(trk_bendchi2->at(it));
-	}
-	if(trk_fake->at(it)==1 && isPrimary==false){
-	  h_trk_eta_notHiggs_qualCuts->Fill(trk_eta->at(it));
-	  h_trk_pt_notHiggs_qualCuts->Fill(trk_pt->at(it));
-	  h_trk_d0_notHiggs_qualCuts->Fill(trk_d0->at(it));
-	  h_trk_z0_notHiggs_qualCuts->Fill(trk_z0->at(it));
-	  h_trk_phi_notHiggs_qualCuts->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_notHiggs_qualCuts->Fill(sectorphi);
-	  h_trk_chi2rphidof_notHiggs_qualCuts->Fill(chi2rphidof);
-	  h_trk_MVA1_notHiggs_qualCuts->Fill(trk_MVA1->at(it));
-	  h_trk_chi2rzdof_notHiggs_qualCuts->Fill(chi2rzdof);
-	  h_trk_bendchi2_notHiggs_qualCuts->Fill(trk_bendchi2->at(it));
-	}
-      }
-      
-      h_trk_pt->Fill(trk_pt->at(it));
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_pt_primary->Fill(trk_pt->at(it));
-      }
-      else{
-	h_trk_pt_np->Fill(trk_pt->at(it));
-      }
-
-      if (trk_pt->at(it) < TP_minPt)
-	continue;
-
-#if 0
-      if (trk_pt->at(it) > TP_maxPt)
-	continue;
-#endif
-      h_trk_d0->Fill(trk_d0->at(it));
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_d0_primary->Fill(trk_d0->at(it));
-	h_trk_pt_primary_ptCuts->Fill(trk_pt->at(it));
-	numPart_primary_ptCuts[partId]++;
-      }
-      else{
-	h_trk_d0_np->Fill(trk_d0->at(it));
-	h_trk_pt_np_ptCuts->Fill(trk_pt->at(it));
-	numPart_np_ptCuts[partId]++;
-      }
-#if 0
-      if (std::fabs(trk_d0->at(it))>TP_maxD0)
-	continue;
-#endif
-
-      if ( (fabs(trk_eta->at(it))<=barrelEta && std::fabs(trk_d0->at(it))<TP_minD0_barrel) || (fabs(trk_eta->at(it))>barrelEta && std::fabs(trk_d0->at(it))<TP_minD0_disk) )
-	continue;
-
-      if(trk_matchtp_pt->at(it)!= -999 && trk_fake->at(it)==1 && find(matchtp_pt_oldCuts_vec.begin(),matchtp_pt_oldCuts_vec.end(),trk_matchtp_pt->at(it))==matchtp_pt_oldCuts_vec.end() ){
-	matchtp_pt_oldCuts_vec.push_back(trk_matchtp_pt->at(it));
-      }
-      h_trk_pt_oldCuts->Fill(trk_pt->at(it));
-      h_trk_z0->Fill(trk_z0->at(it));
-      h_trk_phi->Fill(trk_phi->at(it));
-      h_trk_sectorPhi->Fill(sectorphi);
-
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_z0_primary->Fill(trk_z0->at(it));
-	h_trk_pt_primary_d0Cuts->Fill(trk_pt->at(it));
-	h_trk_phi_primary->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_primary->Fill(sectorphi);
-	numPart_primary_d0Cuts[partId]++;
-      }
-      else{
-	h_trk_z0_np->Fill(trk_z0->at(it));
-	h_trk_pt_np_d0Cuts->Fill(trk_pt->at(it));
-	h_trk_phi_np->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_np->Fill(sectorphi);
-	numPart_np_d0Cuts[partId]++;
-      }	     	 
-	 
-      if(trk_pt->at(it) > 8){   
-	h_trk_chi2rphidof_H->Fill(chi2rphidof);
-	h_trk_chi2rzdof_H->Fill(chi2rzdof);
-	h_trk_bendchi2_H->Fill(trk_bendchi2 ->at(it));
-      }
-      else{
-	h_trk_chi2rphidof_L->Fill(chi2rphidof);
-	h_trk_chi2rzdof_L->Fill(chi2rzdof);
-	h_trk_bendchi2_L->Fill(trk_bendchi2 ->at(it));
-      }
-      if(fabs(trk_eta->at(it)) < 0.8){
-	h_trk_chi2rphidof_C->Fill(chi2rphidof);
-	h_trk_chi2rzdof_C->Fill(chi2rzdof);
-	h_trk_bendchi2_C->Fill(trk_bendchi2 ->at(it));
-      }
-      else if(fabs(trk_eta->at(it)) <= 1.6){
-	h_trk_chi2rphidof_I->Fill(chi2rphidof);
-	h_trk_chi2rzdof_I->Fill(chi2rzdof);
-	h_trk_bendchi2_I->Fill(trk_bendchi2 ->at(it));
-      }
-      else{
-	h_trk_chi2rphidof_F->Fill(chi2rphidof);
-	h_trk_chi2rzdof_F->Fill(chi2rzdof);
-	h_trk_bendchi2_F->Fill(trk_bendchi2 ->at(it));
-      }
-      if(fabs(trk_d0->at(it)) <= 1){   
-	h_trk_chi2rphidof_P->Fill(chi2rphidof);
-	h_trk_chi2rzdof_P->Fill(chi2rzdof);
-	h_trk_bendchi2_P->Fill(trk_bendchi2 ->at(it));
-      }
-      else{   
-	h_trk_chi2rphidof_D->Fill(chi2rphidof);
-	h_trk_chi2rzdof_D->Fill(chi2rzdof);
-	h_trk_bendchi2_D->Fill(trk_bendchi2 ->at(it));
-      }
-#if 0
-      if( fabs(trk_z0->at(it))>TP_maxZ0 )
-	continue;
-#endif
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_pt_primary_z0Cuts->Fill(trk_pt->at(it));
-	numPart_primary_z0Cuts[partId]++;
-      }
-      else{
-	h_trk_pt_np_z0Cuts->Fill(trk_pt->at(it));
-	numPart_np_z0Cuts[partId]++;
-      }
-
-      if(trk_matchtp_pt->at(it)!= -999 && trk_fake->at(it)==1 && find(matchtp_pt_allCuts_vec.begin(),matchtp_pt_allCuts_vec.end(),trk_matchtp_pt->at(it))==matchtp_pt_allCuts_vec.end() ){
-	matchtp_pt_allCuts_vec.push_back(trk_matchtp_pt->at(it));
-      }
-      h_trk_pt_allCuts->Fill(trk_pt->at(it));
-
-      if(trk_fake->at(it)==1 && isPrimary){
-	h_trk_eta_primary_allCuts->Fill(trk_eta->at(it));
-	h_trk_pt_primary_allCuts->Fill(trk_pt->at(it));
-	h_trk_d0_primary_allCuts->Fill(trk_d0->at(it));
-	h_trk_d0_primary_allCuts_zoomOut->Fill(trk_d0->at(it));
-	h_trk_z0_primary_allCuts->Fill(trk_z0->at(it));
-	h_trk_z0_primary_allCuts_zoomOut->Fill(trk_z0->at(it));
-	h_trk_phi_primary_allCuts->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_primary_allCuts->Fill(sectorphi);
-	h_trk_chi2rphidof_primary_allCuts->Fill(chi2rphidof);
-	h_trk_chi2rphidof_primary_allCuts_zoomOut->Fill(chi2rphidof);
-	h_trk_MVA1_primary_allCuts->Fill(trk_MVA1->at(it));
-	h_trk_MVA2_primary_allCuts->Fill(trk_MVA2->at(it));
-	if(fabs(trk_d0->at(it))<1.0){
-	  h_trk_MVA1_primary_allCuts_P->Fill(trk_MVA1->at(it));
-	  h_trk_MVA2_primary_allCuts_P->Fill(trk_MVA2->at(it));
-	}
-	else{
-	  h_trk_MVA1_primary_allCuts_D->Fill(trk_MVA1->at(it));
-	  h_trk_MVA2_primary_allCuts_D->Fill(trk_MVA2->at(it));
-	}
-	h_trk_chi2rzdof_primary_allCuts->Fill(chi2rzdof);
-	h_trk_chi2rzdof_primary_allCuts_zoomOut->Fill(chi2rzdof);
-	h_trk_bendchi2_primary_allCuts->Fill(trk_bendchi2->at(it));
-	h_trk_bendchi2_primary_allCuts_zoomOut->Fill(trk_bendchi2->at(it));
-	h_trk_pt_vs_d0_primary_allCuts->Fill(trk_d0->at(it),trk_pt->at(it));
-	h_trk_pt_vs_eta_primary_allCuts->Fill(trk_eta->at(it),trk_pt->at(it));
-	h_trk_numStubs_vs_eta_primary_allCuts->Fill(trk_eta->at(it),trk_nstub->at(it));
-	h_trk_eta_vs_d0_primary_allCuts->Fill(trk_d0->at(it),trk_eta->at(it));
-	if( fabs(trk_eta->at(it))<=barrelEta ){
-	  h_trk_pt_primary_allCuts_barrel->Fill(trk_pt->at(it));
-	  h_trk_d0_primary_allCuts_barrel->Fill(trk_d0->at(it));
-	  h_trk_z0_primary_allCuts_barrel->Fill(trk_z0->at(it));
-	  h_trk_phi_primary_allCuts_barrel->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_primary_allCuts_barrel->Fill(sectorphi);
-	  h_trk_chi2rphidof_primary_allCuts_barrel->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_primary_allCuts_barrel->Fill(chi2rzdof);
-	  h_trk_bendchi2_primary_allCuts_barrel->Fill(trk_bendchi2->at(it));
-	}
-	else{
-	  h_trk_pt_primary_allCuts_disk->Fill(trk_pt->at(it));
-	  h_trk_d0_primary_allCuts_disk->Fill(trk_d0->at(it));
-	  h_trk_z0_primary_allCuts_disk->Fill(trk_z0->at(it));
-	  h_trk_phi_primary_allCuts_disk->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_primary_allCuts_disk->Fill(sectorphi);
-	  h_trk_chi2rphidof_primary_allCuts_disk->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_primary_allCuts_disk->Fill(chi2rzdof);
-	  h_trk_bendchi2_primary_allCuts_disk->Fill(trk_bendchi2->at(it));
-	}
-      }
-      else{
-	h_trk_eta_np_allCuts->Fill(trk_eta->at(it));
-	h_trk_pt_np_allCuts->Fill(trk_pt->at(it));
-	h_trk_d0_np_allCuts->Fill(trk_d0->at(it));
-	h_trk_d0_np_allCuts_zoomOut->Fill(trk_d0->at(it));
-	h_trk_z0_np_allCuts->Fill(trk_z0->at(it));
-	h_trk_z0_np_allCuts_zoomOut->Fill(trk_z0->at(it));
-	h_trk_phi_np_allCuts->Fill(trk_phi->at(it));
-	h_trk_sectorPhi_np_allCuts->Fill(sectorphi);
-	h_trk_chi2rphidof_np_allCuts->Fill(chi2rphidof);
-	h_trk_chi2rphidof_np_allCuts_zoomOut->Fill(chi2rphidof);
-	h_trk_MVA1_np_allCuts->Fill(trk_MVA1->at(it));
-	h_trk_MVA2_np_allCuts->Fill(trk_MVA2->at(it));
-	if(fabs(trk_d0->at(it))<1.0){
-	  h_trk_MVA1_np_allCuts_P->Fill(trk_MVA1->at(it));
-	  h_trk_MVA2_np_allCuts_P->Fill(trk_MVA2->at(it));
-	}
-	else{
-	  h_trk_MVA1_np_allCuts_D->Fill(trk_MVA1->at(it));
-	  h_trk_MVA2_np_allCuts_D->Fill(trk_MVA2->at(it));
-	}
-	h_trk_chi2rzdof_np_allCuts->Fill(chi2rzdof);
-	h_trk_chi2rzdof_np_allCuts_zoomOut->Fill(chi2rzdof);
-	h_trk_bendchi2_np_allCuts->Fill(trk_bendchi2->at(it));
-	h_trk_bendchi2_np_allCuts_zoomOut->Fill(trk_bendchi2->at(it));
-	h_trk_pt_vs_d0_np_allCuts->Fill(trk_d0->at(it),trk_pt->at(it));
-	h_trk_pt_vs_eta_np_allCuts->Fill(trk_eta->at(it),trk_pt->at(it));
-	h_trk_numStubs_vs_eta_np_allCuts->Fill(trk_eta->at(it),trk_nstub->at(it));
-	h_trk_eta_vs_d0_np_allCuts->Fill(trk_d0->at(it),trk_eta->at(it));
-	if(trk_fake->at(it)==0){
-	  h_trk_numStubs_vs_eta_fake_allCuts->Fill(trk_eta->at(it),trk_nstub->at(it));
-	}
-	if(trk_fake->at(it)==2){
-	  h_trk_numStubs_vs_eta_PU_allCuts->Fill(trk_eta->at(it),trk_nstub->at(it));
-	}
-	if(trk_fake->at(it)==1 && isPrimary==false){
-	  h_trk_numStubs_vs_eta_notHiggs_allCuts->Fill(trk_eta->at(it),trk_nstub->at(it));
-	}
-	if( fabs(trk_eta->at(it))<=barrelEta ){
-	  h_trk_pt_np_allCuts_barrel->Fill(trk_pt->at(it));
-	  h_trk_d0_np_allCuts_barrel->Fill(trk_d0->at(it));
-	  h_trk_z0_np_allCuts_barrel->Fill(trk_z0->at(it));
-	  h_trk_phi_np_allCuts_barrel->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_np_allCuts_barrel->Fill(sectorphi);
-	  h_trk_chi2rphidof_np_allCuts_barrel->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_np_allCuts_barrel->Fill(chi2rzdof);
-	  h_trk_bendchi2_np_allCuts_barrel->Fill(trk_bendchi2->at(it));
-	}
-	else{
-	  h_trk_pt_np_allCuts_disk->Fill(trk_pt->at(it));
-	  h_trk_d0_np_allCuts_disk->Fill(trk_d0->at(it));
-	  h_trk_z0_np_allCuts_disk->Fill(trk_z0->at(it));
-	  h_trk_phi_np_allCuts_disk->Fill(trk_phi->at(it));
-	  h_trk_sectorPhi_np_allCuts_disk->Fill(sectorphi);
-	  h_trk_chi2rphidof_np_allCuts_disk->Fill(chi2rphidof);
-	  h_trk_chi2rzdof_np_allCuts_disk->Fill(chi2rzdof);
-	  h_trk_bendchi2_np_allCuts_disk->Fill(trk_bendchi2->at(it));
-	}
-      }
-    
-      Track_Parameters* tp_params = new Track_Parameters(trk_matchtp_pt->at(it), -1*trk_matchtp_d0->at(it), trk_matchtp_z0->at(it), trk_matchtp_eta->at(it), trk_matchtp_phi->at(it), trk_matchtp_pdgid->at(it), trk_matchtp_x->at(it), trk_matchtp_y->at(it), trk_matchtp_z->at(it));
-      for(uint i=0; i<track_bins.size(); i++){
-	float trkVariable = 0.0;
-	if(binVariable=="phi") trkVariable = trk_phi->at(it);
-	if (binVariable=="z0") trkVariable = fabs(trk_z0->at(it));
-	if(trkVariable<track_bins[i][1] && trkVariable>track_bins[i][0] ){
-	  binnedSelectedTracks[i].push_back(Track_Parameters(trk_pt->at(it), trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -99999, -999., -999., -999., trk_rinv->at(it), it, tp_params, trk_nstub->at(it), trk_chi2rphi->at(it), trk_chi2rz->at(it), trk_bendchi2->at(it), trk_MVA1->at(it), trk_MVA2->at(it)));
-	}
-      }
-      //std::cout<<"track rinv: "<<trk_rinv->at(it)<<" matchtp_pdgid: "<<trk_matchtp_pdgid->at(it)<<std::endl;
-      //std::cout<<"track calc rho: "<<(100*trk_pt->at(it))/(0.3*3.8)<<" ntuple rho: "<<fabs(1/trk_rinv->at(it))<<std::endl;
-      selectedTracks.push_back(Track_Parameters(trk_pt->at(it), trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -99999, -999., -999., -999., trk_rinv->at(it), it, tp_params, trk_nstub->at(it), trk_chi2rphi->at(it), trk_chi2rz->at(it), trk_bendchi2->at(it), trk_MVA1->at(it), trk_MVA2->at(it) ));
-      trkH_T += trk_pt->at(it);
-      std::valarray<float> trackPtVec = {trk_pt->at(it)*cos(trk_phi->at(it)),trk_pt->at(it)*sin(trk_phi->at(it))};
-      trkMET -= trackPtVec;
     }
     
     h_trk_H_T->Fill(trkH_T);
@@ -2253,49 +1944,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     h_numSelectedTrks->Fill(selectedTracks.size());
     h_numSelectedTrks_zoomOut->Fill(selectedTracks.size());
     
-    int pt_check[5] = {0,0,0,0,0};
-    int d0_check[5] = {0,0,0,0,0};
-    int pt_d0_check[5][5];
-    for (int k=0; k < 5; k++){
-      for (int l=0; l < 5; l++){
-	pt_d0_check[k][l] = 0;
-      }
-    }
-    if(detailedPlots){  
-      if ((selectedTracks.size() >= 2)){ 
-	for (uint j = 0; j < selectedTracks.size(); j++){
-	  if (selectedTracks[j].pt   >   pt_cuts[0]){ pt_check[0]++; }
-	  if (selectedTracks[j].pt   >   pt_cuts[1]){ pt_check[1]++; }
-	  if (selectedTracks[j].pt   >   pt_cuts[2]){ pt_check[2]++; }
-	  if (selectedTracks[j].pt   >   pt_cuts[3]){ pt_check[3]++; }
-	  if (selectedTracks[j].pt   >   pt_cuts[4]){ pt_check[4]++; }
-	   
-	  if (fabs(selectedTracks[j].d0)>d0_cuts[0]){ d0_check[0]++;}
-	  if (fabs(selectedTracks[j].d0)>d0_cuts[1]){ d0_check[1]++;}
-	  if (fabs(selectedTracks[j].d0)>d0_cuts[2]){ d0_check[2]++;}
-	  if (fabs(selectedTracks[j].d0)>d0_cuts[3]){ d0_check[3]++;}
-	  if (fabs(selectedTracks[j].d0)>d0_cuts[4]){ d0_check[4]++;}
-	  for (int l=0; l < 5; l++){
-	    if (selectedTracks[j].pt   >   pt_cuts[0] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[0][l]++;}
-	    if (selectedTracks[j].pt   >   pt_cuts[1] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[1][l]++;}
-	    if (selectedTracks[j].pt   >   pt_cuts[2] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[2][l]++;}
-	    if (selectedTracks[j].pt   >   pt_cuts[3] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[3][l]++;}
-	    if (selectedTracks[j].pt   >   pt_cuts[4] && fabs(selectedTracks[j].d0)>d0_cuts[l]) { pt_d0_check[4][l]++;}
-	  }
-	}
-	 
-	for(int k=0;k<5;k++){
-	  pt_check[k] = 0;
-	  d0_check[k] = 0;
-	  for (int l=0; l < 5; l++){
-	    if(pt_d0_check[k][l]>=2){
-	      h_Count_trk_pt_d0->SetBinContent(l+1,k+1,(h_Count_trk_pt_d0->GetBinContent(l+1,k+1) + 1));
-	    }
-	    pt_d0_check[k][l] = 0;
-	  }
-	}
-      }
-    }
     // ----------------------------------------------------------------------------------------------------------------
     // tracking particle loop
     float tpH_T = 0.0;
@@ -2310,174 +1958,115 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       float tmp_d0 = -tp_d0->at(it);	// Sign difference in the NTupleMaker
       float tmp_z0 = tp_z0->at(it);
 	
-      h_tp_pt_noCuts->Fill(tp_pt->at(it));
-      h_tp_eta_noCuts->Fill(tp_eta->at(it));
-      h_tp_d0_noCuts->Fill(tp_d0->at(it));
-      h_tp_z0_noCuts->Fill(tp_z0->at(it));
-      h_tp_dxy_noCuts->Fill(tp_dxy->at(it));
-      
       bool isPrimary = true;
       if(inputFile.Contains("DarkPhoton")) isPrimary = tp_isHToMu->at(it);
       if(inputFile.Contains("DisplacedTrackJet")) isPrimary = tp_isHToB->at(it);
-
-      if (std::fabs(tp_eta->at(it)) > TP_maxEta)
-	continue;
-
-      if(tp_eventid->at(it)>0 || isPrimary==false){
-	h_tp_pt_noCuts_PU->Fill(tp_pt->at(it));
-	h_tp_eta_noCuts_PU->Fill(tp_eta->at(it));
-	h_tp_d0_noCuts_PU->Fill(tp_d0->at(it));
-	h_tp_z0_noCuts_PU->Fill(tp_z0->at(it));
+      //std::cout<<"tp pt: "<<tp_pt->at(it)<<" eta: "<<tp_eta->at(it)<<" d0 : "<<tp_d0->at(it)<<" phi: "<<tp_phi->at(it)<<" z0: "<<tp_z0->at(it)<<" nstub: "<<tp_nstub<<std::endl;
+      uint icut_counter = 0;
+      for(auto icut=preselCutsTP.cbegin(); icut!=preselCutsTP.cend(); ++icut){
+	bool mods = true;
+	float param;
+	if(icut->second.first.type() == typeid(std::vector<float>**)){
+	  std::vector<float>** paramVector = boost::get<std::vector<float>**>(icut->second.first);
+	  param = (*paramVector)->at(it);
+	}
+	else{
+	  std::vector<int>** paramVector = boost::get<std::vector<int>**>(icut->second.first);
+	  int tmp_param = (*paramVector)->at(it);
+	  param = float(tmp_param);
+	}
+	TString cutName = icut->first;
+	if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
+	float cutValue = icut->second.second;
+	//std::cout<<"cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
+	if(cutName.Contains("barrel") && fabs(tp_eta->at(it))>barrelEta) mods = false;
+	if(cutName.Contains("disk") && fabs(tp_eta->at(it))<=barrelEta) mods = false;
+	if(cutName.Contains("_D") && fabs(tp_d0->at(it))<=1 ) mods = false;
+	if(cutName.Contains("overlap") && (fabs(tp_eta->at(it))<=1.1 || fabs(tp_eta->at(it))>=1.7)) mods = false;
+	if(cutName.Contains("dof")) param /= 2*tp_nstub->at(it) - 5;
+	if(mods){
+	  if(cutName.Contains("max") && param>cutValue) break;
+	  if(cutName.Contains("min") && param<cutValue) break;
+	}
+	//std::cout<<"passed cut"<<std::endl;
+	for(uint i=0; i<tpType.size(); ++i){
+	  bool primary = tp_eventid->at(it)==0 && isPrimary;
+	  if(tpType[i]=="primary" && !primary) continue;
+	  if(tpType[i]=="np" && primary) continue;
+	  if(tpType[i]=="PU" && tp_eventid->at(it)==0) continue;
+	  if(tpType[i]=="notHiggs" && !(tp_eventid->at(it)==0 && !isPrimary)) continue;
+	  if(tpType[i]=="match" && tp_nmatch->at(it)==0) continue;
+	  string partId = to_string(tp_pdgid->at(it));
+	  numPartCutFlowsTP[i][icut_counter][partId]++;
+	  for(uint j=0; j<plotModifiers.size(); ++j){
+	    if(plotModifiers[j]=="_H" && tp_pt->at(it)<=10) continue;
+	    if(plotModifiers[j]=="_L" && tp_pt->at(it)>10) continue;
+	    if(plotModifiers[j]=="_P" && fabs(tp_d0->at(it))>1) continue;
+	    if(plotModifiers[j]=="_D" && fabs(tp_d0->at(it))<=1) continue;
+	    if(plotModifiers[j]=="_barrel" && fabs(tp_eta->at(it))>barrelEta) continue;
+	    if(plotModifiers[j]=="_disk" && fabs(tp_eta->at(it))<=barrelEta) continue;
+	    int ivar_counter = 0;
+	    for(auto ivar=varCutFlowsTP.cbegin(); ivar!=varCutFlowsTP.cend(); ++ivar){
+	      if(ivar->second.first.type() == typeid(std::vector<float>**)){
+		std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar->second.first);
+		param = (*paramVector)->at(it);
+	      }
+	      else{
+		std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar->second.first);
+		int tmp_param = (*paramVector)->at(it);
+		param = float(tmp_param);
+	      }
+	      TString varName = ivar->first.at(0);
+	      if(varName.Contains("dof")) param /= 2*tp_nstub->at(it) - 5;
+	      if(varName.Contains("sector")){
+		while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
+		while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
+		while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
+	      }
+	      preselCutFlowsTP[ivar_counter][i][icut_counter][j]->Fill(param);
+	      ivar_counter++;
+	    }
+	    int ivar2D_counter = 0;
+	    for(auto ivar2D=varCutFlowsTP2D.cbegin(); ivar2D!=varCutFlowsTP2D.cend(); ++ivar2D){
+	      std::vector<float> params;
+	      for(int k=0; k<2; ++k){
+		if(ivar2D->second.first.at(k).type() == typeid(std::vector<float>**)){
+		  std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar2D->second.first.at(k));
+		  param = (*paramVector)->at(it);
+		}
+		else{
+		  std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar2D->second.first.at(k));
+		  int tmp_param = (*paramVector)->at(it);
+		  param = float(tmp_param);
+		}
+		TString varName = ivar2D->first.at(2*k);
+		if(varName.Contains("dof")) param /= 2*tp_nstub->at(it) - 5;
+		if(varName.Contains("sector")){
+		  while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
+		  while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
+		  while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
+		}
+		params.push_back(param);
+	      }
+	      preselCutFlowsTP2D[ivar2D_counter][i][icut_counter][j]->Fill(params[0],params[1]);
+	      ivar2D_counter++;
+	    }
+	  }
+	}
+	icut_counter++;
       }
-      else{
-	h_tp_pt_noCuts_primary->Fill(tp_pt->at(it));
-	tp_pt_noCuts_primary_vec.push_back(tp_pt->at(it));
-	h_tp_eta_noCuts_primary->Fill(tp_eta->at(it));
-	h_tp_d0_noCuts_primary->Fill(tp_d0->at(it));
-	h_tp_z0_noCuts_primary->Fill(tp_z0->at(it));
+      if(icut_counter==preselCutsTP.size()){
+	//std::cout<<"pushed tp icut_counter: "<<icut_counter<<std::endl;
+	selectedTPs.push_back(Track_Parameters(tp_pt->at(it), tmp_d0, tmp_z0, tp_eta->at(it), tp_phi->at(it), tp_pdgid->at(it), tp_x->at(it), tp_y->at(it), tp_z->at(it), tp_charge->at(it), it));
+	if (tp_eventid->at(it)>0){
+	  tpH_T += tp_pt->at(it);
+	  std::valarray<float> tpPtVec = {tp_pt->at(it)*cos(tp_phi->at(it)),tp_pt->at(it)*sin(tp_phi->at(it))};
+	  tpMET -= tpPtVec;
+	}
       }
-      
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_noCuts->Fill(tp_pt->at(it));
-	h_match_tp_eta_noCuts->Fill(tp_eta->at(it));
-	h_match_tp_d0_noCuts->Fill(tp_d0->at(it));
-      }
-
-      //if (tp_eventid->at(it)>0)
-      if (tp_eventid->at(it)>0 || isPrimary==false)
-	continue;
-
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_noCuts_primary->Fill(tp_pt->at(it));
-      }
-	 
-      h_tp_d0->Fill(tp_d0->at(it));
-#if 0
-      if (std::fabs(tmp_d0) > TP_maxD0)
-	continue;
-#endif
-      h_tp_pt_maxD0Cut->Fill(tp_pt->at(it));
-      h_tp_eta_maxD0Cut->Fill(tp_eta->at(it));
-      h_tp_d0_maxD0Cut->Fill(tp_d0->at(it));
-	 
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_maxD0Cut->Fill(tp_pt->at(it));
-	h_match_tp_eta_maxD0Cut->Fill(tp_eta->at(it));
-	h_match_tp_d0_maxD0Cut->Fill(tp_d0->at(it));
-      }
-
-      if ( (fabs(tp_eta->at(it))<=barrelEta && std::fabs(tmp_d0)<TP_minD0_barrel) || (fabs(tp_eta->at(it))>barrelEta && std::fabs(tmp_d0)<TP_minD0_disk) ) 
-	continue;
-
-      h_tp_pt_minD0Cut->Fill(tp_pt->at(it));
-      h_tp_eta_minD0Cut->Fill(tp_eta->at(it));
-      h_tp_d0_minD0Cut->Fill(tp_d0->at(it));
-	 
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_minD0Cut->Fill(tp_pt->at(it));
-	h_match_tp_eta_minD0Cut->Fill(tp_eta->at(it));
-	h_match_tp_d0_minD0Cut->Fill(tp_d0->at(it));
-      }
-      h_tp_pt->Fill(tp_pt->at(it));
-
-      if (tp_pt->at(it) < TP_minPt)
-	continue;
-
-      h_tp_pt_minPtCut->Fill(tp_pt->at(it));
-      h_tp_eta_minPtCut->Fill(tp_eta->at(it));
-      h_tp_d0_minPtCut->Fill(tp_d0->at(it));
-	
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_minPtCut->Fill(tp_pt->at(it));
-	h_match_tp_eta_minPtCut->Fill(tp_eta->at(it));
-	h_match_tp_d0_minPtCut->Fill(tp_d0->at(it));
-      }
-#if 0
-      if (tp_pt->at(it) > TP_maxPt)
-	continue;
-#endif
-      h_tp_pt_maxPtCut->Fill(tp_pt->at(it));
-      h_tp_eta_maxPtCut->Fill(tp_eta->at(it));
-      h_tp_d0_maxPtCut->Fill(tp_d0->at(it));
-	
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_maxPtCut->Fill(tp_pt->at(it));
-	h_match_tp_eta_maxPtCut->Fill(tp_eta->at(it));
-	h_match_tp_d0_maxPtCut->Fill(tp_d0->at(it));
-      }
-
-      h_tp_eta->Fill(tp_eta->at(it));
-      h_tp_pt_maxEtaCut->Fill(tp_pt->at(it));
-      h_tp_eta_maxEtaCut->Fill(tp_eta->at(it));
-      h_tp_d0_maxEtaCut->Fill(tp_d0->at(it));
-      h_tp_dxy_oldCuts->Fill(tp_dxy->at(it));
-      tp_pt_oldCuts_vec.push_back(tp_pt->at(it));
-
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_maxEtaCut->Fill(tp_pt->at(it));
-	h_match_tp_eta_maxEtaCut->Fill(tp_eta->at(it));
-	h_match_tp_d0_maxEtaCut->Fill(tp_d0->at(it));
-      }
-#if 0
-      if( fabs(tp_z0->at(it))>TP_maxZ0 )
-	continue;
-#endif
-      h_tp_pt_allCuts->Fill(tp_pt->at(it));
-      h_tp_eta_allCuts->Fill(tp_eta->at(it));
-      h_tp_d0_allCuts->Fill(tp_d0->at(it));
-      h_tp_dxy_allCuts->Fill(tp_dxy->at(it));
-      tp_pt_allCuts_vec.push_back(tp_pt->at(it));
-
-      if (tp_nmatch->at(it) >= 1){
-	h_match_tp_pt_allCuts->Fill(tp_pt->at(it));
-	h_match_tp_eta_allCuts->Fill(tp_eta->at(it));
-	h_match_tp_d0_allCuts->Fill(tp_d0->at(it));
-	int ndof = 2 * matchtrk_nstub->at(it) - 5;
-	float chi2rzdof = (float)matchtrk_chi2rz->at(it) / ndof;
-	//if(matchtrk_bendchi2->at(it)<trk_maxBendChi2 && ( chi2rzdof<maxChi2rzdof ) ){
-	//h_match_tp_pt_allCuts_trkCuts->Fill(tp_pt->at(it));
-	//}
-      }
-      selectedTPs.push_back(Track_Parameters(tp_pt->at(it), tmp_d0, tmp_z0, tp_eta->at(it), tp_phi->at(it), tp_pdgid->at(it), tp_x->at(it), tp_y->at(it), tp_z->at(it), tp_charge->at(it), it));
-      tpH_T += tp_pt->at(it);
-      std::valarray<float> tpPtVec = {tp_pt->at(it)*cos(tp_phi->at(it)),tp_pt->at(it)*sin(tp_phi->at(it))};
-      tpMET -= tpPtVec;
     }
     h_tp_H_T->Fill(tpH_T);
     h_tp_MET->Fill(TMath::Sqrt(pow(tpMET[0],2)+pow(tpMET[1],2)));
-    for(uint i=0; i<matchtp_pt_noCuts_vec.size();){
-      if(find(tp_pt_noCuts_primary_vec.begin(),tp_pt_noCuts_primary_vec.end(),matchtp_pt_noCuts_vec[i])==tp_pt_noCuts_primary_vec.end()){
-	matchtp_pt_noCuts_vec.erase(matchtp_pt_noCuts_vec.begin()+i);
-      }
-      else{
-	++i;
-      }
-    }
-    for(uint i=0; i<matchtp_pt_oldCuts_vec.size();){
-      if(find(tp_pt_oldCuts_vec.begin(),tp_pt_oldCuts_vec.end(),matchtp_pt_oldCuts_vec[i])==tp_pt_oldCuts_vec.end()){
-	matchtp_pt_oldCuts_vec.erase(matchtp_pt_oldCuts_vec.begin()+i);
-      }
-      else{
-	++i;
-      }
-    }
-    for(uint i=0; i<matchtp_pt_allCuts_vec.size();){
-      if(find(tp_pt_allCuts_vec.begin(),tp_pt_allCuts_vec.end(),matchtp_pt_allCuts_vec[i])==tp_pt_allCuts_vec.end()){
-	matchtp_pt_allCuts_vec.erase(matchtp_pt_allCuts_vec.begin()+i);
-      }
-      else{
-	++i;
-      }
-    }
-    for(uint i=0; i<matchtp_pt_noCuts_vec.size();i++){
-      h_trk_matchtp_pt_noCuts->Fill(matchtp_pt_noCuts_vec[i]);
-    }
-    for(uint i=0; i<matchtp_pt_oldCuts_vec.size();i++){
-      h_trk_matchtp_pt_oldCuts->Fill(matchtp_pt_oldCuts_vec[i]);
-    }
-    for(uint i=0; i<matchtp_pt_allCuts_vec.size();i++){
-      h_trk_matchtp_pt_allCuts->Fill(matchtp_pt_allCuts_vec[i]);
-    }
     
     // --------------------------------------------------------------------------------------------
     //         Vertex finding in Tracking Particles
@@ -3371,56 +2960,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_res_tp_trk_r->Fill(r_j-r_i);
 	h_res_tp_trk_phi->Fill(phi_j-phi_i);
        
-	if(detailedPlots){
-	  if (trackVertices[i].a.pt   >   pt_cuts[0]){ pt_check[0]++; }
-	  if (trackVertices[i].a.pt   >   pt_cuts[1]){ pt_check[1]++; }
-	  if (trackVertices[i].a.pt   >   pt_cuts[2]){ pt_check[2]++; }
-	  if (trackVertices[i].a.pt   >   pt_cuts[3]){ pt_check[3]++; }
-	  if (trackVertices[i].a.pt   >   pt_cuts[4]){ pt_check[4]++; }
-	  
-	  if (fabs(trackVertices[i].a.d0)>d0_cuts[0]){ d0_check[0]++;}
-	  if (fabs(trackVertices[i].a.d0)>d0_cuts[1]){ d0_check[1]++;}
-	  if (fabs(trackVertices[i].a.d0)>d0_cuts[2]){ d0_check[2]++;}
-	  if (fabs(trackVertices[i].a.d0)>d0_cuts[3]){ d0_check[3]++;}
-	  if (fabs(trackVertices[i].a.d0)>d0_cuts[4]){ d0_check[4]++;}
-	  for (int l=0; l < 5; l++){
-	    if (trackVertices[i].a.pt   >   pt_cuts[0] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[0][l]++;}
-	    if (trackVertices[i].a.pt   >   pt_cuts[1] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[1][l]++;}
-	    if (trackVertices[i].a.pt   >   pt_cuts[2] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[2][l]++;}
-	    if (trackVertices[i].a.pt   >   pt_cuts[3] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[3][l]++;}
-	    if (trackVertices[i].a.pt   >   pt_cuts[4] && fabs(trackVertices[i].a.d0)>d0_cuts[l]) { pt_d0_check[4][l]++;}
-	  }
-	  
-	  if (trackVertices[i].b.pt   >   pt_cuts[0]){ pt_check[0]++; }
-	  if (trackVertices[i].b.pt   >   pt_cuts[1]){ pt_check[1]++; }
-	  if (trackVertices[i].b.pt   >   pt_cuts[2]){ pt_check[2]++; }
-	  if (trackVertices[i].b.pt   >   pt_cuts[3]){ pt_check[3]++; }
-	  if (trackVertices[i].b.pt   >   pt_cuts[4]){ pt_check[4]++; }
-	  
-	  if (fabs(trackVertices[i].b.d0)>d0_cuts[0]){ d0_check[0]++;}
-	  if (fabs(trackVertices[i].b.d0)>d0_cuts[1]){ d0_check[1]++;}
-	  if (fabs(trackVertices[i].b.d0)>d0_cuts[2]){ d0_check[2]++;}
-	  if (fabs(trackVertices[i].b.d0)>d0_cuts[3]){ d0_check[3]++;}
-	  if (fabs(trackVertices[i].b.d0)>d0_cuts[4]){ d0_check[4]++;}
-	  for (int l=0; l < 5; l++){
-	    if (trackVertices[i].b.pt   >   pt_cuts[0] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[0][l]++;}
-	    if (trackVertices[i].b.pt   >   pt_cuts[1] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[1][l]++;}
-	    if (trackVertices[i].b.pt   >   pt_cuts[2] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[2][l]++;}
-	    if (trackVertices[i].b.pt   >   pt_cuts[3] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[3][l]++;}
-	    if (trackVertices[i].b.pt   >   pt_cuts[4] && fabs(trackVertices[i].b.d0)>d0_cuts[l]) { pt_d0_check[4][l]++;}
-	  }
-		    
-	  for(int k=0;k<5;k++){
-	    pt_check[k] = 0;
-	    d0_check[k] = 0;
-	    for (int l=0; l < 5; l++){
-	      if(pt_d0_check[k][l]>=2){
-		h_Count_trk_pt_d0_dv->SetBinContent(l+1,k+1,(h_Count_trk_pt_d0_dv->GetBinContent(l+1,k+1) + 1));
-	      }
-	      pt_d0_check[k][l] = 0;
-	    }
-	  }
-	}
       }
       else{
 	if(trackVertices[i].x_dv!=-9999.0){
@@ -3718,9 +3257,216 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TString makedir = "mkdir -p " + DIR;
   const char *mkDIR = makedir.Data();
   gSystem->Exec(mkDIR);
+  TString PRESELDIR = DIR + "PreselectionPlots/";
+  TString makedirPreSel = "mkdir -p " + PRESELDIR;
+  const char *mkDIRPRESEL = makedirPreSel.Data();
+  gSystem->Exec(mkDIRPRESEL);
 
   TFile *fout;
   fout = new TFile(outputDir + "output_" + inputFile + ".root", "recreate");
+  
+  TLegend* l = new TLegend(0.86,0.35,0.98,0.7);
+  l->SetFillColor(0);
+  l->SetLineColor(0);
+  l->SetTextSize(0.04);
+  l->SetTextFont(42);
+  //std::cout<<"plots"<<std::endl;
+
+  int i = 0;
+  for(auto ivar=varCutFlows.cbegin(); ivar!=varCutFlows.cend(); ++ivar){
+    for(uint j=0; j<trackType.size(); ++j){
+      for(uint k=0; k<plotModifiers.size(); ++k){
+	auto start = std::chrono::high_resolution_clock::now();
+	l->Clear();
+	TH1F* h_trkEff[preselCuts.size()];
+	int m = 0;
+	for(auto mcut=preselCuts.cbegin(); mcut!=preselCuts.cend(); ++mcut){
+	  if(m!=0){
+	    //std::cout<<"trkEffOverlay i j m k: "<<i<<" "<<j<<" "<<m<<" "<<k<<std::endl;
+	    h_trkEff[m] = (TH1F*)preselCutFlows[i][j][0][k]->Clone();
+	    h_trkEff[m]->GetYaxis()->SetNoExponent(kTRUE);
+	    removeFlows(h_trkEff[m]);
+	    h_trkEff[m]->SetStats(0);
+	    removeFlows(preselCutFlows[i][j][m][k]);
+	    h_trkEff[m]->Divide(preselCutFlows[i][j][m][k],h_trkEff[m],1.0,1.0,"B");
+	    h_trkEff[m]->SetLineColor(m);
+	    h_trkEff[m]->SetMarkerColor(m);
+	    TString cutName = mcut->first;
+	    //std::cout<<"cutName: "<<cutName<<std::endl;
+	    l->AddEntry(h_trkEff[m],cutName,"lp");
+	    if(m==1){
+	      raiseMax(h_trkEff[m]);
+	      h_trkEff[m]->Draw();
+	    }
+	    else{
+	      h_trkEff[m]->Draw("SAME");
+	    }
+	  }
+	  m++;
+	}
+	mySmallText(0.3, 0.9, 1, ctxt);
+	l->Draw();
+	c.SaveAs(PRESELDIR + "/h_trkEffOverlay_"+ivar->first.at(0)+"_"+trackType[j]+plotModifiers[k]+".pdf");
+	auto finish = std::chrono::high_resolution_clock::now();
+	/*std::cout << "trkEffOverlay took "
+		  << std::chrono::duration_cast<milli>(finish - start).count()
+		  << " milliseconds\n";*/
+      }
+    }
+    i++;
+  }
+
+  i = 0;
+  int m_primary = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "primary"));
+  int m_np = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "np"));
+  int m_fake = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "fake"));
+  int m_PU = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "PU"));
+  int m_notHiggs = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "notHiggs"));
+
+  for(auto icut=preselCuts.cbegin(); icut!=preselCuts.cend(); ++icut){
+    for(uint j=0; j<plotModifiers.size(); ++j){
+      int k = 0;
+      for(auto kvar=varCutFlows.cbegin(); kvar!=varCutFlows.cend(); ++kvar){
+	TString cutName = icut->first;
+	auto h_stack = new THStack("hs_"+kvar->first.at(0)+"_"+cutName+"Cut"+plotModifiers[j],"Stacked BG histograms");
+	float integralSum = 0;
+	l->Clear();
+	for(uint m=0; m<trackType.size(); ++m){
+	  auto start = std::chrono::high_resolution_clock::now();
+	  preselCutFlows[k][m][i][j]->GetYaxis()->SetNoExponent(kTRUE);
+	  removeFlows(preselCutFlows[k][m][i][j]);
+	  if(detailedPlots){
+	    raiseMax(preselCutFlows[k][m][i][j]);
+	    preselCutFlows[k][m][i][j]->Draw();
+	    mySmallText(0.3, 0.9, 1, ctxt);
+	    preselCutFlows[k][m][i][j]->Write("", TObject::kOverwrite);
+	    c.SaveAs(PRESELDIR + "/"+ preselCutFlows[k][m][i][j]->GetName() + ".pdf");
+	  }
+	  preselCutFlows[k][m][i][j]->SetLineColor(m+1);
+	  preselCutFlows[k][m][i][j]->SetMarkerColor(m+1);
+	  if(trackType[m]=="fake" || trackType[m]=="PU" || trackType[m]=="notHiggs"){
+	    integralSum+=preselCutFlows[k][m][i][j]->Integral();
+	  }
+	  auto finish = std::chrono::high_resolution_clock::now();
+	  /*std::cout << "preselCutFlows took "
+		    << std::chrono::duration_cast<milli>(finish - start).count()
+		    << " milliseconds\n";*/
+	}
+	for(uint m=0; m<trackType.size(); ++m){
+	  if(trackType[m]=="fake" || trackType[m]=="PU" || trackType[m]=="notHiggs"){
+	    preselCutFlows[k][m][i][j]->Scale(1./integralSum);
+	    h_stack->Add(preselCutFlows[k][m][i][j]);
+	  }
+	}
+	auto start = std::chrono::high_resolution_clock::now();
+	h_stack->Draw("HIST");
+	preselCutFlows[k][m_primary][i][j]->Scale(1./preselCutFlows[k][m_primary][i][j]->Integral());
+	raiseMax(preselCutFlows[k][m_primary][i][j],h_stack);
+	drawSame(preselCutFlows[k][m_primary][i][j],h_stack);
+	mySmallText(0.3, 0.9, 1, ctxt);
+	l->Clear();
+	l->AddEntry(preselCutFlows[k][m_primary][i][j],"Primary","l");
+	l->AddEntry(preselCutFlows[k][m_fake][i][j],"Fake","l");
+	l->AddEntry(preselCutFlows[k][m_PU][i][j],"PU","l");
+	l->AddEntry(preselCutFlows[k][m_notHiggs][i][j],"notHiggs","l");
+	l->Draw();
+	c.SaveAs(PRESELDIR + "/h_signalVsBGStack_"+kvar->first.at(0)+"_"+icut->first+"Cut"+plotModifiers[j]+".pdf");
+	for(uint m=0; m<trackType.size(); ++m){
+	  preselCutFlows[k][m][i][j]->Scale(1./preselCutFlows[k][m][i][j]->Integral());
+	  preselCutFlows[k][m][i][j]->SetStats(0);
+	}
+	raiseMax(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_fake][i][j],preselCutFlows[k][m_PU][i][j],preselCutFlows[k][m_notHiggs][i][j]);
+	drawSame(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_fake][i][j],preselCutFlows[k][m_PU][i][j],preselCutFlows[k][m_notHiggs][i][j]);
+	mySmallText(0.3, 0.9, 1, ctxt);
+	l->Draw();
+	//std::cout<<"signalvsBGOverlay primary fake PU notHiggs: "<<m_primary<<" "<<m_fake<<" "<<m_PU<<" "<<m_notHiggs<<std::endl;
+	//std::cout<<"signalvsBGOverlay k i j: "<<k<<" "<<i<<" "<<j<<std::endl;
+	c.SaveAs(PRESELDIR + "/h_signalVsBGOverlay_"+kvar->first.at(0)+"_"+icut->first+"Cut"+plotModifiers[j]+".pdf");
+	auto finish = std::chrono::high_resolution_clock::now();
+	/*std::cout << "signalVsBGOverlay took "
+		  << std::chrono::duration_cast<milli>(finish - start).count()
+		  << " milliseconds\n";*/
+	raiseMax(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_np][i][j]);
+	drawSame(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_np][i][j]);
+	mySmallText(0.3, 0.9, 1, ctxt);
+	l->Clear();
+	l->AddEntry(preselCutFlows[k][m_primary][i][j],"Primary","l");
+	l->AddEntry(preselCutFlows[k][m_np][i][j],"NP","l");
+	l->Draw();
+	c.SaveAs(PRESELDIR + "/h_signalVsBG_"+kvar->first.at(0)+"_"+icut->first+"Cut"+plotModifiers[j]+".pdf");
+	
+	k++;
+      }
+    }
+    i++;
+  }
+
+  i=0;
+  int m_match = distance(tpType.begin(), find(tpType.begin(), tpType.end(), "match"));
+  int m_tp = distance(tpType.begin(), find(tpType.begin(), tpType.end(), ""));
+  for(auto icut=preselCutsTP.cbegin(); icut!=preselCutsTP.cend(); ++icut){
+    TString cutName = icut->first;
+    for(uint j=0; j<plotModifiers.size(); ++j){
+      int k = 0;
+      for(auto kvar=varCutFlowsTP.cbegin(); kvar!=varCutFlowsTP.cend(); ++kvar){
+	for(uint m=0; m<tpType.size(); ++m){
+	  preselCutFlowsTP[k][m][i][j]->GetYaxis()->SetNoExponent(kTRUE);
+	  removeFlows(preselCutFlowsTP[k][m][i][j]);
+	  if(detailedPlots){
+	    raiseMax(preselCutFlowsTP[k][m][i][j]);
+	    preselCutFlowsTP[k][m][i][j]->Draw();
+	    mySmallText(0.3, 0.9, 1, ctxt);
+	    preselCutFlowsTP[k][m][i][j]->Write("", TObject::kOverwrite);
+	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP[k][m][i][j]->GetName() + ".pdf");
+	  }
+	}
+	preselCutFlowsTP[k][m_match][i][j]->Divide(preselCutFlowsTP[k][m_match][i][j],preselCutFlowsTP[k][m_tp][i][j]);
+	raiseMax(preselCutFlowsTP[k][m_match][i][j]);
+	mySmallText(0.3, 0.9, 1, ctxt);
+	c.SaveAs(PRESELDIR + "/h_trackFindingEff_"+kvar->first.at(0)+"_"+cutName+"Cut"+plotModifiers[j]+".pdf");
+	k++;
+      }
+    }
+    i++;
+  }
+
+  i = 0;
+  for(auto icut=preselCuts.cbegin(); icut!=preselCuts.cend(); ++icut){
+    TString cutName = icut->first;
+    for(uint j=0; j<plotModifiers.size(); ++j){
+      int k = 0;
+      for(auto kvar=varCutFlows2D.cbegin(); kvar!=varCutFlows2D.cend(); ++kvar){
+	for(uint m=0; m<trackType.size(); ++m){
+	  removeFlows(preselCutFlows2D[k][m][i][j]);
+	  preselCutFlows2D[k][m][i][j]->Draw();
+	  mySmallText(0.3, 0.9, 1, ctxt);
+	  c.SaveAs(PRESELDIR + "/"+ preselCutFlows2D[k][m][i][j]->GetName() + ".pdf");
+	}
+	k++;
+      }
+    }
+    i++;
+  }
+
+  i = 0;
+  if(detailedPlots){
+    for(auto icut=preselCutsTP.cbegin(); icut!=preselCutsTP.cend(); ++icut){
+      TString cutName = icut->first;
+      for(uint j=0; j<plotModifiers.size(); ++j){
+	int k = 0;
+	for(auto kvar=varCutFlowsTP2D.cbegin(); kvar!=varCutFlowsTP2D.cend(); ++kvar){
+	  for(uint m=0; m<tpType.size(); ++m){
+	    removeFlows(preselCutFlowsTP2D[k][m][i][j]);
+	    preselCutFlowsTP2D[k][m][i][j]->Draw();
+	    mySmallText(0.3, 0.9, 1, ctxt);
+	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP2D[k][m][i][j]->GetName() + ".pdf");
+	  }
+	  k++;
+	}
+      }
+      i++;
+    }
+  }
 
   h_trk_d0->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_trk_d0);
@@ -3773,7 +3519,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   h_trk_d0_np_noCutsNorm->Draw("HIST");
   h_trk_d0_primary_noCuts->Draw("HIST,SAME");
   mySmallText(0.3, 0.9, 1, ctxt);
-  TLegend* l = new TLegend(0.86,0.35,0.98,0.7);
   l->SetFillColor(0);
   l->SetLineColor(0);
   l->SetTextSize(0.04);
