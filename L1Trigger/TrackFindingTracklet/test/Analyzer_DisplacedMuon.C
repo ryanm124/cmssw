@@ -285,6 +285,92 @@ constexpr bool operator==(const Vertex_Parameters& lhs, const Vertex_Parameters&
   return (lhs.x_dv==rhs.x_dv && lhs.y_dv==rhs.y_dv && lhs.z_dv==rhs.z_dv);
 }
 
+class Cut {
+public:
+  virtual ~Cut() = default;
+  virtual TString getCutName() const = 0;
+  virtual float getParam(int it) const = 0;
+  virtual float getCutValue() const = 0;
+};
+
+template <typename T>
+class TypedCut : public Cut
+{
+public:
+  TString cutName;
+  std::vector<T>** params;
+  T cutValue;
+  
+  TypedCut(TString cutName_in, std::vector<T>** params_in, T cutValue_in): cutName(cutName_in), params(params_in), cutValue(cutValue_in) {}
+  TypedCut(){};
+  ~TypedCut(){};
+  TString getCutName() const
+  {
+    return cutName;
+  }
+  float getParam(int it) const
+  {
+    T param = (*params)->at(it);
+    return float(param);
+  }
+  float getCutValue() const
+  {
+    return float(cutValue);
+  }
+};
+  
+class Plot {
+public:
+  virtual ~Plot() = default;
+  virtual TString getVarName() const = 0;
+  virtual TString getUnit() const = 0;
+  virtual float getParam(int it) const = 0;
+  virtual int getNumBins() const = 0;
+  virtual float getMinBin() const = 0;
+  virtual float getMaxBin() const = 0;
+};
+
+template <typename T>
+class TypedPlot : public Plot
+{
+public:
+  TString varName;
+  TString unit;
+  std::vector<T>** params;
+  int numBins;
+  float minBin;
+  float maxBin;
+  
+  TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, float minBin_in, float maxBin_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), minBin(minBin_in), maxBin(maxBin_in) {}
+  TypedPlot(){};
+  ~TypedPlot(){};
+  TString getVarName() const
+  {
+    return varName;
+  }
+  TString getUnit() const
+  {
+    return unit;
+  }
+  float getParam(int it) const
+  {
+    T param = (*params)->at(it);
+    return float(param);
+  }
+  int getNumBins() const
+  {
+    return numBins;
+  }
+  float getMinBin() const
+  {
+    return minBin;
+  }
+  float getMaxBin() const
+  {
+    return maxBin;
+  }
+};
+
 void displayProgress(long current, long max)
 {
   using std::cerr;
@@ -835,45 +921,142 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertTree->SetBranchAddress("vert_z", &vert_z, &b_vert_z);
   tree->AddFriend(vertTree);
 #endif  
-  using milli = std::chrono::milliseconds;
-  typedef boost::variant<vector<float>**,vector<int>**> boostVector;
-  std::map<TString, std::pair<boostVector, float> > preselCuts{{{"maxEta",{&trk_eta,2.4}}, {"maxChi2rzdof",{&trk_chi2rz,3.0}}, {"maxChi2rphidof_barrel",{&trk_chi2rphi, 5.0}}, {"minMVA2",{&trk_MVA2,0.2}},{"minMVA1",{&trk_MVA1,0.2}}, {"minMVA1_D",{&trk_MVA1,0.8}}, {"minNumStub_overlap",{&trk_nstub,5}}, {"minPt",{&trk_pt,3.0}}, {"minD0_barrel",{&trk_d0,0.06}}, {"minD0_disk",{&trk_d0,0.08}}}};
-  std::map<TString, std::pair<boostVector, float> > preselCutsTP{{{"maxEta",{&tp_eta,2.4}}, {"minPt",{&tp_pt,3.0}}, {"minD0_barrel",{&tp_d0,0.06}}, {"minD0_disk",{&tp_d0,0.08}}}};
 
-  std::map<std::vector<TString>,std::pair<boostVector,std::vector<float>> > varCutFlows = { {{"d0","cm"},{&trk_d0,{200,-2.0,2.0}}},
-													{{"pt","GeV"},{&trk_pt,{200,0.0,100.0}}},
-													{{"eta",""},{&trk_eta,{50,-2.5,2.5}}},
-													{{"z0","cm"},{&trk_z0,{100,-20.0,20.0}}},
-													{{"phi",""},{&trk_phi,{100,-2*TMath::Pi(),2*TMath::Pi()}}},
-													{{"sectorPhi",""},{&trk_phi,{100,-1.0,1.0}}},
-													{{"MVA1",""},{&trk_MVA1,{100,0.0,1.0}}},
-													{{"MVA2",""},{&trk_MVA2,{100,0.0,1.0}}},
-													{{"chi2rphidof",""},{&trk_chi2rphi,{100,0.0,6.0}}},
-													{{"chi2rzdof",""},{&trk_chi2rz,{100,0.0,6.0}}},
-													{{"bendchi2",""},{&trk_bendchi2,{100,0.0,10.0}}}
-  };
+  std::vector<std::unique_ptr<Cut>> preselCuts;
+  //Cut preselCuts[preselCutsSize]  = {TypedCut<float>("maxEta",&trk_eta,2.4), TypedCut<float>("maxChi2rzdof",&trk_chi2rz,3.0), TypedCut<float>("maxChi2rphidof_barrel",&trk_chi2rphi,5.0), TypedCut<float>("minMVA2",&trk_MVA2,0.2), TypedCut<float>("minMVA1",&trk_MVA1,0.2), TypedCut<float>("minMVA1_D",&trk_MVA1,0.8), TypedCut<int>("minNumStub_overlap",&trk_nstub,5), TypedCut<float>("minPt",&trk_pt,3.0), TypedCut<float>("minD0_barrel",&trk_d0,0.06), TypedCut<float>("minD0_disk",&trk_d0,0.08)};
+  std::unique_ptr<TypedCut<float>> cut0(new TypedCut<float>("maxEta",&trk_eta,2.4));
+  preselCuts.push_back(std::move(cut0));
+  std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof",&trk_chi2rz,3.0));
+  preselCuts.push_back(std::move(cut1));
+  std::unique_ptr<TypedCut<float>> cut2(new TypedCut<float>("maxChi2rphidof_barrel",&trk_chi2rphi,5.0));
+  preselCuts.push_back(std::move(cut2));
+  std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("minMVA2",&trk_MVA2,0.2));
+  preselCuts.push_back(std::move(cut3));
+  std::unique_ptr<TypedCut<float>> cut4(new TypedCut<float>("minMVA1",&trk_MVA1,0.2));
+  preselCuts.push_back(std::move(cut4));
+  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D",&trk_MVA1,0.8));
+  preselCuts.push_back(std::move(cut5));
+  std::unique_ptr<TypedCut<int>> cut6(new TypedCut<int>("minNumStub_overlap",&trk_nstub,5));
+  preselCuts.push_back(std::move(cut6));
+  std::unique_ptr<TypedCut<float>> cut7(new TypedCut<float>("minPt",&trk_pt,3.0));
+  preselCuts.push_back(std::move(cut7));
+  std::unique_ptr<TypedCut<float>> cut8(new TypedCut<float>("minD0_barrel",&trk_d0,0.06));
+  preselCuts.push_back(std::move(cut8));
+  std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("minD0_disk",&trk_d0,0.08));
+  preselCuts.push_back(std::move(cut9));
+				      
+  std::vector<std::unique_ptr<Cut>> preselCutsTP;
+  std::unique_ptr<TypedCut<float>> tpCut0(new TypedCut<float>("maxEta",&tp_eta,2.4));
+  preselCutsTP.push_back(std::move(tpCut0));
+  std::unique_ptr<TypedCut<float>> tpCut1(new TypedCut<float>("minPt",&tp_pt,3.0));
+  preselCutsTP.push_back(std::move(tpCut1));
+  std::unique_ptr<TypedCut<float>> tpCut2(new TypedCut<float>("minD0_barrel",&tp_d0,0.06));
+  preselCutsTP.push_back(std::move(tpCut2));
+  std::unique_ptr<TypedCut<float>> tpCut3(new TypedCut<float>("minD0_disk",&tp_d0,0.08));
+  preselCutsTP.push_back(std::move(tpCut3));
+
+  /*Plot varCutFlows[varCutFlowsSize] = { TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0),
+					TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,100.0),
+					TypedPlot<float>("eta","",&trk_eta,50,-2.5,2.5),
+					TypedPlot<float>("z0","cm",&trk_z0,100,-20.0,20.0),
+					TypedPlot<float>("phi","",&trk_phi,100,-2*TMath::Pi(),2*TMath::Pi()),
+					TypedPlot<float>("sectorPhi","",&trk_phi,100,-1.0,1.0),
+					TypedPlot<float>("MVA1","",&trk_MVA1,100,0.0,1.0),
+					TypedPlot<float>("MVA2","",&trk_MVA2,100,0.0,1.0),
+					TypedPlot<float>("chi2rphidof","",&trk_chi2rphi,100,0.0,6.0),
+					TypedPlot<float>("chi2rzdof","",&trk_chi2rz,100,0.0,6.0),
+					TypedPlot<float>("bendchi2","",&trk_bendchi2,100,0.0,10.0)
+					};*/
+
+  std::vector<std::unique_ptr<Plot>> varCutFlows;
+  std::unique_ptr<TypedPlot<float>> plot0(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
+  varCutFlows.push_back(std::move(plot0));
+  std::unique_ptr<TypedPlot<float>> plot1(new TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,100.0));
+  varCutFlows.push_back(std::move(plot1));
+  std::unique_ptr<TypedPlot<float>> plot2(new TypedPlot<float>("eta","",&trk_eta,50,-2.5,2.5));
+  varCutFlows.push_back(std::move(plot2));
+  std::unique_ptr<TypedPlot<float>> plot3(new TypedPlot<float>("z0","cm",&trk_z0,100,-20.0,20.0));
+  varCutFlows.push_back(std::move(plot3));
+  std::unique_ptr<TypedPlot<float>> plot4(new TypedPlot<float>("phi","",&trk_phi,100,-2*TMath::Pi(),2*TMath::Pi()));
+  varCutFlows.push_back(std::move(plot4));
+  std::unique_ptr<TypedPlot<float>> plot5(new TypedPlot<float>("sectorPhi","",&trk_phi,100,-1.0,1.0));
+  varCutFlows.push_back(std::move(plot5));
+  std::unique_ptr<TypedPlot<float>> plot6(new TypedPlot<float>("MVA1","",&trk_MVA1,100,0.0,1.0));
+  varCutFlows.push_back(std::move(plot6));
+  std::unique_ptr<TypedPlot<float>> plot7(new TypedPlot<float>("MVA2","",&trk_MVA2,100,0.0,1.0));
+  varCutFlows.push_back(std::move(plot7));
+  std::unique_ptr<TypedPlot<float>> plot8(new TypedPlot<float>("chi2rphidof","",&trk_chi2rphi,100,0.0,6.0));
+  varCutFlows.push_back(std::move(plot8));
+  std::unique_ptr<TypedPlot<float>> plot9(new TypedPlot<float>("chi2rzdof","",&trk_chi2rz,100,0.0,6.0));
+  varCutFlows.push_back(std::move(plot9));
+  std::unique_ptr<TypedPlot<float>> plot10(new TypedPlot<float>("bendchi2","",&trk_bendchi2,100,0.0,10.0));
+  varCutFlows.push_back(std::move(plot10));
+
+  /*Plot varCutFlowsTP[varCutFlowsTPSize] = {  TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0),
+					     TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,100.0),
+					     TypedPlot<float>("eta","",&tp_eta,50,-2.5,2.5),
+					     TypedPlot<float>("z0","cm",&tp_z0,100,-20.0,20.0),
+					     TypedPlot<float>("phi","",&tp_phi,100,-2*TMath::Pi(),2*TMath::Pi()),
+					     TypedPlot<float>("sectorPhi","",&tp_phi,100,-1.0,1.0),
+					     TypedPlot<float>("dxy","cm",&tp_dxy,50,-2.0,2.0)
+					     };*/
+
+  std::vector<std::unique_ptr<Plot>> varCutFlowsTP;
+  std::unique_ptr<TypedPlot<float>> tpPlot0(new TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0));
+  varCutFlowsTP.push_back(std::move(tpPlot0));
+  std::unique_ptr<TypedPlot<float>> tpPlot1(new TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,100.0));
+  varCutFlowsTP.push_back(std::move(tpPlot1));
+  std::unique_ptr<TypedPlot<float>> tpPlot2(new TypedPlot<float>("eta","",&tp_eta,50,-2.5,2.5));
+  varCutFlowsTP.push_back(std::move(tpPlot2));
+  std::unique_ptr<TypedPlot<float>> tpPlot3(new TypedPlot<float>("z0","cm",&tp_z0,100,-20.0,20.0));
+  varCutFlowsTP.push_back(std::move(tpPlot3));
+  std::unique_ptr<TypedPlot<float>> tpPlot4(new TypedPlot<float>("phi","",&tp_phi,100,-2*TMath::Pi(),2*TMath::Pi()));
+  varCutFlowsTP.push_back(std::move(tpPlot4));
+  std::unique_ptr<TypedPlot<float>> tpPlot5(new TypedPlot<float>("sectorPhi","",&tp_phi,100,-1.0,1.0));
+  varCutFlowsTP.push_back(std::move(tpPlot5));
+  std::unique_ptr<TypedPlot<float>> tpPlot6(new TypedPlot<float>("dxy","cm",&tp_dxy,50,-2.0,2.0));
+  varCutFlowsTP.push_back(std::move(tpPlot6));
   
-  std::map<std::vector<TString>,std::pair<boostVector,std::vector<float>> > varCutFlowsTP = { {{"d0","cm"},{&tp_d0,{200,-2.0,2.0}}},
-													  {{"pt","GeV"},{&tp_pt,{200,0.0,100.0}}},
-													  {{"eta",""},{&tp_eta,{50,-2.5,2.5}}},
-													  {{"z0","cm"},{&tp_z0,{100,-20.0,20.0}}},
-													  {{"phi",""},{&tp_phi,{100,-2*TMath::Pi(),2*TMath::Pi()}}},
-													  {{"sectorPhi",""},{&tp_phi,{100,-1.0,1.0}}},
-													  {{"dxy","cm"},{&tp_dxy,{50,-2.0,2.0}}}
-  };
+  /*std::pair<Plot,Plot> varCutFlows2D[varCutFlows2DSize] = { {TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0),TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0)},
+							    {TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4),TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0)},
+							    {TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0),TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4)},
+							    {TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4),TypedPlot<int>("nstub","",&trk_nstub,7,0.0,7.0)}
+							    };*/
 
-  std::map<std::vector<TString>,std::pair<std::vector<boostVector>,std::vector<float>> > varCutFlows2D = { {{"d0","cm","pt","GeV"},{{&trk_d0,&trk_pt},{200,-2.0,2.0,200,0.0,30.0}}},
-														       {{"eta","","pt","GeV"},{{&trk_eta,&trk_pt},{200,-2.4,2.4,200,0.0,30.0}}},
-														       {{"d0","cm","eta",""},{{&trk_d0,&trk_eta},{200,-2.0,2.0,200,-2.4,2.4}}},
-														       {{"eta","","nstub",""},{{&trk_eta,&trk_nstub},{200,-2.4,2.4,7,0.0,7.0}}}
-  };
+  std::vector<std::pair<std::unique_ptr<Plot>,std::unique_ptr<Plot> > > varCutFlows2D;
+  std::unique_ptr<TypedPlot<float>> plot0X(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
+  std::unique_ptr<TypedPlot<float>> plot0Y(new TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0));
+  varCutFlows2D.push_back({std::move(plot0X),std::move(plot0Y)});
+  std::unique_ptr<TypedPlot<float>> plot1X(new TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4));
+  std::unique_ptr<TypedPlot<float>> plot1Y(new TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0));
+  varCutFlows2D.push_back({std::move(plot1X),std::move(plot1Y)});
+  std::unique_ptr<TypedPlot<float>> plot2X(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
+  std::unique_ptr<TypedPlot<float>> plot2Y(new TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4));
+  varCutFlows2D.push_back({std::move(plot2X),std::move(plot2Y)});
+  std::unique_ptr<TypedPlot<float>> plot3X(new TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4));
+  std::unique_ptr<TypedPlot<int>> plot3Y(new TypedPlot<int>("nstub","",&trk_nstub,7,0.0,7.0));
+  varCutFlows2D.push_back({std::move(plot3X),std::move(plot3Y)});
 
-  std::map<std::vector<TString>,std::pair<std::vector<boostVector>,std::vector<float>> > varCutFlowsTP2D = { {{"d0","cm","pt","GeV"},{{&tp_d0,&tp_pt},{200,-2.0,2.0,200,0.0,30.0}}},
-															 {{"eta","","pt","GeV"},{{&tp_eta,&tp_pt},{200,-2.4,2.4,200,0.0,30.0}}},
-															 {{"d0","cm","eta",""},{{&tp_d0,&tp_eta},{200,-2.0,2.0,200,-2.4,2.4}}},
-															 {{"eta","","nstub",""},{{&tp_eta,&tp_nstub},{200,-2.4,2.4,7,0.0,7.0}}}
-  };
-    
+  /*std::pair<Plot,Plot> varCutFlowsTP2D[varCutFlowsTP2DSize] = { {TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0),TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,30.0)},
+								{TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4),TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,30.0)},
+								{TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0),TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4)},
+								{TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4),TypedPlot<int>("nstub","",&tp_nstub,7,0.0,7.0)}
+								};*/
+
+  std::vector<std::pair<std::unique_ptr<Plot>,std::unique_ptr<Plot> > > varCutFlowsTP2D;
+  std::unique_ptr<TypedPlot<float>> tpPlot0X(new TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0));
+  std::unique_ptr<TypedPlot<float>> tpPlot0Y(new TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,30.0));
+  varCutFlowsTP2D.push_back({std::move(tpPlot0X),std::move(tpPlot0Y)});
+  std::unique_ptr<TypedPlot<float>> tpPlot1X(new TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4));
+  std::unique_ptr<TypedPlot<float>> tpPlot1Y(new TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,30.0));
+  varCutFlowsTP2D.push_back({std::move(tpPlot1X),std::move(tpPlot1Y)});
+  std::unique_ptr<TypedPlot<float>> tpPlot2X(new TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0));
+  std::unique_ptr<TypedPlot<float>> tpPlot2Y(new TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4));
+  varCutFlowsTP2D.push_back({std::move(tpPlot2X),std::move(tpPlot2Y)});
+  std::unique_ptr<TypedPlot<float>> tpPlot3X(new TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4));
+  std::unique_ptr<TypedPlot<int>> tpPlot3Y(new TypedPlot<int>("nstub","",&tp_nstub,7,0.0,7.0));
+  varCutFlowsTP2D.push_back({std::move(tpPlot3X),std::move(tpPlot3Y)});
+
   std::vector<TString> trackType = {"primary","np","fake","PU","notHiggs"};
   std::vector<TString> tpType = {"primary","np","PU","notHiggs","match",""};
   std::vector<TString> plotModifiers = {"","_H","_L","_P","_D","_barrel","_disk"};
@@ -885,266 +1068,62 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::map<string,int> numPartCutFlows[trackType.size()][preselCuts.size()];
   std::map<string,int> numPartCutFlowsTP[tpType.size()][preselCutsTP.size()];
   
-  int it_counter = 0;
-  for(auto it=varCutFlows.cbegin(); it!=varCutFlows.cend(); ++it){
+  for(uint it=0; it<varCutFlows.size(); ++it){
     for(uint i=0; i<trackType.size(); ++i){
-      int jt_counter = 0;
-      for(auto jt=preselCuts.cbegin(); jt!=preselCuts.cend(); ++jt){
+      for(uint jt=0; jt<preselCuts.size(); ++jt){
 	for(uint j=0; j<plotModifiers.size(); ++j){
-	  TString name = "h_trk_"+it->first.at(0)+"_"+trackType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
-	  float binWidth = (it->second.second.at(2) - it->second.second.at(1)) / it->second.second.at(0);
+	  TString name = "h_trk_"+varCutFlows[it]->getVarName()+"_"+trackType[i]+"_"+preselCuts[jt]->getCutName()+"Cut"+plotModifiers[j];
+	  float binWidth = (varCutFlows[it]->getMaxBin() - varCutFlows[it]->getMinBin()) / varCutFlows[it]->getNumBins();
 	  TString binLabel = std::to_string(binWidth);
-	  TString labels = name+"; Track "+it->first.at(0)+" ("+it->first.at(1)+") ; Events / "+binLabel+" "+it->first.at(1);
-	  TH1F* hist = new TH1F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2));
-	  preselCutFlows[it_counter][i][jt_counter][j] = hist;
+	  TString labels = name+"; Track "+varCutFlows[it]->getVarName()+" ("+varCutFlows[it]->getUnit()+") ; Events / "+binLabel+" "+varCutFlows[it]->getUnit();
+	  TH1F* hist = new TH1F(name,labels,varCutFlows[it]->getNumBins(),varCutFlows[it]->getMinBin(),varCutFlows[it]->getMaxBin());
+	  preselCutFlows[it][i][jt][j] = hist;
 	}
-	jt_counter++;
       }
     }
-    it_counter++;
   }
   
-  it_counter = 0;
-  for(auto it=varCutFlows2D.cbegin(); it!=varCutFlows2D.cend(); ++it){
+  for(uint it=0; it<varCutFlows2D.size(); ++it){
     for(uint i=0; i<trackType.size(); ++i){
-      int jt_counter = 0;
-      for(auto jt=preselCuts.cbegin(); jt!=preselCuts.cend(); ++jt){
+      for(uint jt=0; jt<preselCuts.size(); ++jt){
 	for(uint j=0; j<plotModifiers.size(); ++j){
-	  TString name = "h_trk_"+it->first.at(2)+"_vs_"+it->first.at(0)+"_"+trackType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
-	  TString labels = name+"; Track "+it->first.at(0)+" ("+it->first.at(1)+") ; Track "+it->first.at(2)+" ("+it->first.at(3)+")";
-	  TH2F* hist = new TH2F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2),it->second.second.at(3),it->second.second.at(4),it->second.second.at(5));
-	  preselCutFlows2D[it_counter][i][jt_counter][j] = hist;	  
+	  TString name = "h_trk_"+varCutFlows2D[it].second->getVarName()+"_vs_"+varCutFlows2D[it].first->getVarName()+"_"+trackType[i]+"_"+preselCuts[jt]->getCutName()+"Cut"+plotModifiers[j];
+	  TString labels = name+"; Track "+varCutFlows2D[it].first->getVarName()+" ("+varCutFlows2D[it].first->getUnit()+") ; Track "+varCutFlows2D[it].second->getVarName()+" ("+varCutFlows2D[it].second->getUnit()+")";
+	  TH2F* hist = new TH2F(name,labels,varCutFlows2D[it].first->getNumBins(),varCutFlows2D[it].first->getMinBin(),varCutFlows2D[it].first->getMaxBin(),varCutFlows2D[it].second->getNumBins(),varCutFlows2D[it].second->getMinBin(),varCutFlows2D[it].second->getMaxBin());
+	  preselCutFlows2D[it][i][jt][j] = hist;
 	}
-	jt_counter++;
       }
     }
-    it_counter++;
   }
-  
-  it_counter = 0;
-  for(auto it=varCutFlowsTP.cbegin(); it!=varCutFlowsTP.cend(); ++it){
-    for(uint i=0; i<tpType.size(); ++i){
-      int jt_counter = 0;
-      for(auto jt=preselCutsTP.cbegin(); jt!=preselCutsTP.cend(); ++jt){
-	TString cutName = jt->first;
-	for(uint j=0; j<plotModifiers.size(); ++j){
-	  TString name = "h_tp_"+it->first.at(0)+"_"+tpType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
-	  float binWidth = (it->second.second.at(2) - it->second.second.at(1)) / it->second.second.at(0);
-	  TString binLabel = std::to_string(binWidth);
-	  TString labels = name+"; Tp "+it->first.at(0)+" ("+it->first.at(1)+") ; Events / "+binLabel+" "+it->first.at(1);
-	  TH1F* hist = new TH1F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2));
-	  preselCutFlowsTP[it_counter][i][jt_counter][j] = hist;
-	}
-	jt_counter++;
-      }
-    }
-    it_counter++;
-  }
-  
-  it_counter = 0;
-  for(auto it=varCutFlowsTP2D.cbegin(); it!=varCutFlowsTP2D.cend(); ++it){
-    for(uint i=0; i<tpType.size(); ++i){
-      int jt_counter = 0;
-      for(auto jt=preselCutsTP.cbegin(); jt!=preselCutsTP.cend(); ++jt){
-	TString cutName = jt->first;
-	for(uint j=0; j<plotModifiers.size(); ++j){
-	  TString name = "h_tp_"+it->first.at(2)+"_vs_"+it->first.at(0)+"_"+tpType[i]+"_"+jt->first+"Cut"+plotModifiers[j];
-	  TString labels = name+"; Tp "+it->first.at(0)+" ("+it->first.at(1)+") ; Tp "+it->first.at(2)+" ("+it->first.at(3)+")";
-	  TH2F* hist = new TH2F(name,labels,it->second.second.at(0),it->second.second.at(1),it->second.second.at(2),it->second.second.at(3),it->second.second.at(4),it->second.second.at(5));
-	  preselCutFlowsTP2D[it_counter][i][jt_counter][j] = hist;
-	}
-	jt_counter++;
-      }
-    }
-    it_counter++;
-  }
-  
-  TH1F *h_trk_d0 = new TH1F("h_trk_d0","h_trk_d0; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary = new TH1F("h_trk_d0_primary","h_trk_d0_primary; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_noCuts = new TH1F("h_trk_d0_primary_noCuts","h_trk_d0_primary_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_noCuts_zoomOut = new TH1F("h_trk_d0_primary_noCuts_zoomOut","h_trk_d0_primary_noCuts_zoomOut; Track d_{0} Distribution (cm) ; Events / 0.2 cm",200,-20,20);
-  TH1F *h_trk_d0_primary_noCuts_barrel = new TH1F("h_trk_d0_primary_noCuts_barrel","h_trk_d0_primary_noCuts_barrel; Track d_{0} Distribution (cm) (#eta<=0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_noCuts_disk = new TH1F("h_trk_d0_primary_noCuts_disk","h_trk_d0_primary_noCuts_disk; Track d_{0} Distribution (cm) (#eta>0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_noCuts_H = new TH1F("h_trk_d0_primary_noCuts_H","h_trk_d0_primary_noCuts_H; Track d_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_noCuts_L = new TH1F("h_trk_d0_primary_noCuts_L","h_trk_d0_primary_noCuts_L; Track d_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_qualCuts = new TH1F("h_trk_d0_primary_qualCuts","h_trk_d0_primary_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_allCuts = new TH1F("h_trk_d0_primary_allCuts","h_trk_d0_primary_allCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_allCuts_zoomOut = new TH1F("h_trk_d0_primary_allCuts_zoomOut","h_trk_d0_primary_allCuts_zoomOut; Track d_{0} Distribution (cm) ; Events / 0.2 cm",200,-20,20);
-  TH1F *h_trk_d0_primary_allCuts_barrel = new TH1F("h_trk_d0_primary_allCuts_barrel","h_trk_d0_primary_allCuts_barrel; Track d_{0} Distribution (cm) (#eta<=0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_primary_allCuts_disk = new TH1F("h_trk_d0_primary_allCuts_disk","h_trk_d0_primary_allCuts_disk; Track d_{0} Distribution (cm) (#eta>0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_ptWeightedD0_primary_qualCuts = new TH1F("h_trk_ptWeightedD0_primary_qualCuts","h_trk_ptWeightedD0_primary_qualCuts; Track p_{T}*d_{0} Distribution (GeV cm) ; Events / 0.02 GeV cm",200,-2,2);
-  // np = not primary
-  TH1F *h_trk_d0_np = new TH1F("h_trk_d0_np","h_trk_d0_np; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_noCuts = new TH1F("h_trk_d0_np_noCuts","h_trk_d0_np_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_noCuts_zoomOut = new TH1F("h_trk_d0_np_noCuts_zoomOut","h_trk_d0_np_noCuts_zoomOut; Track d_{0} Distribution (cm) ; Events / 0.2 cm",200,-20,20);
-  TH1F *h_trk_d0_np_noCuts_barrel = new TH1F("h_trk_d0_np_noCuts_barrel","h_trk_d0_np_noCuts_barrel; Track d_{0} Distribution (cm) (#eta<=0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_noCuts_disk = new TH1F("h_trk_d0_np_noCuts_disk","h_trk_d0_np_noCuts_disk; Track d_{0} Distribution (cm) (#eta>0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_noCuts_H = new TH1F("h_trk_d0_np_noCuts_H","h_trk_d0_np_noCuts_H; Track d_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_noCuts_L = new TH1F("h_trk_d0_np_noCuts_L","h_trk_d0_np_noCuts_L; Track d_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_fake_noCuts = new TH1F("h_trk_d0_fake_noCuts","h_trk_d0_fake_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_PU_noCuts = new TH1F("h_trk_d0_PU_noCuts","h_trk_d0_PU_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_notHiggs_noCuts = new TH1F("h_trk_d0_notHiggs_noCuts","h_trk_d0_notHiggs_noCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_qualCuts = new TH1F("h_trk_d0_np_qualCuts","h_trk_d0_np_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_allCuts = new TH1F("h_trk_d0_np_allCuts","h_trk_d0_np_allCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_allCuts_zoomOut = new TH1F("h_trk_d0_np_allCuts_zoomOut","h_trk_d0_np_allCuts_zoomOut; Track d_{0} Distribution (cm) ; Events / 0.2 cm",200,-20,20);
-  TH1F *h_trk_d0_np_allCuts_barrel = new TH1F("h_trk_d0_np_allCuts_barrel","h_trk_d0_np_allCuts_barrel; Track d_{0} Distribution (cm) (#eta<=0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_np_allCuts_disk = new TH1F("h_trk_d0_np_allCuts_disk","h_trk_d0_np_allCuts_disk; Track d_{0} Distribution (cm) (#eta>0.95); Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_ptWeightedD0_np_qualCuts = new TH1F("h_trk_ptWeightedD0_np_qualCuts","h_trk_ptWeightedD0_np_qualCuts; Track p_{T}*d_{0} Distribution (GeV cm) ; Events / 0.02 GeV cm",200,-2,2);
-  TH1F *h_trk_d0_fake_qualCuts = new TH1F("h_trk_d0_fake_qualCuts","h_trk_d0_fake_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_PU_qualCuts = new TH1F("h_trk_d0_PU_qualCuts","h_trk_d0_PU_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_d0_notHiggs_qualCuts = new TH1F("h_trk_d0_notHiggs_qualCuts","h_trk_d0_notHiggs_qualCuts; Track d_{0} Distribution (cm) ; Events / 0.02 cm",200,-2,2);
-  TH1F *h_trk_pt = new TH1F("h_trk_pt","h_trk_pt; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
-  TH1F *h_trk_pt_noCuts = new TH1F("h_trk_pt_noCuts","h_trk_pt_noCuts; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
-  TH1F *h_trk_pt_oldCuts = new TH1F("h_trk_pt_oldCuts","h_trk_pt_oldCuts; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
-  TH1F *h_trk_pt_allCuts = new TH1F("h_trk_pt_allCuts","h_trk_pt_allCuts; Track p_{T} Distribution (GeV); Events / 0.6 GeV", 100, 0, 60.0);
-  TH1F *h_trk_pt_primary = new TH1F("h_trk_pt_primary","h_trk_pt_primary; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_noCuts = new TH1F("h_trk_pt_primary_noCuts","h_trk_pt_primary_noCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_noCuts_barrel = new TH1F("h_trk_pt_primary_noCuts_barrel","h_trk_pt_primary_noCuts_barrel; Track p_{T} Distribution (GeV) (#eta<=0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_noCuts_disk = new TH1F("h_trk_pt_primary_noCuts_disk","h_trk_pt_primary_noCuts_disk; Track p_{T} Distribution (GeV) (#eta>0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_qualCuts = new TH1F("h_trk_pt_primary_qualCuts","h_trk_pt_primary_qualCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_ptCuts = new TH1F("h_trk_pt_primary_ptCuts","h_trk_pt_primary_ptCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_d0Cuts = new TH1F("h_trk_pt_primary_d0Cuts","h_trk_pt_primary_d0Cuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_chi2rzdofCuts = new TH1F("h_trk_pt_primary_chi2rzdofCuts","h_trk_pt_primary_chi2rzdofCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_bendchi2Cuts = new TH1F("h_trk_pt_primary_bendchi2Cuts","h_trk_pt_primary_bendchi2Cuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_chi2rphidofCuts = new TH1F("h_trk_pt_primary_chi2rphidofCuts","h_trk_pt_primary_chi2rphidofCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_nstubCuts = new TH1F("h_trk_pt_primary_nstubCuts","h_trk_pt_primary_nstubCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_z0Cuts = new TH1F("h_trk_pt_primary_z0Cuts","h_trk_pt_primary_z0Cuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_allCuts = new TH1F("h_trk_pt_primary_allCuts","h_trk_pt_primary_allCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_allCuts_barrel = new TH1F("h_trk_pt_primary_allCuts_barrel","h_trk_pt_primary_allCuts_barrel; Track p_{T} Distribution (GeV) (#eta<=0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_primary_allCuts_disk = new TH1F("h_trk_pt_primary_allCuts_disk","h_trk_pt_primary_allCuts_disk; Track p_{T} Distribution (GeV) (#eta>0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_ptIso4_primary_allCuts = new TH1F("h_trk_ptIso4_primary_allCuts","h_trk_ptIso4_primary_allCuts; Track p_{T} Isolation Distribution; Events / 0.02", 1000, 0, 20.0);
-  TH1F *h_trk_ptIso8_primary_allCuts = new TH1F("h_trk_ptIso8_primary_allCuts","h_trk_ptIso8_primary_allCuts; Track p_{T} Isolation Distribution; Events / 0.02", 1000, 0, 20.0);
-  TH1F *h_trk_pt_np = new TH1F("h_trk_pt_np","h_trk_pt_np; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_noCuts = new TH1F("h_trk_pt_np_noCuts","h_trk_pt_np_noCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_noCuts_barrel = new TH1F("h_trk_pt_np_noCuts_barrel","h_trk_pt_np_noCuts_barrel; Track p_{T} Distribution (GeV) (#eta<=0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_noCuts_disk = new TH1F("h_trk_pt_np_noCuts_disk","h_trk_pt_np_noCuts_disk; Track p_{T} Distribution (GeV) (#eta>0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_fake_noCuts = new TH1F("h_trk_pt_fake_noCuts","h_trk_pt_fake_noCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_PU_noCuts = new TH1F("h_trk_pt_PU_noCuts","h_trk_pt_PU_noCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_notHiggs_noCuts = new TH1F("h_trk_pt_notHiggs_noCuts","h_trk_pt_notHiggs_noCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_qualCuts = new TH1F("h_trk_pt_np_qualCuts","h_trk_pt_np_qualCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_fake_qualCuts = new TH1F("h_trk_pt_fake_qualCuts","h_trk_pt_fake_qualCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_PU_qualCuts = new TH1F("h_trk_pt_PU_qualCuts","h_trk_pt_PU_qualCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_notHiggs_qualCuts = new TH1F("h_trk_pt_notHiggs_qualCuts","h_trk_pt_notHiggs_qualCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_ptCuts = new TH1F("h_trk_pt_np_ptCuts","h_trk_pt_np_ptCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_d0Cuts = new TH1F("h_trk_pt_np_d0Cuts","h_trk_pt_np_d0Cuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_chi2rzdofCuts = new TH1F("h_trk_pt_np_chi2rzdofCuts","h_trk_pt_np_chi2rzdofCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_bendchi2Cuts = new TH1F("h_trk_pt_np_bendchi2Cuts","h_trk_pt_np_bendchi2Cuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_chi2rphidofCuts = new TH1F("h_trk_pt_np_chi2rphidofCuts","h_trk_pt_np_chi2rphidofCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_nstubCuts = new TH1F("h_trk_pt_np_nstubCuts","h_trk_pt_np_nstubCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_z0Cuts = new TH1F("h_trk_pt_np_z0Cuts","h_trk_pt_np_z0Cuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_allCuts = new TH1F("h_trk_pt_np_allCuts","h_trk_pt_np_allCuts; Track p_{T} Distribution (GeV); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_allCuts_barrel = new TH1F("h_trk_pt_np_allCuts_barrel","h_trk_pt_np_allCuts_barrel; Track p_{T} Distribution (GeV) (#eta<=0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_pt_np_allCuts_disk = new TH1F("h_trk_pt_np_allCuts_disk","h_trk_pt_np_allCuts_disk; Track p_{T} Distribution (GeV) (#eta>0.95); Events / 0.5 GeV", 200, 0, 100.0);
-  TH1F *h_trk_ptIso4_np_allCuts = new TH1F("h_trk_ptIso4_np_allCuts","h_trk_ptIso4_np_allCuts; Track p_{T} Isolation Distribution; Events / 0.02", 1000, 0, 20.0);
-  TH1F *h_trk_ptIso8_np_allCuts = new TH1F("h_trk_ptIso8_np_allCuts","h_trk_ptIso8_np_allCuts; Track p_{T} Isolation Distribution; Events / 0.02", 1000, 0, 20.0);
-  TH1F *h_trk_eta = new TH1F("h_trk_eta","h_trk_eta; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_primary = new TH1F("h_trk_eta_primary","h_trk_eta_primary; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_primary_noCuts = new TH1F("h_trk_eta_primary_noCuts","h_trk_eta_primary_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_primary_noCuts_H = new TH1F("h_trk_eta_primary_noCuts_H","h_trk_eta_primary_noCuts_H; Track #eta Distribution (p_{T}>10 GeV); Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_primary_noCuts_L = new TH1F("h_trk_eta_primary_noCuts_L","h_trk_eta_primary_noCuts_L; Track #eta Distribution (p_{T}<10 GeV); Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_primary_qualCuts = new TH1F("h_trk_eta_primary_qualCuts","h_trk_eta_primary_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_primary_allCuts = new TH1F("h_trk_eta_primary_allCuts","h_trk_eta_primary_allCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_np = new TH1F("h_trk_eta_np","h_trk_eta_np; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_np_noCuts = new TH1F("h_trk_eta_np_noCuts","h_trk_eta_np_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_np_noCuts_H = new TH1F("h_trk_eta_np_noCuts_H","h_trk_eta_np_noCuts_H; Track #eta Distribution (p_{T}>10 GeV); Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_np_noCuts_L = new TH1F("h_trk_eta_np_noCuts_L","h_trk_eta_np_noCuts_L; Track #eta Distribution (p_{T}<10 GeV); Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_fake_noCuts = new TH1F("h_trk_eta_fake_noCuts","h_trk_eta_fake_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_PU_noCuts = new TH1F("h_trk_eta_PU_noCuts","h_trk_eta_PU_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_notHiggs_noCuts = new TH1F("h_trk_eta_notHiggs_noCuts","h_trk_eta_notHiggs_noCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_np_qualCuts = new TH1F("h_trk_eta_np_qualCuts","h_trk_eta_np_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_fake_qualCuts = new TH1F("h_trk_eta_fake_qualCuts","h_trk_eta_fake_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_PU_qualCuts = new TH1F("h_trk_eta_PU_qualCuts","h_trk_eta_PU_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_notHiggs_qualCuts = new TH1F("h_trk_eta_notHiggs_qualCuts","h_trk_eta_notHiggs_qualCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F *h_trk_eta_np_allCuts = new TH1F("h_trk_eta_np_allCuts","h_trk_eta_np_allCuts; Track #eta Distribution; Events / 0.1", 50, -2.5, 2.5);
-  TH1F* h_trk_z0 = new TH1F("h_trk_z0","h_trk_z0; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_primary = new TH1F("h_trk_z0_primary","h_trk_z0_primary; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_primary_noCuts = new TH1F("h_trk_z0_primary_noCuts","h_trk_z0_primary_noCuts; Track z_{0} Distribution (cm); Events / 0.4 cm", 100, -20, 20);
-  TH1F* h_trk_z0_primary_noCuts_zoomOut = new TH1F("h_trk_z0_primary_noCuts_zoomOut","h_trk_z0_primary_noCuts_zoomOut; Track z_{0} Distribution (cm); Events / 1.0 cm", 100, -50, 50);
-  TH1F* h_trk_z0_primary_noCuts_barrel = new TH1F("h_trk_z0_primary_noCuts_barrel","h_trk_z0_primary_noCuts_barrel; Track z_{0} Distribution (cm) (#eta<=0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_primary_noCuts_disk = new TH1F("h_trk_z0_primary_noCuts_disk","h_trk_z0_primary_noCuts_disk; Track z_{0} Distribution (cm) (#eta>0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_primary_noCuts_H = new TH1F("h_trk_z0_primary_noCuts_H","h_trk_z0_primary_noCuts_H; Track z_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.1 cm", 100, 0, 20);
-  TH1F* h_trk_z0_primary_noCuts_L = new TH1F("h_trk_z0_primary_noCuts_L","h_trk_z0_primary_noCuts_L; Track z_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.1 cm", 100, 0, 20);
-  TH1F* h_trk_z0_primary_qualCuts = new TH1F("h_trk_z0_primary_qualCuts","h_trk_z0_primary_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_primary_allCuts = new TH1F("h_trk_z0_primary_allCuts","h_trk_z0_primary_allCuts; Track z_{0} Distribution (cm); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_primary_allCuts_zoomOut = new TH1F("h_trk_z0_primary_allCuts_zoomOut","h_trk_z0_primary_allCuts_zoomOut; Track z_{0} Distribution (cm); Events / 1.0 cm", 100, -50, 50);
-  TH1F* h_trk_z0_primary_allCuts_barrel = new TH1F("h_trk_z0_primary_allCuts_barrel","h_trk_z0_primary_allCuts_barrel; Track z_{0} Distribution (cm) (#eta<=0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_primary_allCuts_disk = new TH1F("h_trk_z0_primary_allCuts_disk","h_trk_z0_primary_allCuts_disk; Track z_{0} Distribution (cm) (#eta>0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np = new TH1F("h_trk_z0_np","h_trk_z0_np; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_np_noCuts = new TH1F("h_trk_z0_np_noCuts","h_trk_z0_np_noCuts; Track z_{0} Distribution (cm); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np_noCuts_zoomOut = new TH1F("h_trk_z0_np_noCuts_zoomOut","h_trk_z0_np_noCuts_zoomOut; Track z_{0} Distribution (cm); Events / 1.0 cm", 100, -50, 50);
-  TH1F* h_trk_z0_np_noCuts_barrel = new TH1F("h_trk_z0_np_noCuts_barrel","h_trk_z0_np_noCuts_barrel; Track z_{0} Distribution (cm) (#eta<=0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np_noCuts_disk = new TH1F("h_trk_z0_np_noCuts_disk","h_trk_z0_np_noCuts_disk; Track z_{0} Distribution (cm) (#eta>0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np_noCuts_H = new TH1F("h_trk_z0_np_noCuts_H","h_trk_z0_np_noCuts_H; Track z_{0} Distribution (cm) (p_{T}>10 GeV); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_np_noCuts_L = new TH1F("h_trk_z0_np_noCuts_L","h_trk_z0_np_noCuts_L; Track z_{0} Distribution (cm) (p_{T}<10 GeV); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_fake_noCuts = new TH1F("h_trk_z0_fake_noCuts","h_trk_z0_fake_noCuts; Track z_{0} Distribution (cm); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_PU_noCuts = new TH1F("h_trk_z0_PU_noCuts","h_trk_z0_PU_noCuts; Track z_{0} Distribution (cm); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_notHiggs_noCuts = new TH1F("h_trk_z0_notHiggs_noCuts","h_trk_z0_notHiggs_noCuts; Track z_{0} Distribution (cm); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np_qualCuts = new TH1F("h_trk_z0_np_qualCuts","h_trk_z0_np_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_fake_qualCuts = new TH1F("h_trk_z0_fake_qualCuts","h_trk_z0_fake_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_PU_qualCuts = new TH1F("h_trk_z0_PU_qualCuts","h_trk_z0_PU_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_notHiggs_qualCuts = new TH1F("h_trk_z0_notHiggs_qualCuts","h_trk_z0_notHiggs_qualCuts; Track z_{0} Distribution (cm); Events / 0.1 cm", 200, 0, 20);
-  TH1F* h_trk_z0_np_allCuts = new TH1F("h_trk_z0_np_allCuts","h_trk_z0_np_allCuts; Track z_{0} Distribution (cm); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np_allCuts_zoomOut = new TH1F("h_trk_z0_np_allCuts_zoomOut","h_trk_z0_np_allCuts_zoomOut; Track z_{0} Distribution (cm); Events / 1.0 cm", 100, -50, 50);
-  TH1F* h_trk_z0_np_allCuts_barrel = new TH1F("h_trk_z0_np_allCuts_barrel","h_trk_z0_np_allCuts_barrel; Track z_{0} Distribution (cm) (#eta<=0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F* h_trk_z0_np_allCuts_disk = new TH1F("h_trk_z0_np_allCuts_disk","h_trk_z0_np_allCuts_disk; Track z_{0} Distribution (cm) (#eta>0.95); Events / 0.2 cm", 100, -20, 20);
-  TH1F *h_trk_phi = new TH1F("h_trk_phi","h_trk_phi; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary = new TH1F("h_trk_phi_primary","h_trk_phi_primary; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_noCuts = new TH1F("h_trk_phi_primary_noCuts","h_trk_phi_primary_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_noCuts_barrel = new TH1F("h_trk_phi_primary_noCuts_barrel","h_trk_phi_primary_noCuts_barrel; Track #phi_{0} Distribution (#eta<=0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_noCuts_disk = new TH1F("h_trk_phi_primary_noCuts_disk","h_trk_phi_primary_noCuts_disk; Track #phi_{0} Distribution (#eta>0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_noCuts_H = new TH1F("h_trk_phi_primary_noCuts_H","h_trk_phi_primary_noCuts_H; Track #phi_{0} Distribution (p_{T}>10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_noCuts_L = new TH1F("h_trk_phi_primary_noCuts_L","h_trk_phi_primary_noCuts_L; Track #phi_{0} Distribution (p_{T}<10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_qualCuts = new TH1F("h_trk_phi_primary_qualCuts","h_trk_phi_primary_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_allCuts = new TH1F("h_trk_phi_primary_allCuts","h_trk_phi_primary_allCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_allCuts_barrel = new TH1F("h_trk_phi_primary_allCuts_barrel","h_trk_phi_primary_allCuts_barrel; Track #phi_{0} Distribution (#eta<=0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_primary_allCuts_disk = new TH1F("h_trk_phi_primary_allCuts_disk","h_trk_phi_primary_allCuts_disk; Track #phi_{0} Distribution (#eta>0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np = new TH1F("h_trk_phi_np","h_trk_phi_np; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_noCuts = new TH1F("h_trk_phi_np_noCuts","h_trk_phi_np_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_noCuts_barrel = new TH1F("h_trk_phi_np_noCuts_barrel","h_trk_phi_np_noCuts_barrel; Track #phi_{0} Distribution (#eta<=0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_noCuts_disk = new TH1F("h_trk_phi_np_noCuts_disk","h_trk_phi_np_noCuts_disk; Track #phi_{0} Distribution (#eta>0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_noCuts_H = new TH1F("h_trk_phi_np_noCuts_H","h_trk_phi_np_noCuts_H; Track #phi_{0} Distribution (p_{T}>10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_noCuts_L = new TH1F("h_trk_phi_np_noCuts_L","h_trk_phi_np_noCuts_L; Track #phi_{0} Distribution (p_{T}<10 GeV); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_fake_noCuts = new TH1F("h_trk_phi_fake_noCuts","h_trk_phi_fake_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_PU_noCuts = new TH1F("h_trk_phi_PU_noCuts","h_trk_phi_PU_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_notHiggs_noCuts = new TH1F("h_trk_phi_notHiggs_noCuts","h_trk_phi_notHiggs_noCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_qualCuts = new TH1F("h_trk_phi_np_qualCuts","h_trk_phi_np_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_fake_qualCuts = new TH1F("h_trk_phi_fake_qualCuts","h_trk_phi_fake_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_PU_qualCuts = new TH1F("h_trk_phi_PU_qualCuts","h_trk_phi_PU_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_notHiggs_qualCuts = new TH1F("h_trk_phi_notHiggs_qualCuts","h_trk_phi_notHiggs_qualCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_allCuts = new TH1F("h_trk_phi_np_allCuts","h_trk_phi_np_allCuts; Track #phi_{0} Distribution; Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_allCuts_barrel = new TH1F("h_trk_phi_np_allCuts_barrel","h_trk_phi_np_allCuts_barrel; Track #phi_{0} Distribution (#eta<=0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_phi_np_allCuts_disk = new TH1F("h_trk_phi_np_allCuts_disk","h_trk_phi_np_allCuts_disk; Track #phi_{0} Distribution (#eta>0.95); Events / 0.1256",100,-2*TMath::Pi(),2*TMath::Pi());
-  TH1F *h_trk_sectorPhi = new TH1F("h_trk_sectorPhi","h_trk_sectorPhi; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary = new TH1F("h_trk_sectorPhi_primary","h_trk_sectorPhi_primary; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_noCuts = new TH1F("h_trk_sectorPhi_primary_noCuts","h_trk_sectorPhi_primary_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_noCuts_barrel = new TH1F("h_trk_sectorPhi_primary_noCuts_barrel","h_trk_sectorPhi_primary_noCuts_barrel; Track #sectorPhi_{0} Distribution (#eta<=0.95); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_noCuts_disk = new TH1F("h_trk_sectorPhi_primary_noCuts_disk","h_trk_sectorPhi_primary_noCuts_disk; Track #sectorPhi_{0} Distribution (#eta>0.95); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_noCuts_H = new TH1F("h_trk_sectorPhi_primary_noCuts_H","h_trk_sectorPhi_primary_noCuts_H; Track #sectorPhi_{0} Distribution (p_{T}>10 GeV); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_noCuts_L = new TH1F("h_trk_sectorPhi_primary_noCuts_L","h_trk_sectorPhi_primary_noCuts_L; Track #sectorPhi_{0} Distribution (p_{T}<10 GeV); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_qualCuts = new TH1F("h_trk_sectorPhi_primary_qualCuts","h_trk_sectorPhi_primary_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_allCuts = new TH1F("h_trk_sectorPhi_primary_allCuts","h_trk_sectorPhi_primary_allCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_allCuts_barrel = new TH1F("h_trk_sectorPhi_primary_allCuts_barrel","h_trk_sectorPhi_primary_allCuts_barrel; Track #sectorPhi_{0} Distribution (#eta<=0.95); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_primary_allCuts_disk = new TH1F("h_trk_sectorPhi_primary_allCuts_disk","h_trk_sectorPhi_primary_allCuts_disk; Track #sectorPhi_{0} Distribution (#eta>0.95); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np = new TH1F("h_trk_sectorPhi_np","h_trk_sectorPhi_np; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_noCuts = new TH1F("h_trk_sectorPhi_np_noCuts","h_trk_sectorPhi_np_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_noCuts_barrel = new TH1F("h_trk_sectorPhi_np_noCuts_barrel","h_trk_sectorPhi_np_noCuts_barrel; Track #sectorPhi_{0} Distribution (#eta<=0.95); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_noCuts_disk = new TH1F("h_trk_sectorPhi_np_noCuts_disk","h_trk_sectorPhi_np_noCuts_disk; Track #sectorPhi_{0} Distribution (#eta>0.95); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_noCuts_H = new TH1F("h_trk_sectorPhi_np_noCuts_H","h_trk_sectorPhi_np_noCuts_H; Track #sectorPhi_{0} Distribution (p_{T}>10 GeV); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_noCuts_L = new TH1F("h_trk_sectorPhi_np_noCuts_L","h_trk_sectorPhi_np_noCuts_L; Track #sectorPhi_{0} Distribution (p_{T}<10 GeV); Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_fake_noCuts = new TH1F("h_trk_sectorPhi_fake_noCuts","h_trk_sectorPhi_fake_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_PU_noCuts = new TH1F("h_trk_sectorPhi_PU_noCuts","h_trk_sectorPhi_PU_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_notHiggs_noCuts = new TH1F("h_trk_sectorPhi_notHiggs_noCuts","h_trk_sectorPhi_notHiggs_noCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_qualCuts = new TH1F("h_trk_sectorPhi_np_qualCuts","h_trk_sectorPhi_np_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_fake_qualCuts = new TH1F("h_trk_sectorPhi_fake_qualCuts","h_trk_sectorPhi_fake_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_PU_qualCuts = new TH1F("h_trk_sectorPhi_PU_qualCuts","h_trk_sectorPhi_PU_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_notHiggs_qualCuts = new TH1F("h_trk_sectorPhi_notHiggs_qualCuts","h_trk_sectorPhi_notHiggs_qualCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_allCuts = new TH1F("h_trk_sectorPhi_np_allCuts","h_trk_sectorPhi_np_allCuts; Track #sectorPhi_{0} Distribution; Events / 0.02",100,-1,1);
-  TH1F *h_trk_sectorPhi_np_allCuts_barrel = new TH1F("h_trk_sectorPhi_np_allCuts_barrel","h_trk_sectorPhi_np_allCuts_barrel; Track #sectorPhi_{0} Distribution (#eta<=0.95); Events / 0.02",100,-1,1); 
-  TH1F *h_trk_sectorPhi_np_allCuts_disk = new TH1F("h_trk_sectorPhi_np_allCuts_disk","h_trk_sectorPhi_np_allCuts_disk; Track #sectorPhi_{0} Distribution (#eta>0.95); Events / 0.02",100,-1,1); 
 
-  TH1F *h_tp_pt = new TH1F("h_tp_pt", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F *h_tp_eta = new TH1F("h_tp_eta", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F *h_tp_d0 = new TH1F("h_tp_d0", ";Tracking particle d_{0} [cm]; Tracking particles / 0.01 cm", 50, -2, 2);
+  for(uint it=0; it<varCutFlowsTP.size(); ++it){
+    for(uint i=0; i<tpType.size(); ++i){
+      for(uint jt=0; jt<preselCutsTP.size(); ++jt){
+	for(uint j=0; j<plotModifiers.size(); ++j){
+	  TString name = "h_tp_"+varCutFlowsTP[it]->getVarName()+"_"+tpType[i]+"_"+preselCutsTP[jt]->getCutName()+"Cut"+plotModifiers[j];
+	  float binWidth = (varCutFlowsTP[it]->getMaxBin() - varCutFlowsTP[it]->getMinBin()) / varCutFlowsTP[it]->getNumBins();
+	  TString binLabel = std::to_string(binWidth);
+	  TString labels = name+"; Tp "+varCutFlowsTP[it]->getVarName()+" ("+varCutFlowsTP[it]->getUnit()+") ; Events / "+binLabel+" "+varCutFlowsTP[it]->getUnit();
+	  TH1F* hist = new TH1F(name,labels,varCutFlowsTP[it]->getNumBins(),varCutFlowsTP[it]->getMinBin(),varCutFlowsTP[it]->getMaxBin());
+	  preselCutFlowsTP[it][i][jt][j] = hist;
+	}
+      }
+    }
+  }
+    
+  for(uint it=0; it<varCutFlowsTP2D.size(); ++it){
+    for(uint i=0; i<tpType.size(); ++i){
+      for(uint jt=0; jt<preselCutsTP.size(); ++jt){
+	for(uint j=0; j<plotModifiers.size(); ++j){
+	  TString name = "h_tp_"+varCutFlowsTP2D[it].second->getVarName()+"_vs_"+varCutFlowsTP2D[it].first->getVarName()+"_"+tpType[i]+"_"+preselCutsTP[jt]->getCutName()+"Cut"+plotModifiers[j];
+	  TString labels = name+"; Tp "+varCutFlowsTP2D[it].first->getVarName()+" ("+varCutFlowsTP2D[it].first->getUnit()+") ; Tp "+varCutFlowsTP2D[it].second->getVarName()+" ("+varCutFlowsTP2D[it].second->getUnit()+")";
+	  TH2F* hist = new TH2F(name,labels,varCutFlowsTP2D[it].first->getNumBins(),varCutFlowsTP2D[it].first->getMinBin(),varCutFlowsTP2D[it].first->getMaxBin(),varCutFlowsTP2D[it].second->getNumBins(),varCutFlowsTP2D[it].second->getMinBin(),varCutFlowsTP2D[it].second->getMaxBin());
+	  preselCutFlowsTP2D[it][i][jt][j] = hist;
+	}
+      }
+    }
+  }
+
   TH1F *h_numSelectedTrks = new TH1F("h_numSelectedTrks","h_numSelectedTrks; Number of Selected Tracks; Events / 1.0",100,0,100);
   TH1F *h_numSelectedTrks_zoomOut = new TH1F("h_numSelectedTrks_zoomOut","h_numSelectedTrks_zoomOut; Number of Selected Tracks; Events / 10.0",100,0,1000);
   TH1F *h_trk_H_T = new TH1F("h_trk_H_T","h_trk_H_T; Event Track Scalar p_{T} Sum [GeV]; Events / 10.0",100,0,1000);
@@ -1187,226 +1166,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trackVertexCuts_sumPt = new TH1F("h_trackVertexCuts_sumPt","h_trackVertexCuts_sumPt; Track Vertex Momentum (GeV); Events / 1.0 GeV",200,0,200.0);
   TH1F *h_trackVertexCuts_indexPt = new TH1F("h_trackVertexCuts_indexPt","h_trackVertexCuts_indexPt; Pt Ranking of Track; Events / 1.0",50,0,50.0);
   TH1F *h_correct_trackVertex_indexPt = new TH1F("h_correct_trackVertex_indexPt","h_correct_trackVertex_indexPt; Pt Ranking of Track; Events / 1.0",100,0,100.0);
-
-  TH1F *h_trk_MVA1_primary_noCuts = new TH1F("h_trk_MVA1_primary_noCuts","h_trk_MVA1_primary_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_primary_noCuts_H = new TH1F("h_trk_MVA1_primary_noCuts_H","h_trk_MVA1_primary_noCuts_H; Track MVA Score (p_{T}>10 GeV); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_primary_noCuts_L = new TH1F("h_trk_MVA1_primary_noCuts_L","h_trk_MVA1_primary_noCuts_L; Track MVA Score (p_{T}<10 GeV); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_primary_qualCuts = new TH1F("h_trk_MVA1_primary_qualCuts","h_trk_MVA1_primary_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_primary_allCuts = new TH1F("h_trk_MVA1_primary_allCuts","h_trk_MVA1_primary_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_primary_allCuts_P = new TH1F("h_trk_MVA1_primary_allCuts_P","h_trk_MVA1_primary_allCuts_P; Track MVA Score (d_{0}<1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_primary_allCuts_D = new TH1F("h_trk_MVA1_primary_allCuts_D","h_trk_MVA1_primary_allCuts_D; Track MVA Score (d_{0}>1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_noCuts = new TH1F("h_trk_MVA1_np_noCuts","h_trk_MVA1_np_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_noCuts_H = new TH1F("h_trk_MVA1_np_noCuts_H","h_trk_MVA1_np_noCuts_H; Track MVA Score (p_{T}>10 GeV); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_noCuts_L = new TH1F("h_trk_MVA1_np_noCuts_L","h_trk_MVA1_np_noCuts_L; Track MVA Score (p_{T}<10 GeV); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_fake_noCuts = new TH1F("h_trk_MVA1_fake_noCuts","h_trk_MVA1_fake_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_PU_noCuts = new TH1F("h_trk_MVA1_PU_noCuts","h_trk_MVA1_PU_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_notHiggs_noCuts = new TH1F("h_trk_MVA1_notHiggs_noCuts","h_trk_MVA1_notHiggs_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_qualCuts = new TH1F("h_trk_MVA1_np_qualCuts","h_trk_MVA1_np_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_fake_qualCuts = new TH1F("h_trk_MVA1_fake_qualCuts","h_trk_MVA1_fake_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_PU_qualCuts = new TH1F("h_trk_MVA1_PU_qualCuts","h_trk_MVA1_PU_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_notHiggs_qualCuts = new TH1F("h_trk_MVA1_notHiggs_qualCuts","h_trk_MVA1_notHiggs_qualCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_allCuts = new TH1F("h_trk_MVA1_np_allCuts","h_trk_MVA1_np_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_allCuts_P = new TH1F("h_trk_MVA1_np_allCuts_P","h_trk_MVA1_np_allCuts_P; Track MVA Score (d_{0}<1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA1_np_allCuts_D = new TH1F("h_trk_MVA1_np_allCuts_D","h_trk_MVA1_np_allCuts_D; Track MVA Score (d_{0}>1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_primary_noCuts = new TH1F("h_trk_MVA2_primary_noCuts","h_trk_MVA2_primary_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_primary_allCuts = new TH1F("h_trk_MVA2_primary_allCuts","h_trk_MVA2_primary_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_primary_allCuts_P = new TH1F("h_trk_MVA2_primary_allCuts_P","h_trk_MVA2_primary_allCuts_P; Track MVA Score (d_{0}<1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_primary_allCuts_D = new TH1F("h_trk_MVA2_primary_allCuts_D","h_trk_MVA2_primary_allCuts_D; Track MVA Score (d_{0}>1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_np_noCuts = new TH1F("h_trk_MVA2_np_noCuts","h_trk_MVA2_np_noCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_np_allCuts = new TH1F("h_trk_MVA2_np_allCuts","h_trk_MVA2_np_allCuts; Track MVA Score ; Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_np_allCuts_P = new TH1F("h_trk_MVA2_np_allCuts_P","h_trk_MVA2_np_allCuts_P; Track MVA Score (d_{0}<1 cm); Events / 0.01",100,0,1);
-  TH1F *h_trk_MVA2_np_allCuts_D = new TH1F("h_trk_MVA2_np_allCuts_D","h_trk_MVA2_np_allCuts_D; Track MVA Score (d_{0}>1 cm); Events / 0.01",100,0,1);
-  // Chi2 plots
-  TH1F *h_trk_chi2rphidof = new TH1F("h_trk_chi2rphidof","h_trk_chi2rphidof; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rphidof_primary = new TH1F("h_trk_chi2rphidof_primary","h_trk_chi2rphidof_primary; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_noCuts = new TH1F("h_trk_chi2rphidof_primary_noCuts","h_trk_chi2rphidof_primary_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_noCuts_zoomOut = new TH1F("h_trk_chi2rphidof_primary_noCuts_zoomOut","h_trk_chi2rphidof_primary_noCuts_zoomOut; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.6",100,0,60);
-  TH1F *h_trk_chi2rphidof_primary_noCuts_barrel = new TH1F("h_trk_chi2rphidof_primary_noCuts_barrel","h_trk_chi2rphidof_primary_noCuts_barrel; Track #chi^{2}_{r#phi}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_noCuts_disk = new TH1F("h_trk_chi2rphidof_primary_noCuts_disk","h_trk_chi2rphidof_primary_noCuts_disk; Track #chi^{2}_{r#phi}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_noCuts_H = new TH1F("h_trk_chi2rphidof_primary_noCuts_H","h_trk_chi2rphidof_primary_noCuts_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_noCuts_L = new TH1F("h_trk_chi2rphidof_primary_noCuts_L","h_trk_chi2rphidof_primary_noCuts_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_qualCuts = new TH1F("h_trk_chi2rphidof_primary_qualCuts","h_trk_chi2rphidof_primary_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_allCuts = new TH1F("h_trk_chi2rphidof_primary_allCuts","h_trk_chi2rphidof_primary_allCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_allCuts_zoomOut = new TH1F("h_trk_chi2rphidof_primary_allCuts_zoomOut","h_trk_chi2rphidof_primary_allCuts_zoomOut; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.6",100,0,60);
-  TH1F *h_trk_chi2rphidof_primary_allCuts_barrel = new TH1F("h_trk_chi2rphidof_primary_allCuts_barrel","h_trk_chi2rphidof_primary_allCuts_barrel; Track #chi^{2}_{r#phi}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_primary_allCuts_disk = new TH1F("h_trk_chi2rphidof_primary_allCuts_disk","h_trk_chi2rphidof_primary_allCuts_disk; Track #chi^{2}_{r#phi}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np = new TH1F("h_trk_chi2rphidof_np","h_trk_chi2rphidof_np; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_noCuts = new TH1F("h_trk_chi2rphidof_np_noCuts","h_trk_chi2rphidof_np_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_noCuts_zoomOut = new TH1F("h_trk_chi2rphidof_np_noCuts_zoomOut","h_trk_chi2rphidof_np_noCuts_zoomOut; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.6",100,0,60);
-  TH1F *h_trk_chi2rphidof_np_noCuts_barrel = new TH1F("h_trk_chi2rphidof_np_noCuts_barrel","h_trk_chi2rphidof_np_noCuts_barrel; Track #chi^{2}_{r#phi}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_noCuts_disk = new TH1F("h_trk_chi2rphidof_np_noCuts_disk","h_trk_chi2rphidof_np_noCuts_disk; Track #chi^{2}_{r#phi}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_noCuts_H = new TH1F("h_trk_chi2rphidof_np_noCuts_H","h_trk_chi2rphidof_np_noCuts_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_noCuts_L = new TH1F("h_trk_chi2rphidof_np_noCuts_L","h_trk_chi2rphidof_np_noCuts_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_fake_noCuts = new TH1F("h_trk_chi2rphidof_fake_noCuts","h_trk_chi2rphidof_fake_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_PU_noCuts = new TH1F("h_trk_chi2rphidof_PU_noCuts","h_trk_chi2rphidof_PU_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_notHiggs_noCuts = new TH1F("h_trk_chi2rphidof_notHiggs_noCuts","h_trk_chi2rphidof_notHiggs_noCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_qualCuts = new TH1F("h_trk_chi2rphidof_np_qualCuts","h_trk_chi2rphidof_np_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_fake_qualCuts = new TH1F("h_trk_chi2rphidof_fake_qualCuts","h_trk_chi2rphidof_fake_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_PU_qualCuts = new TH1F("h_trk_chi2rphidof_PU_qualCuts","h_trk_chi2rphidof_PU_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_notHiggs_qualCuts = new TH1F("h_trk_chi2rphidof_notHiggs_qualCuts","h_trk_chi2rphidof_notHiggs_qualCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_allCuts = new TH1F("h_trk_chi2rphidof_np_allCuts","h_trk_chi2rphidof_np_allCuts; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_allCuts_zoomOut = new TH1F("h_trk_chi2rphidof_np_allCuts_zoomOut","h_trk_chi2rphidof_np_allCuts_zoomOut; Track #chi^{2}_{r#phi}/d.o.f ; Events / 0.6",100,0,60);
-  TH1F *h_trk_chi2rphidof_np_allCuts_barrel = new TH1F("h_trk_chi2rphidof_np_allCuts_barrel","h_trk_chi2rphidof_np_allCuts_barrel; Track #chi^{2}_{r#phi}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_np_allCuts_disk = new TH1F("h_trk_chi2rphidof_np_allCuts_disk","h_trk_chi2rphidof_np_allCuts_disk; Track #chi^{2}_{r#phi}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rphidof_H = new TH1F("h_trk_chi2rphidof_H","h_trk_chi2rphidof_H; Track #chi^{2}_{r#phi}/d.o.f (p_{T}>8 GeV); Events / 0.1",50,0,5);   
-  TH1F *h_trk_chi2rphidof_L = new TH1F("h_trk_chi2rphidof_L","h_trk_chi2rphidof_L; Track #chi^{2}_{r#phi}/d.o.f (p_{T}<8 GeV); Events / 0.1",50,0,5);   
-  TH1F *h_trk_chi2rphidof_C = new TH1F("h_trk_chi2rphidof_C","h_trk_chi2rphidof_C; Track #chi^{2}_{r#phi}/d.o.f (|#eta|<0.8); Events / 0.1",50,0,5);   
-  TH1F *h_trk_chi2rphidof_I = new TH1F("h_trk_chi2rphidof_I","h_trk_chi2rphidof_I; Track #chi^{2}_{r#phi}/d.o.f (0.8#leq|#eta|#leq1.6); Events / 0.1",50,0,5);   
-  TH1F *h_trk_chi2rphidof_F = new TH1F("h_trk_chi2rphidof_F","h_trk_chi2rphidof_F; Track #chi^{2}_{r#phi}/d.o.f (|#eta|>1.6); Events / 0.1",50,0,5);   
-  TH1F *h_trk_chi2rphidof_P = new TH1F("h_trk_chi2rphidof_P","h_trk_chi2rphidof_P; Track #chi^{2}_{r#phi}/d.o.f (d_{0}#leq 1 cm); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rphidof_D = new TH1F("h_trk_chi2rphidof_D","h_trk_chi2rphidof_D; Track #chi^{2}_{r#phi}/d.o.f (d_{0}>1 cm); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof = new TH1F("h_trk_chi2rzdof","h_trk_chi2rzdof; Track #chi^{2}_{rz}/d.o.f ; Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_primary = new TH1F("h_trk_chi2rzdof_primary","h_trk_chi2rzdof_primary; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_noCuts = new TH1F("h_trk_chi2rzdof_primary_noCuts","h_trk_chi2rzdof_primary_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_noCuts_zoomOut = new TH1F("h_trk_chi2rzdof_primary_noCuts_zoomOut","h_trk_chi2rzdof_primary_noCuts_zoomOut; Track #chi^{2}_{rz}/d.o.f ; Events / 0.3",100,0,30);
-  TH1F *h_trk_chi2rzdof_primary_noCuts_barrel = new TH1F("h_trk_chi2rzdof_primary_noCuts_barrel","h_trk_chi2rzdof_primary_noCuts_barrel; Track #chi^{2}_{rz}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_noCuts_disk = new TH1F("h_trk_chi2rzdof_primary_noCuts_disk","h_trk_chi2rzdof_primary_noCuts_disk; Track #chi^{2}_{rz}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_noCuts_H = new TH1F("h_trk_chi2rzdof_primary_noCuts_H","h_trk_chi2rzdof_primary_noCuts_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_noCuts_L = new TH1F("h_trk_chi2rzdof_primary_noCuts_L","h_trk_chi2rzdof_primary_noCuts_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_qualCuts = new TH1F("h_trk_chi2rzdof_primary_qualCuts","h_trk_chi2rzdof_primary_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_allCuts = new TH1F("h_trk_chi2rzdof_primary_allCuts","h_trk_chi2rzdof_primary_allCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_allCuts_zoomOut = new TH1F("h_trk_chi2rzdof_primary_allCuts_zoomOut","h_trk_chi2rzdof_primary_allCuts_zoomOut; Track #chi^{2}_{rz}/d.o.f ; Events / 0.3",100,0,30);
-  TH1F *h_trk_chi2rzdof_primary_allCuts_barrel = new TH1F("h_trk_chi2rzdof_primary_allCuts_barrel","h_trk_chi2rzdof_primary_allCuts_barrel; Track #chi^{2}_{rz}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_primary_allCuts_disk = new TH1F("h_trk_chi2rzdof_primary_allCuts_disk","h_trk_chi2rzdof_primary_allCuts_disk; Track #chi^{2}_{rz}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np = new TH1F("h_trk_chi2rzdof_np","h_trk_chi2rzdof_np; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_noCuts = new TH1F("h_trk_chi2rzdof_np_noCuts","h_trk_chi2rzdof_np_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_noCuts_zoomOut = new TH1F("h_trk_chi2rzdof_np_noCuts_zoomOut","h_trk_chi2rzdof_np_noCuts_zoomOut; Track #chi^{2}_{rz}/d.o.f ; Events / 0.3",100,0,30);
-  TH1F *h_trk_chi2rzdof_np_noCuts_barrel = new TH1F("h_trk_chi2rzdof_np_noCuts_barrel","h_trk_chi2rzdof_np_noCuts_barrel; Track #chi^{2}_{rz}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_noCuts_disk = new TH1F("h_trk_chi2rzdof_np_noCuts_disk","h_trk_chi2rzdof_np_noCuts_disk; Track #chi^{2}_{rz}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_noCuts_H = new TH1F("h_trk_chi2rzdof_np_noCuts_H","h_trk_chi2rzdof_np_noCuts_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_noCuts_L = new TH1F("h_trk_chi2rzdof_np_noCuts_L","h_trk_chi2rzdof_np_noCuts_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<10 GeV); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_fake_noCuts = new TH1F("h_trk_chi2rzdof_fake_noCuts","h_trk_chi2rzdof_fake_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_PU_noCuts = new TH1F("h_trk_chi2rzdof_PU_noCuts","h_trk_chi2rzdof_PU_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_notHiggs_noCuts = new TH1F("h_trk_chi2rzdof_notHiggs_noCuts","h_trk_chi2rzdof_notHiggs_noCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_qualCuts = new TH1F("h_trk_chi2rzdof_np_qualCuts","h_trk_chi2rzdof_np_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_fake_qualCuts = new TH1F("h_trk_chi2rzdof_fake_qualCuts","h_trk_chi2rzdof_fake_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_PU_qualCuts = new TH1F("h_trk_chi2rzdof_PU_qualCuts","h_trk_chi2rzdof_PU_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_notHiggs_qualCuts = new TH1F("h_trk_chi2rzdof_notHiggs_qualCuts","h_trk_chi2rzdof_notHiggs_qualCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_allCuts = new TH1F("h_trk_chi2rzdof_np_allCuts","h_trk_chi2rzdof_np_allCuts; Track #chi^{2}_{rz}/d.o.f ; Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_allCuts_zoomOut = new TH1F("h_trk_chi2rzdof_np_allCuts_zoomOut","h_trk_chi2rzdof_np_allCuts_zoomOut; Track #chi^{2}_{rz}/d.o.f ; Events / 0.3",100,0,30);
-  TH1F *h_trk_chi2rzdof_np_allCuts_barrel = new TH1F("h_trk_chi2rzdof_np_allCuts_barrel","h_trk_chi2rzdof_np_allCuts_barrel; Track #chi^{2}_{rz}/d.o.f (#eta<=0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_np_allCuts_disk = new TH1F("h_trk_chi2rzdof_np_allCuts_disk","h_trk_chi2rzdof_np_allCuts_disk; Track #chi^{2}_{rz}/d.o.f (#eta>0.95); Events / 0.06",100,0,6);
-  TH1F *h_trk_chi2rzdof_H = new TH1F("h_trk_chi2rzdof_H","h_trk_chi2rzdof_H; Track #chi^{2}_{rz}/d.o.f (p_{T}>8 GeV); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_L = new TH1F("h_trk_chi2rzdof_L","h_trk_chi2rzdof_L; Track #chi^{2}_{rz}/d.o.f (p_{T}<8 GeV); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_C = new TH1F("h_trk_chi2rzdof_C","h_trk_chi2rzdof_C; Track #chi^{2}_{rz}/d.o.f (|#eta|<0.8); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_I = new TH1F("h_trk_chi2rzdof_I","h_trk_chi2rzdof_I; Track #chi^{2}_{rz}/d.o.f (0.8#leq|#eta|#leq1.6); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_F = new TH1F("h_trk_chi2rzdof_F","h_trk_chi2rzdof_F; Track #chi^{2}_{rz}/d.o.f (|#eta|>1.6); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_P = new TH1F("h_trk_chi2rzdof_P","h_trk_chi2rzdof_P; Track #chi^{2}_{rz}/d.o.f (d_{0}#leq 1 cm); Events / 0.1",50,0,5);
-  TH1F *h_trk_chi2rzdof_D = new TH1F("h_trk_chi2rzdof_D","h_trk_chi2rzdof_D; Track #chi^{2}_{rz}/d.o.f (d_{0}>1 cm); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2 = new TH1F("h_trk_bendchi2","h_trk_bendchi2; Track bend #chi^{2} ; Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_primary = new TH1F("h_trk_bendchi2_primary","h_trk_bendchi2_primary; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_noCuts = new TH1F("h_trk_bendchi2_primary_noCuts","h_trk_bendchi2_primary_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_noCuts_zoomOut = new TH1F("h_trk_bendchi2_primary_noCuts_zoomOut","h_trk_bendchi2_primary_noCuts_zoomOut; Track bend #chi^{2} ; Events / 0.7",100,0,70);
-  TH1F *h_trk_bendchi2_primary_noCuts_barrel = new TH1F("h_trk_bendchi2_primary_noCuts_barrel","h_trk_bendchi2_primary_noCuts_barrel; Track bend #chi^{2} (#eta<=0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_noCuts_disk = new TH1F("h_trk_bendchi2_primary_noCuts_disk","h_trk_bendchi2_primary_noCuts_disk; Track bend #chi^{2} (#eta>0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_noCuts_H = new TH1F("h_trk_bendchi2_primary_noCuts_H","h_trk_bendchi2_primary_noCuts_H; Track bend #chi^{2} (p_{T}>10 GeV); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_noCuts_L = new TH1F("h_trk_bendchi2_primary_noCuts_L","h_trk_bendchi2_primary_noCuts_L; Track bend #chi^{2} (p_{T}<10 GeV); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_qualCuts = new TH1F("h_trk_bendchi2_primary_qualCuts","h_trk_bendchi2_primary_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_allCuts = new TH1F("h_trk_bendchi2_primary_allCuts","h_trk_bendchi2_primary_allCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_allCuts_zoomOut = new TH1F("h_trk_bendchi2_primary_allCuts_zoomOut","h_trk_bendchi2_primary_allCuts_zoomOut; Track bend #chi^{2} ; Events / 0.7",100,0,70);
-  TH1F *h_trk_bendchi2_primary_allCuts_barrel = new TH1F("h_trk_bendchi2_primary_allCuts_barrel","h_trk_bendchi2_primary_allCuts_barrel; Track bend #chi^{2} (#eta<=0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_primary_allCuts_disk = new TH1F("h_trk_bendchi2_primary_allCuts_disk","h_trk_bendchi2_primary_allCuts_disk; Track bend #chi^{2} (#eta>0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np = new TH1F("h_trk_bendchi2_np","h_trk_bendchi2_np; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_noCuts = new TH1F("h_trk_bendchi2_np_noCuts","h_trk_bendchi2_np_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_noCuts_zoomOut = new TH1F("h_trk_bendchi2_np_noCuts_zoomOut","h_trk_bendchi2_np_noCuts_zoomOut; Track bend #chi^{2} ; Events / 0.7",100,0,70);
-  TH1F *h_trk_bendchi2_np_noCuts_barrel = new TH1F("h_trk_bendchi2_np_noCuts_barrel","h_trk_bendchi2_np_noCuts_barrel; Track bend #chi^{2} (#eta<=0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_noCuts_disk = new TH1F("h_trk_bendchi2_np_noCuts_disk","h_trk_bendchi2_np_noCuts_disk; Track bend #chi^{2} (#eta>0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_noCuts_H = new TH1F("h_trk_bendchi2_np_noCuts_H","h_trk_bendchi2_np_noCuts_H; Track bend #chi^{2} (p_{T}>10 GeV); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_noCuts_L = new TH1F("h_trk_bendchi2_np_noCuts_L","h_trk_bendchi2_np_noCuts_L; Track bend #chi^{2} (p_{T}<10 GeV); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_fake_noCuts = new TH1F("h_trk_bendchi2_fake_noCuts","h_trk_bendchi2_fake_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_PU_noCuts = new TH1F("h_trk_bendchi2_PU_noCuts","h_trk_bendchi2_PU_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_notHiggs_noCuts = new TH1F("h_trk_bendchi2_notHiggs_noCuts","h_trk_bendchi2_notHiggs_noCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_qualCuts = new TH1F("h_trk_bendchi2_np_qualCuts","h_trk_bendchi2_np_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_fake_qualCuts = new TH1F("h_trk_bendchi2_fake_qualCuts","h_trk_bendchi2_fake_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_PU_qualCuts = new TH1F("h_trk_bendchi2_PU_qualCuts","h_trk_bendchi2_PU_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_notHiggs_qualCuts = new TH1F("h_trk_bendchi2_notHiggs_qualCuts","h_trk_bendchi2_notHiggs_qualCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_allCuts = new TH1F("h_trk_bendchi2_np_allCuts","h_trk_bendchi2_np_allCuts; Track bend #chi^{2} ; Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_allCuts_zoomOut = new TH1F("h_trk_bendchi2_np_allCuts_zoomOut","h_trk_bendchi2_np_allCuts_zoomOut; Track bend #chi^{2} ; Events / 0.7",100,0,70);
-  TH1F *h_trk_bendchi2_np_allCuts_barrel = new TH1F("h_trk_bendchi2_np_allCuts_barrel","h_trk_bendchi2_np_allCuts_barrel; Track bend #chi^{2} (#eta<=0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_np_allCuts_disk = new TH1F("h_trk_bendchi2_np_allCuts_disk","h_trk_bendchi2_np_allCuts_disk; Track bend #chi^{2} (#eta>0.95); Events / 0.1",100,0,10);
-  TH1F *h_trk_bendchi2_H = new TH1F("h_trk_bendchi2_H","h_trk_bendchi2_H; Track bend #chi^{2} (p_{T}>8 GeV); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_L = new TH1F("h_trk_bendchi2_L","h_trk_bendchi2_L; Track bend #chi^{2} (p_{T}<8 GeV); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_C = new TH1F("h_trk_bendchi2_C","h_trk_bendchi2_C; Track bend #chi^{2} (|#eta|<0.8); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_I = new TH1F("h_trk_bendchi2_I","h_trk_bendchi2_I; Track bend #chi^{2} (0.8#leq|#eta|#leq1.6); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_F = new TH1F("h_trk_bendchi2_F","h_trk_bendchi2_F; Track bend #chi^{2} (|#eta|>1.6); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_P = new TH1F("h_trk_bendchi2_P","h_trk_bendchi2_P; Track bend #chi^{2} (d_{0}#leq 1 cm); Events / 0.1",50,0,5);
-  TH1F *h_trk_bendchi2_D = new TH1F("h_trk_bendchi2_D","h_trk_bendchi2_D; Track bend #chi^{2} (d_{0}>1 cm); Events / 0.1",50,0,5);
-
-  // Efficiency of Identifying Tracks Plots
-  TH1F* h_tp_pt_noCuts = new TH1F("h_tp_pt_noCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
-  TH1F* h_tp_pt_noCuts_primary = new TH1F("h_tp_pt_noCuts_primary", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
-  TH1F* h_tp_pt_noCuts_PU = new TH1F("h_tp_pt_noCuts_PU", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_noCuts = new TH1F("h_match_tp_pt_noCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_noCuts_primary = new TH1F("h_match_tp_pt_noCuts_primary", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_noCuts = new TH1F("h_tp_eta_noCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_eta_noCuts_primary = new TH1F("h_tp_eta_noCuts_primary", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_eta_noCuts_PU = new TH1F("h_tp_eta_noCuts_PU", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_noCuts = new TH1F("h_match_tp_eta_noCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_noCuts = new TH1F("h_tp_d0_noCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
-  TH1F* h_tp_d0_noCuts_primary = new TH1F("h_tp_d0_noCuts_primary", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
-  TH1F* h_tp_d0_noCuts_PU = new TH1F("h_tp_d0_noCuts_PU", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
-  TH1F* h_match_tp_d0_noCuts = new TH1F("h_match_tp_d0_noCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.0005 cm", 120, -0.03, 0.03);
-  TH1F* h_tp_z0_noCuts = new TH1F("h_tp_z0_noCuts", ";Tracking particle z_{0} [cm]; Tracking particles / 0.1 cm", 220, -2, 20);
-  TH1F* h_tp_z0_noCuts_primary = new TH1F("h_tp_z0_noCuts_primary", ";Tracking particle z_{0} [cm]; Tracking particles / 0.1 cm", 220, -2, 20);
-  TH1F* h_tp_z0_noCuts_PU = new TH1F("h_tp_z0_noCuts_PU", ";Tracking particle z_{0} [cm]; Tracking particles / 0.1 cm", 220, -2, 20);
-
-  TH1F* h_tp_pt_maxD0Cut = new TH1F("h_tp_pt_maxD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_maxD0Cut = new TH1F("h_match_tp_pt_maxD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_maxD0Cut = new TH1F("h_tp_eta_maxD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_maxD0Cut = new TH1F("h_match_tp_eta_maxD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_maxD0Cut = new TH1F("h_tp_d0_maxD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_match_tp_d0_maxD0Cut = new TH1F("h_match_tp_d0_maxD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-   
-  TH1F* h_tp_pt_minD0Cut = new TH1F("h_tp_pt_minD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_minD0Cut = new TH1F("h_match_tp_pt_minD0Cut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_minD0Cut = new TH1F("h_tp_eta_minD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_minD0Cut = new TH1F("h_match_tp_eta_minD0Cut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_minD0Cut = new TH1F("h_tp_d0_minD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_match_tp_d0_minD0Cut = new TH1F("h_match_tp_d0_minD0Cut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_tp_pt_minPtCut = new TH1F("h_tp_pt_minPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_minPtCut = new TH1F("h_match_tp_pt_minPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_minPtCut = new TH1F("h_tp_eta_minPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_minPtCut = new TH1F("h_match_tp_eta_minPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_minPtCut = new TH1F("h_tp_d0_minPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_match_tp_d0_minPtCut = new TH1F("h_match_tp_d0_minPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_tp_pt_maxPtCut = new TH1F("h_tp_pt_maxPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_maxPtCut = new TH1F("h_match_tp_pt_maxPtCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_maxPtCut = new TH1F("h_tp_eta_maxPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_maxPtCut = new TH1F("h_match_tp_eta_maxPtCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_maxPtCut = new TH1F("h_tp_d0_maxPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_match_tp_d0_maxPtCut = new TH1F("h_match_tp_d0_maxPtCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_tp_pt_maxEtaCut = new TH1F("h_tp_pt_maxEtaCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_maxEtaCut = new TH1F("h_match_tp_pt_maxEtaCut", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_maxEtaCut = new TH1F("h_tp_eta_maxEtaCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_maxEtaCut = new TH1F("h_match_tp_eta_maxEtaCut", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_maxEtaCut = new TH1F("h_tp_d0_maxEtaCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_match_tp_d0_maxEtaCut = new TH1F("h_match_tp_d0_maxEtaCut", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_tp_pt_allCuts = new TH1F("h_tp_pt_allCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_allCuts = new TH1F("h_match_tp_pt_allCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_match_tp_pt_allCuts_trkCuts = new TH1F("h_match_tp_pt_allCuts_trkCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_tp_eta_allCuts = new TH1F("h_tp_eta_allCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_match_tp_eta_allCuts = new TH1F("h_match_tp_eta_allCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_d0_allCuts = new TH1F("h_tp_d0_allCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_match_tp_d0_allCuts = new TH1F("h_match_tp_d0_allCuts", ";Tracking particle d_{0} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_trk_matchtp_pt_allCuts = new TH1F("h_trk_matchtp_pt_allCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_trk_matchtp_eta_allCuts = new TH1F("h_trk_matchtp_eta_allCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_dxy_allCuts = new TH1F("h_tp_dxy_allCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_trk_matchtp_dxy_allCuts = new TH1F("h_trk_matchtp_dxy_allCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_trk_matchtp_pt_noCuts = new TH1F("h_trk_matchtp_pt_noCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 0.4 GeV", 100, 0, 100.0);
-  TH1F* h_trk_matchtp_eta_noCuts = new TH1F("h_trk_matchtp_eta_noCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_dxy_noCuts = new TH1F("h_tp_dxy_noCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_trk_matchtp_dxy_noCuts = new TH1F("h_trk_matchtp_dxy_noCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-
-  TH1F* h_trk_matchtp_pt_oldCuts = new TH1F("h_trk_matchtp_pt_oldCuts", ";Tracking particle p_{T} [GeV]; Tracking particles / 1.0 GeV", 100, 0, 100.0);
-  TH1F* h_trk_matchtp_eta_oldCuts = new TH1F("h_trk_matchtp_eta_oldCuts", ";Tracking particle #eta; Tracking particles / 0.1", 50, -2.5, 2.5);
-  TH1F* h_tp_dxy_oldCuts = new TH1F("h_tp_dxy_oldCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
-  TH1F* h_trk_matchtp_dxy_oldCuts = new TH1F("h_trk_matchtp_dxy_oldCuts", ";Tracking particle d_{xy} [cm]; Tracking particles / 0.08 cm", 50, -2, 2);
 
   // Displaced Vertex Plots
   TH1F *h_delta_dist_xy = new TH1F("h_delta_dist_xy","h_delta_dist_xy; (a) Distance between chosen TPs in x-y (cm) ; Events / 0.005 cm",100,0,0.5);
@@ -1589,24 +1348,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   // Trigger Rates Study 
   TH2F *h_Count_trk_pt_d0 = new TH2F("h_Count_trk_pt_d0","h_Count_trk_pt_d0; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T}(GeV)",5,0.1,0.6,5,2,12); // Count of Selected tracks
   TH2F *h_Count_trk_pt_d0_dv = new TH2F("h_Count_trk_pt_d0_dv","h_Count_trk_pt_d0_dv;(DV selection) Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T}(GeV)",5,0.1,0.6,5,2,12); // Count of Selected tracks including the displaced vertex selection
-  TH2F *h_trk_pt_vs_d0_primary_qualCuts = new TH2F("h_trk_pt_vs_d0_primary_qualCuts","h_trk_pt_vs_d0_primary_qualCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
-  TH2F *h_trk_pt_vs_d0_np_qualCuts = new TH2F("h_trk_pt_vs_d0_np_qualCuts","h_trk_pt_vs_d0_np_qualCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
-  TH2F *h_trk_pt_vs_eta_primary_qualCuts = new TH2F("h_trk_pt_vs_eta_primary_qualCuts","h_trk_pt_vs_eta_primary_qualCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
-  TH2F *h_trk_pt_vs_eta_np_qualCuts = new TH2F("h_trk_pt_vs_eta_np_qualCuts","h_trk_pt_vs_eta_np_qualCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
-  TH2F *h_trk_eta_vs_d0_primary_qualCuts = new TH2F("h_trk_eta_vs_d0_primary_qualCuts","h_trk_eta_vs_d0_primary_qualCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
-  TH2F *h_trk_eta_vs_d0_np_qualCuts = new TH2F("h_trk_eta_vs_d0_np_qualCuts","h_trk_eta_vs_d0_np_qualCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
-  
-  TH2F *h_trk_pt_vs_d0_primary_allCuts = new TH2F("h_trk_pt_vs_d0_primary_allCuts","h_trk_pt_vs_d0_primary_allCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
-  TH2F *h_trk_pt_vs_d0_np_allCuts = new TH2F("h_trk_pt_vs_d0_np_allCuts","h_trk_pt_vs_d0_np_allCuts; Transverse Impact Parameter d_{0} (cm); Transverse Momentum p_{T} (GeV)",200,-2,2,200,0,30);
-  TH2F *h_trk_pt_vs_eta_primary_allCuts = new TH2F("h_trk_pt_vs_eta_primary_allCuts","h_trk_pt_vs_eta_primary_allCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
-  TH2F *h_trk_pt_vs_eta_np_allCuts = new TH2F("h_trk_pt_vs_eta_np_allCuts","h_trk_pt_vs_eta_np_allCuts; Eta; Transverse Momentum p_{T} (GeV)",200,-2.4,2.4,200,0,30);
-  TH2F *h_trk_eta_vs_d0_primary_allCuts = new TH2F("h_trk_eta_vs_d0_primary_allCuts","h_trk_eta_vs_d0_primary_allCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
-  TH2F *h_trk_eta_vs_d0_np_allCuts = new TH2F("h_trk_eta_vs_d0_np_allCuts","h_trk_eta_vs_d0_np_allCuts; Transverse Impact Parameter d_{0} (cm); Eta",200,-2,2,200,-2.4,2.4);
-  TH2F *h_trk_numStubs_vs_eta_primary_allCuts = new TH2F("h_trk_numStubs_vs_eta_primary_allCuts","h_trk_numStubs_vs_eta_primary_allCuts; Eta; Track Stubs",200,-2.4,2.4,7,0,7);
-  TH2F *h_trk_numStubs_vs_eta_np_allCuts = new TH2F("h_trk_numStubs_vs_eta_np_allCuts","h_trk_numStubs_vs_eta_np_allCuts; Eta; Track Stubs",200,-2.4,2.4,7,0,7);
-  TH2F *h_trk_numStubs_vs_eta_fake_allCuts = new TH2F("h_trk_numStubs_vs_eta_fake_allCuts","h_trk_numStubs_vs_eta_fake_allCuts; Eta; Track Stubs",200,-2.4,2.4,7,0,7);
-  TH2F *h_trk_numStubs_vs_eta_PU_allCuts = new TH2F("h_trk_numStubs_vs_eta_PU_allCuts","h_trk_numStubs_vs_eta_PU_allCuts; Eta; Track Stubs",200,-2.4,2.4,7,0,7);
-  TH2F *h_trk_numStubs_vs_eta_notHiggs_allCuts = new TH2F("h_trk_numStubs_vs_eta_notHiggs_allCuts","h_trk_numStubs_vs_eta_notHiggs_allCuts; Eta; Track Stubs",200,-2.4,2.4,7,0,7);
   TH2F *h_trueVertex_charge_vs_numTPs = new TH2F("h_trueVertex_charge_vs_numTPs","h_trueVertex_charge_vs_numTPs; TPs Associated with Vertex; Net Charge",6,0,6,12,-6,6);
   TH2F *h_trueVertex_charge_vs_numTracks = new TH2F("h_trueVertex_charge_vs_numTracks","h_trueVertex_charge_vs_numTracks; Tracks Associated with Vertex; Net Charge",6,0,6,12,-6,6);
   TH2F *h_correct_trackVertex_charge_vs_numTracks = new TH2F("h_correct_trackVertex_charge_vs_numTracks","h_correct_trackVertex_charge_vs_numTracks; Tracks Associated with Vertex; Net Charge",20,0,20,40,-20,20);
@@ -1739,7 +1480,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   
   if (tree == 0) return;
   Long64_t nevt = tree->GetEntries();
-  nevt = 1;
+  //nevt = 1;
   Vertex_Parameters geomTrackVertex;
   Vertex_Parameters geomTrueVertex;
 
@@ -1774,23 +1515,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       if(inputFile.Contains("DarkPhoton")) isPrimary = trk_matchtp_isHToMu->at(it);
       if(inputFile.Contains("DisplacedTrackJet")) isPrimary = trk_matchtp_isHToB->at(it);
       //std::cout<<"track pt: "<<trk_pt->at(it)<<" eta: "<<trk_eta->at(it)<<" d0 : "<<trk_d0->at(it)<<" phi: "<<trk_phi->at(it)<<" z0: "<<trk_z0->at(it)<<" nstub: "<<trk_nstub<<std::endl;
-      uint icut_counter = 0;
-      for(auto icut=preselCuts.cbegin(); icut!=preselCuts.cend(); ++icut){
+      uint icut = 0;
+      for(icut=0; icut<preselCuts.size(); ++icut){
 	bool mods = true;
-	float param;
-	if(icut->second.first.type() == typeid(std::vector<float>**)){
-	  std::vector<float>** paramVector = boost::get<std::vector<float>**>(icut->second.first);
-	  param = (*paramVector)->at(it);
-	}
-	else{
-	  std::vector<int>** paramVector = boost::get<std::vector<int>**>(icut->second.first);
-	  int tmp_param = (*paramVector)->at(it);
-	  param = float(tmp_param);
-	}
-	TString cutName = icut->first;
-	float cutValue = icut->second.second;
+	TString cutName = preselCuts[icut]->getCutName();
+	float cutValue = preselCuts[icut]->getCutValue();
+	float param = preselCuts[icut]->getParam(it);
 	if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
-	//std::cout<<"cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
+	//std::cout<<"cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;      
 	if(cutName.Contains("barrel") && fabs(trk_eta->at(it))>barrelEta) mods = false;
 	if(cutName.Contains("disk") && fabs(trk_eta->at(it))<=barrelEta) mods = false;
 	if(cutName.Contains("_D") && fabs(trk_d0->at(it))<=1 ) mods = false;
@@ -1809,7 +1541,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  if(trackType[i]=="PU" && trk_fake->at(it)!=2) continue;
 	  if(trackType[i]=="notHiggs" && !(trk_fake->at(it)==1 && !isPrimary)) continue;
 	  string partId = to_string(trk_matchtp_pdgid->at(it));
-	  numPartCutFlows[i][icut_counter][partId]++;
+	  numPartCutFlows[i][icut][partId]++;
 	  for(uint j=0; j<plotModifiers.size(); ++j){
 	    if(plotModifiers[j]=="_H" && trk_pt->at(it)<=10) continue;
 	    if(plotModifiers[j]=="_L" && trk_pt->at(it)>10) continue;
@@ -1817,57 +1549,40 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    if(plotModifiers[j]=="_D" && fabs(trk_d0->at(it))<=1) continue;
 	    if(plotModifiers[j]=="_barrel" && fabs(trk_eta->at(it))>barrelEta) continue;
 	    if(plotModifiers[j]=="_disk" && fabs(trk_eta->at(it))<=barrelEta) continue;
-	    int ivar_counter = 0;
-	    for(auto ivar=varCutFlows.cbegin(); ivar!=varCutFlows.cend(); ++ivar){
-	      if(ivar->second.first.type() == typeid(std::vector<float>**)){
-		std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar->second.first);
-		param = (*paramVector)->at(it);
-	      }
-	      else{
-		std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar->second.first);
-		int tmp_param = (*paramVector)->at(it);
-		param = float(tmp_param);
-	      }
-	      TString varName = ivar->first.at(0);
+	    for(uint ivar=0; ivar<varCutFlows.size(); ++ivar){
+	      param = varCutFlows[ivar]->getParam(it);
+	      TString varName = varCutFlows[ivar]->getVarName();
 	      if(varName.Contains("dof")) param /= 2*trk_nstub->at(it) - 5;
 	      if(varName.Contains("sector")){
 		while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
 		while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
 		while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
 	      }
-	      preselCutFlows[ivar_counter][i][icut_counter][j]->Fill(param);
-	      ivar_counter++;
+	      preselCutFlows[ivar][i][icut][j]->Fill(param);
 	    }
-	    int ivar2D_counter = 0;
-	    for(auto ivar2D=varCutFlows2D.cbegin(); ivar2D!=varCutFlows2D.cend(); ++ivar2D){
-	      std::vector<float> params;
-	      for(int k=0; k<2; ++k){
-		if(ivar2D->second.first.at(k).type() == typeid(std::vector<float>**)){
-		  std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar2D->second.first.at(k));
-		  param = (*paramVector)->at(it);
-		}
-		else{
-		  std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar2D->second.first.at(k));
-		  int tmp_param = (*paramVector)->at(it);
-		  param = float(tmp_param);
-		}
-		TString varName = ivar2D->first.at(2*k);
-		if(varName.Contains("dof")) param /= 2*trk_nstub->at(it) - 5;
-		if(varName.Contains("sector")){
-		  while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
-		  while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
-		  while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
-		}
-		params.push_back(param);
+	    for(uint ivar2D=0; ivar2D<varCutFlows2D.size(); ++ivar2D){
+	      float param1 = varCutFlows2D[ivar2D].first->getParam(it);
+	      float param2 = varCutFlows2D[ivar2D].second->getParam(it);
+	      TString varName1 = varCutFlows2D[ivar2D].first->getVarName();
+	      TString varName2 = varCutFlows2D[ivar2D].second->getVarName();
+	      if(varName1.Contains("dof")) param1 /= 2*trk_nstub->at(it) - 5;
+	      if(varName1.Contains("sector")){
+		while (param1 < -TMath::Pi()/9 ) param1 += 2*TMath::Pi();
+		while (param1 > TMath::Pi()*2 ) param1 -= 2*TMath::Pi();
+		while (param1 > TMath::Pi()/9) param1 -= 2*TMath::Pi()/9;
 	      }
-	      preselCutFlows2D[ivar2D_counter][i][icut_counter][j]->Fill(params[0],params[1]);
-	      ivar2D_counter++;
+	      if(varName2.Contains("dof")) param2 /= 2*trk_nstub->at(it) - 5;
+	      if(varName2.Contains("sector")){
+		while (param2 < -TMath::Pi()/9 ) param2 += 2*TMath::Pi();
+		while (param2 > TMath::Pi()*2 ) param2 -= 2*TMath::Pi();
+		while (param2 > TMath::Pi()/9) param2 -= 2*TMath::Pi()/9;
+	      }
+	      preselCutFlows2D[ivar2D][i][icut][j]->Fill(param1,param2);
 	    }
 	  }
 	}
-	icut_counter++;
       }
-      if(icut_counter==preselCuts.size()){
+      if(icut==preselCuts.size()){
 	Track_Parameters* tp_params = new Track_Parameters(trk_matchtp_pt->at(it), -1*trk_matchtp_d0->at(it), trk_matchtp_z0->at(it), trk_matchtp_eta->at(it), trk_matchtp_phi->at(it), trk_matchtp_pdgid->at(it), trk_matchtp_x->at(it), trk_matchtp_y->at(it), trk_matchtp_z->at(it));
 	for(uint i=0; i<track_bins.size(); i++){
 	  float trkVariable = 0.0;
@@ -1962,22 +1677,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       if(inputFile.Contains("DarkPhoton")) isPrimary = tp_isHToMu->at(it);
       if(inputFile.Contains("DisplacedTrackJet")) isPrimary = tp_isHToB->at(it);
       //std::cout<<"tp pt: "<<tp_pt->at(it)<<" eta: "<<tp_eta->at(it)<<" d0 : "<<tp_d0->at(it)<<" phi: "<<tp_phi->at(it)<<" z0: "<<tp_z0->at(it)<<" nstub: "<<tp_nstub<<std::endl;
-      uint icut_counter = 0;
-      for(auto icut=preselCutsTP.cbegin(); icut!=preselCutsTP.cend(); ++icut){
+      //if (tp_eventid->at(it)>0 || isPrimary==false) continue;
+      uint icut=0;
+      for(icut=0; icut<preselCutsTP.size(); ++icut){
 	bool mods = true;
-	float param;
-	if(icut->second.first.type() == typeid(std::vector<float>**)){
-	  std::vector<float>** paramVector = boost::get<std::vector<float>**>(icut->second.first);
-	  param = (*paramVector)->at(it);
-	}
-	else{
-	  std::vector<int>** paramVector = boost::get<std::vector<int>**>(icut->second.first);
-	  int tmp_param = (*paramVector)->at(it);
-	  param = float(tmp_param);
-	}
-	TString cutName = icut->first;
+	float param = preselCutsTP[icut]->getParam(it);
+	TString cutName = preselCutsTP[icut]->getCutName();
 	if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
-	float cutValue = icut->second.second;
+	float cutValue = preselCutsTP[icut]->getCutValue();
 	//std::cout<<"cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
 	if(cutName.Contains("barrel") && fabs(tp_eta->at(it))>barrelEta) mods = false;
 	if(cutName.Contains("disk") && fabs(tp_eta->at(it))<=barrelEta) mods = false;
@@ -1997,7 +1704,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  if(tpType[i]=="notHiggs" && !(tp_eventid->at(it)==0 && !isPrimary)) continue;
 	  if(tpType[i]=="match" && tp_nmatch->at(it)==0) continue;
 	  string partId = to_string(tp_pdgid->at(it));
-	  numPartCutFlowsTP[i][icut_counter][partId]++;
+	  numPartCutFlowsTP[i][icut][partId]++;
 	  for(uint j=0; j<plotModifiers.size(); ++j){
 	    if(plotModifiers[j]=="_H" && tp_pt->at(it)<=10) continue;
 	    if(plotModifiers[j]=="_L" && tp_pt->at(it)>10) continue;
@@ -2005,57 +1712,40 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    if(plotModifiers[j]=="_D" && fabs(tp_d0->at(it))<=1) continue;
 	    if(plotModifiers[j]=="_barrel" && fabs(tp_eta->at(it))>barrelEta) continue;
 	    if(plotModifiers[j]=="_disk" && fabs(tp_eta->at(it))<=barrelEta) continue;
-	    int ivar_counter = 0;
-	    for(auto ivar=varCutFlowsTP.cbegin(); ivar!=varCutFlowsTP.cend(); ++ivar){
-	      if(ivar->second.first.type() == typeid(std::vector<float>**)){
-		std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar->second.first);
-		param = (*paramVector)->at(it);
-	      }
-	      else{
-		std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar->second.first);
-		int tmp_param = (*paramVector)->at(it);
-		param = float(tmp_param);
-	      }
-	      TString varName = ivar->first.at(0);
+	    for(uint ivar=0; ivar<varCutFlowsTP.size(); ++ivar){
+	      param = varCutFlowsTP[ivar]->getParam(it);
+	      TString varName = varCutFlowsTP[ivar]->getVarName();
 	      if(varName.Contains("dof")) param /= 2*tp_nstub->at(it) - 5;
 	      if(varName.Contains("sector")){
 		while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
 		while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
 		while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
 	      }
-	      preselCutFlowsTP[ivar_counter][i][icut_counter][j]->Fill(param);
-	      ivar_counter++;
+	      preselCutFlowsTP[ivar][i][icut][j]->Fill(param);
 	    }
-	    int ivar2D_counter = 0;
-	    for(auto ivar2D=varCutFlowsTP2D.cbegin(); ivar2D!=varCutFlowsTP2D.cend(); ++ivar2D){
-	      std::vector<float> params;
-	      for(int k=0; k<2; ++k){
-		if(ivar2D->second.first.at(k).type() == typeid(std::vector<float>**)){
-		  std::vector<float>** paramVector = boost::get<std::vector<float>**>(ivar2D->second.first.at(k));
-		  param = (*paramVector)->at(it);
-		}
-		else{
-		  std::vector<int>** paramVector = boost::get<std::vector<int>**>(ivar2D->second.first.at(k));
-		  int tmp_param = (*paramVector)->at(it);
-		  param = float(tmp_param);
-		}
-		TString varName = ivar2D->first.at(2*k);
-		if(varName.Contains("dof")) param /= 2*tp_nstub->at(it) - 5;
-		if(varName.Contains("sector")){
-		  while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
-		  while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
-		  while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
-		}
-		params.push_back(param);
+	    for(uint ivar2D=0; ivar2D<varCutFlowsTP2D.size(); ++ivar2D){
+	      float param1 = varCutFlowsTP2D[ivar2D].first->getParam(it);
+	      float param2 = varCutFlowsTP2D[ivar2D].second->getParam(it);
+	      TString varName1 = varCutFlowsTP2D[ivar2D].first->getVarName();
+	      TString varName2 = varCutFlowsTP2D[ivar2D].second->getVarName();
+	      if(varName1.Contains("dof")) param1 /= 2*tp_nstub->at(it) - 5;
+	      if(varName1.Contains("sector")){
+		while (param1 < -TMath::Pi()/9 ) param1 += 2*TMath::Pi();
+		while (param1 > TMath::Pi()*2 ) param1 -= 2*TMath::Pi();
+		while (param1 > TMath::Pi()/9) param1 -= 2*TMath::Pi()/9;
 	      }
-	      preselCutFlowsTP2D[ivar2D_counter][i][icut_counter][j]->Fill(params[0],params[1]);
-	      ivar2D_counter++;
+	      if(varName2.Contains("dof")) param2 /= 2*tp_nstub->at(it) - 5;
+	      if(varName2.Contains("sector")){
+		while (param2 < -TMath::Pi()/9 ) param2 += 2*TMath::Pi();
+		while (param2 > TMath::Pi()*2 ) param2 -= 2*TMath::Pi();
+		while (param2 > TMath::Pi()/9) param2 -= 2*TMath::Pi()/9;
+	      }
+	      preselCutFlowsTP2D[ivar2D][i][icut][j]->Fill(param1,param2);
 	    }
 	  }
 	}
-	icut_counter++;
       }
-      if(icut_counter==preselCutsTP.size()){
+      if(icut==preselCutsTP.size() && tp_eventid->at(it)==0 && isPrimary==true){
 	//std::cout<<"pushed tp icut_counter: "<<icut_counter<<std::endl;
 	selectedTPs.push_back(Track_Parameters(tp_pt->at(it), tmp_d0, tmp_z0, tp_eta->at(it), tp_phi->at(it), tp_pdgid->at(it), tp_x->at(it), tp_y->at(it), tp_z->at(it), tp_charge->at(it), it));
 	if (tp_eventid->at(it)>0){
@@ -3272,604 +2962,173 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->SetTextFont(42);
   //std::cout<<"plots"<<std::endl;
 
-  int i = 0;
-  for(auto ivar=varCutFlows.cbegin(); ivar!=varCutFlows.cend(); ++ivar){
+  for(uint ivar=0; ivar<varCutFlows.size(); ++ivar){
     for(uint j=0; j<trackType.size(); ++j){
       for(uint k=0; k<plotModifiers.size(); ++k){
-	auto start = std::chrono::high_resolution_clock::now();
 	l->Clear();
 	TH1F* h_trkEff[preselCuts.size()];
-	int m = 0;
-	for(auto mcut=preselCuts.cbegin(); mcut!=preselCuts.cend(); ++mcut){
-	  if(m!=0){
-	    //std::cout<<"trkEffOverlay i j m k: "<<i<<" "<<j<<" "<<m<<" "<<k<<std::endl;
-	    h_trkEff[m] = (TH1F*)preselCutFlows[i][j][0][k]->Clone();
-	    h_trkEff[m]->GetYaxis()->SetNoExponent(kTRUE);
-	    removeFlows(h_trkEff[m]);
-	    h_trkEff[m]->SetStats(0);
-	    removeFlows(preselCutFlows[i][j][m][k]);
-	    h_trkEff[m]->Divide(preselCutFlows[i][j][m][k],h_trkEff[m],1.0,1.0,"B");
-	    h_trkEff[m]->SetLineColor(m);
-	    h_trkEff[m]->SetMarkerColor(m);
-	    TString cutName = mcut->first;
-	    //std::cout<<"cutName: "<<cutName<<std::endl;
-	    l->AddEntry(h_trkEff[m],cutName,"lp");
-	    if(m==1){
-	      raiseMax(h_trkEff[m]);
-	      h_trkEff[m]->Draw();
-	    }
-	    else{
-	      h_trkEff[m]->Draw("SAME");
-	    }
+	for(uint mcut=1; mcut<preselCuts.size(); ++mcut){
+	  //std::cout<<"trkEffOverlay i j m k: "<<i<<" "<<j<<" "<<m<<" "<<k<<std::endl;
+	  h_trkEff[mcut] = (TH1F*)preselCutFlows[ivar][j][0][k]->Clone();
+	  h_trkEff[mcut]->GetYaxis()->SetNoExponent(kTRUE);
+	  removeFlows(h_trkEff[mcut]);
+	  h_trkEff[mcut]->SetStats(0);
+	  removeFlows(preselCutFlows[ivar][j][mcut][k]);
+	  h_trkEff[mcut]->Divide(preselCutFlows[ivar][j][mcut][k],h_trkEff[mcut],1.0,1.0,"B");
+	  h_trkEff[mcut]->SetLineColor(mcut);
+	  h_trkEff[mcut]->SetMarkerColor(mcut);
+	  TString cutName = preselCuts[mcut]->getCutName();
+	  //std::cout<<"cutName: "<<cutName<<std::endl;
+	  l->AddEntry(h_trkEff[mcut],cutName,"lp");
+	  if(mcut==1){
+	    raiseMax(h_trkEff[mcut]);
+	    h_trkEff[mcut]->Draw();
 	  }
-	  m++;
+	  else{
+	    h_trkEff[mcut]->Draw("SAME");
+	  }
 	}
 	mySmallText(0.3, 0.9, 1, ctxt);
 	l->Draw();
-	c.SaveAs(PRESELDIR + "/h_trkEffOverlay_"+ivar->first.at(0)+"_"+trackType[j]+plotModifiers[k]+".pdf");
-	auto finish = std::chrono::high_resolution_clock::now();
+	c.SaveAs(PRESELDIR + "/h_trkEffOverlay_"+varCutFlows[ivar]->getVarName()+"_"+trackType[j]+plotModifiers[k]+".pdf");
 	/*std::cout << "trkEffOverlay took "
 		  << std::chrono::duration_cast<milli>(finish - start).count()
 		  << " milliseconds\n";*/
       }
     }
-    i++;
   }
 
-  i = 0;
   int m_primary = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "primary"));
   int m_np = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "np"));
   int m_fake = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "fake"));
   int m_PU = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "PU"));
   int m_notHiggs = distance(trackType.begin(), find(trackType.begin(), trackType.end(), "notHiggs"));
 
-  for(auto icut=preselCuts.cbegin(); icut!=preselCuts.cend(); ++icut){
+  for(uint icut=0; icut<preselCuts.size(); ++icut){
     for(uint j=0; j<plotModifiers.size(); ++j){
-      int k = 0;
-      for(auto kvar=varCutFlows.cbegin(); kvar!=varCutFlows.cend(); ++kvar){
-	TString cutName = icut->first;
-	auto h_stack = new THStack("hs_"+kvar->first.at(0)+"_"+cutName+"Cut"+plotModifiers[j],"Stacked BG histograms");
+      for(uint kvar=0; kvar<varCutFlows.size(); ++kvar){
+	TString cutName = preselCuts[icut]->getCutName();
+	auto h_stack = new THStack("hs_"+varCutFlows[kvar]->getVarName()+"_"+cutName+"Cut"+plotModifiers[j],"Stacked BG histograms");
 	float integralSum = 0;
 	l->Clear();
 	for(uint m=0; m<trackType.size(); ++m){
-	  auto start = std::chrono::high_resolution_clock::now();
-	  preselCutFlows[k][m][i][j]->GetYaxis()->SetNoExponent(kTRUE);
-	  removeFlows(preselCutFlows[k][m][i][j]);
+	  preselCutFlows[kvar][m][icut][j]->GetYaxis()->SetNoExponent(kTRUE);
+	  removeFlows(preselCutFlows[kvar][m][icut][j]);
 	  if(detailedPlots){
-	    raiseMax(preselCutFlows[k][m][i][j]);
-	    preselCutFlows[k][m][i][j]->Draw();
+	    raiseMax(preselCutFlows[kvar][m][icut][j]);
+	    preselCutFlows[kvar][m][icut][j]->Draw();
 	    mySmallText(0.3, 0.9, 1, ctxt);
-	    preselCutFlows[k][m][i][j]->Write("", TObject::kOverwrite);
-	    c.SaveAs(PRESELDIR + "/"+ preselCutFlows[k][m][i][j]->GetName() + ".pdf");
+	    preselCutFlows[kvar][m][icut][j]->Write("", TObject::kOverwrite);
+	    c.SaveAs(PRESELDIR + "/"+ preselCutFlows[kvar][m][icut][j]->GetName() + ".pdf");
 	  }
-	  preselCutFlows[k][m][i][j]->SetLineColor(m+1);
-	  preselCutFlows[k][m][i][j]->SetMarkerColor(m+1);
+	  preselCutFlows[kvar][m][icut][j]->SetLineColor(m+1);
+	  preselCutFlows[kvar][m][icut][j]->SetMarkerColor(m+1);
 	  if(trackType[m]=="fake" || trackType[m]=="PU" || trackType[m]=="notHiggs"){
-	    integralSum+=preselCutFlows[k][m][i][j]->Integral();
+	    integralSum+=preselCutFlows[kvar][m][icut][j]->Integral();
 	  }
-	  auto finish = std::chrono::high_resolution_clock::now();
 	  /*std::cout << "preselCutFlows took "
 		    << std::chrono::duration_cast<milli>(finish - start).count()
 		    << " milliseconds\n";*/
 	}
 	for(uint m=0; m<trackType.size(); ++m){
 	  if(trackType[m]=="fake" || trackType[m]=="PU" || trackType[m]=="notHiggs"){
-	    preselCutFlows[k][m][i][j]->Scale(1./integralSum);
-	    h_stack->Add(preselCutFlows[k][m][i][j]);
+	    preselCutFlows[kvar][m][icut][j]->Scale(1./integralSum);
+	    h_stack->Add(preselCutFlows[kvar][m][icut][j]);
 	  }
 	}
-	auto start = std::chrono::high_resolution_clock::now();
 	h_stack->Draw("HIST");
-	preselCutFlows[k][m_primary][i][j]->Scale(1./preselCutFlows[k][m_primary][i][j]->Integral());
-	raiseMax(preselCutFlows[k][m_primary][i][j],h_stack);
-	drawSame(preselCutFlows[k][m_primary][i][j],h_stack);
+	preselCutFlows[kvar][m_primary][icut][j]->Scale(1./preselCutFlows[kvar][m_primary][icut][j]->Integral());
+	raiseMax(preselCutFlows[kvar][m_primary][icut][j],h_stack);
+	drawSame(preselCutFlows[kvar][m_primary][icut][j],h_stack);
 	mySmallText(0.3, 0.9, 1, ctxt);
 	l->Clear();
-	l->AddEntry(preselCutFlows[k][m_primary][i][j],"Primary","l");
-	l->AddEntry(preselCutFlows[k][m_fake][i][j],"Fake","l");
-	l->AddEntry(preselCutFlows[k][m_PU][i][j],"PU","l");
-	l->AddEntry(preselCutFlows[k][m_notHiggs][i][j],"notHiggs","l");
+	l->AddEntry(preselCutFlows[kvar][m_primary][icut][j],"Primary","l");
+	l->AddEntry(preselCutFlows[kvar][m_fake][icut][j],"Fake","l");
+	l->AddEntry(preselCutFlows[kvar][m_PU][icut][j],"PU","l");
+	l->AddEntry(preselCutFlows[kvar][m_notHiggs][icut][j],"notHiggs","l");
 	l->Draw();
-	c.SaveAs(PRESELDIR + "/h_signalVsBGStack_"+kvar->first.at(0)+"_"+icut->first+"Cut"+plotModifiers[j]+".pdf");
+	c.SaveAs(PRESELDIR + "/h_signalVsBGStack_"+varCutFlows[kvar]->getVarName()+"_"+preselCuts[icut]->getCutName()+"Cut"+plotModifiers[j]+".pdf");
 	for(uint m=0; m<trackType.size(); ++m){
-	  preselCutFlows[k][m][i][j]->Scale(1./preselCutFlows[k][m][i][j]->Integral());
-	  preselCutFlows[k][m][i][j]->SetStats(0);
+	  preselCutFlows[kvar][m][icut][j]->Scale(1./preselCutFlows[kvar][m][icut][j]->Integral());
+	  preselCutFlows[kvar][m][icut][j]->SetStats(0);
 	}
-	raiseMax(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_fake][i][j],preselCutFlows[k][m_PU][i][j],preselCutFlows[k][m_notHiggs][i][j]);
-	drawSame(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_fake][i][j],preselCutFlows[k][m_PU][i][j],preselCutFlows[k][m_notHiggs][i][j]);
+	raiseMax(preselCutFlows[kvar][m_primary][icut][j],preselCutFlows[kvar][m_fake][icut][j],preselCutFlows[kvar][m_PU][icut][j],preselCutFlows[kvar][m_notHiggs][icut][j]);
+	drawSame(preselCutFlows[kvar][m_primary][icut][j],preselCutFlows[kvar][m_fake][icut][j],preselCutFlows[kvar][m_PU][icut][j],preselCutFlows[kvar][m_notHiggs][icut][j]);
 	mySmallText(0.3, 0.9, 1, ctxt);
 	l->Draw();
 	//std::cout<<"signalvsBGOverlay primary fake PU notHiggs: "<<m_primary<<" "<<m_fake<<" "<<m_PU<<" "<<m_notHiggs<<std::endl;
 	//std::cout<<"signalvsBGOverlay k i j: "<<k<<" "<<i<<" "<<j<<std::endl;
-	c.SaveAs(PRESELDIR + "/h_signalVsBGOverlay_"+kvar->first.at(0)+"_"+icut->first+"Cut"+plotModifiers[j]+".pdf");
-	auto finish = std::chrono::high_resolution_clock::now();
+	c.SaveAs(PRESELDIR + "/h_signalVsBGOverlay_"+varCutFlows[kvar]->getVarName()+"_"+preselCuts[icut]->getCutName()+"Cut"+plotModifiers[j]+".pdf");
 	/*std::cout << "signalVsBGOverlay took "
 		  << std::chrono::duration_cast<milli>(finish - start).count()
 		  << " milliseconds\n";*/
-	raiseMax(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_np][i][j]);
-	drawSame(preselCutFlows[k][m_primary][i][j],preselCutFlows[k][m_np][i][j]);
+	raiseMax(preselCutFlows[kvar][m_primary][icut][j],preselCutFlows[kvar][m_np][icut][j]);
+	drawSame(preselCutFlows[kvar][m_primary][icut][j],preselCutFlows[kvar][m_np][icut][j]);
 	mySmallText(0.3, 0.9, 1, ctxt);
 	l->Clear();
-	l->AddEntry(preselCutFlows[k][m_primary][i][j],"Primary","l");
-	l->AddEntry(preselCutFlows[k][m_np][i][j],"NP","l");
+	l->AddEntry(preselCutFlows[kvar][m_primary][icut][j],"Primary","l");
+	l->AddEntry(preselCutFlows[kvar][m_np][icut][j],"NP","l");
 	l->Draw();
-	c.SaveAs(PRESELDIR + "/h_signalVsBG_"+kvar->first.at(0)+"_"+icut->first+"Cut"+plotModifiers[j]+".pdf");
-	
-	k++;
+	c.SaveAs(PRESELDIR + "/h_signalVsBG_"+varCutFlows[kvar]->getVarName()+"_"+preselCuts[icut]->getCutName()+"Cut"+plotModifiers[j]+".pdf");
       }
     }
-    i++;
   }
 
-  i=0;
   int m_match = distance(tpType.begin(), find(tpType.begin(), tpType.end(), "match"));
   int m_tp = distance(tpType.begin(), find(tpType.begin(), tpType.end(), ""));
-  for(auto icut=preselCutsTP.cbegin(); icut!=preselCutsTP.cend(); ++icut){
-    TString cutName = icut->first;
+  for(uint icut=0; icut<preselCutsTP.size(); ++icut){
+    TString cutName = preselCutsTP[icut]->getCutName();
     for(uint j=0; j<plotModifiers.size(); ++j){
-      int k = 0;
-      for(auto kvar=varCutFlowsTP.cbegin(); kvar!=varCutFlowsTP.cend(); ++kvar){
+      for(uint kvar=0; kvar<varCutFlowsTP.size(); ++kvar){
 	for(uint m=0; m<tpType.size(); ++m){
-	  preselCutFlowsTP[k][m][i][j]->GetYaxis()->SetNoExponent(kTRUE);
-	  removeFlows(preselCutFlowsTP[k][m][i][j]);
+	  preselCutFlowsTP[kvar][m][icut][j]->GetYaxis()->SetNoExponent(kTRUE);
+	  removeFlows(preselCutFlowsTP[kvar][m][icut][j]);
 	  if(detailedPlots){
-	    raiseMax(preselCutFlowsTP[k][m][i][j]);
-	    preselCutFlowsTP[k][m][i][j]->Draw();
+	    raiseMax(preselCutFlowsTP[kvar][m][icut][j]);
+	    preselCutFlowsTP[kvar][m][icut][j]->Draw();
 	    mySmallText(0.3, 0.9, 1, ctxt);
-	    preselCutFlowsTP[k][m][i][j]->Write("", TObject::kOverwrite);
-	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP[k][m][i][j]->GetName() + ".pdf");
+	    preselCutFlowsTP[kvar][m][icut][j]->Write("", TObject::kOverwrite);
+	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP[kvar][m][icut][j]->GetName() + ".pdf");
 	  }
 	}
-	preselCutFlowsTP[k][m_match][i][j]->Divide(preselCutFlowsTP[k][m_match][i][j],preselCutFlowsTP[k][m_tp][i][j]);
-	raiseMax(preselCutFlowsTP[k][m_match][i][j]);
+	preselCutFlowsTP[kvar][m_match][icut][j]->Divide(preselCutFlowsTP[kvar][m_match][icut][j],preselCutFlowsTP[kvar][m_tp][icut][j]);
+	raiseMax(preselCutFlowsTP[kvar][m_match][icut][j]);
+	preselCutFlowsTP[kvar][m_match][icut][j]->Draw();
 	mySmallText(0.3, 0.9, 1, ctxt);
-	c.SaveAs(PRESELDIR + "/h_trackFindingEff_"+kvar->first.at(0)+"_"+cutName+"Cut"+plotModifiers[j]+".pdf");
-	k++;
+	c.SaveAs(PRESELDIR + "/h_trackFindingEff_"+varCutFlowsTP[kvar]->getVarName()+"_"+cutName+"Cut"+plotModifiers[j]+".pdf");
       }
     }
-    i++;
   }
 
-  i = 0;
-  for(auto icut=preselCuts.cbegin(); icut!=preselCuts.cend(); ++icut){
-    TString cutName = icut->first;
+  for(uint icut=0; icut<preselCuts.size(); ++icut){
+    TString cutName = preselCuts[icut]->getCutName();
     for(uint j=0; j<plotModifiers.size(); ++j){
-      int k = 0;
-      for(auto kvar=varCutFlows2D.cbegin(); kvar!=varCutFlows2D.cend(); ++kvar){
+      for(uint kvar=0; kvar<varCutFlows2D.size(); ++kvar){
 	for(uint m=0; m<trackType.size(); ++m){
-	  removeFlows(preselCutFlows2D[k][m][i][j]);
-	  preselCutFlows2D[k][m][i][j]->Draw();
+	  removeFlows(preselCutFlows2D[kvar][m][icut][j]);
+	  preselCutFlows2D[kvar][m][icut][j]->Draw("COLZ");
 	  mySmallText(0.3, 0.9, 1, ctxt);
-	  c.SaveAs(PRESELDIR + "/"+ preselCutFlows2D[k][m][i][j]->GetName() + ".pdf");
+	  c.SaveAs(PRESELDIR + "/"+ preselCutFlows2D[kvar][m][icut][j]->GetName() + ".pdf");
 	}
-	k++;
       }
     }
-    i++;
   }
 
-  i = 0;
   if(detailedPlots){
-    for(auto icut=preselCutsTP.cbegin(); icut!=preselCutsTP.cend(); ++icut){
-      TString cutName = icut->first;
+    for(uint icut=0; icut<preselCutsTP.size(); ++icut){
+      TString cutName = preselCutsTP[icut]->getCutName();
       for(uint j=0; j<plotModifiers.size(); ++j){
-	int k = 0;
-	for(auto kvar=varCutFlowsTP2D.cbegin(); kvar!=varCutFlowsTP2D.cend(); ++kvar){
+	for(uint kvar=0; kvar<varCutFlowsTP2D.size(); ++kvar){
 	  for(uint m=0; m<tpType.size(); ++m){
-	    removeFlows(preselCutFlowsTP2D[k][m][i][j]);
-	    preselCutFlowsTP2D[k][m][i][j]->Draw();
+	    removeFlows(preselCutFlowsTP2D[kvar][m][icut][j]);
+	    preselCutFlowsTP2D[kvar][m][icut][j]->Draw("COLZ");
 	    mySmallText(0.3, 0.9, 1, ctxt);
-	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP2D[k][m][i][j]->GetName() + ".pdf");
+	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP2D[kvar][m][icut][j]->GetName() + ".pdf");
 	  }
-	  k++;
 	}
       }
-      i++;
     }
   }
-
-  h_trk_d0->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0);
-  h_trk_d0->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_d0->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_d0->GetName() + ".pdf");
-  delete h_trk_d0;
-
-  h_trk_d0_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary);
-  h_trk_d0_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_d0_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_d0_primary->GetName() + ".pdf");
-  delete h_trk_d0_primary;
-
-  h_trk_d0_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_noCuts);
-  h_trk_d0_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_d0_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_d0_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_d0_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np);
-  h_trk_d0_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_d0_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_d0_np->GetName() + ".pdf");
-  delete h_trk_d0_np;
-
-  h_trk_d0_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_noCuts);
-  h_trk_d0_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_d0_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_d0_np_noCuts->GetName() + ".pdf");
-  
-  h_trk_d0_primary_noCuts->Scale(1./h_trk_d0_primary_noCuts->Integral());
-  h_trk_d0_primary_noCuts->SetLineColor(1);
-  h_trk_d0_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_d0_np_noCutsNorm = (TH1F*)h_trk_d0_np_noCuts->Clone(); 
-  h_trk_d0_np_noCutsNorm->Scale(1./h_trk_d0_np_noCutsNorm->Integral());
-  h_trk_d0_np_noCutsNorm->SetLineColor(2);
-  h_trk_d0_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_d0_np_noCutsNorm,h_trk_d0_primary_noCuts);
-  h_trk_d0_np_noCutsNorm->SetStats(0);
-  h_trk_d0_primary_noCuts->SetStats(0);
-  h_trk_d0_np_noCutsNorm->Draw("HIST");
-  h_trk_d0_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_d0_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_np_noCutsNorm,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts.pdf");
-  delete h_trk_d0_np_noCutsNorm;
-
-  h_trk_d0_primary_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_noCuts_zoomOut);
-  h_trk_d0_np_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_noCuts_zoomOut);
-  h_trk_d0_primary_noCuts_zoomOut->Scale(1./h_trk_d0_primary_noCuts_zoomOut->Integral());
-  h_trk_d0_primary_noCuts_zoomOut->SetLineColor(1);
-  h_trk_d0_primary_noCuts_zoomOut->SetMarkerColor(1);
-  h_trk_d0_np_noCuts_zoomOut->Scale(1./h_trk_d0_np_noCuts_zoomOut->Integral());
-  h_trk_d0_np_noCuts_zoomOut->SetLineColor(2);
-  h_trk_d0_np_noCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_d0_np_noCuts_zoomOut,h_trk_d0_primary_noCuts_zoomOut);
-  h_trk_d0_np_noCuts_zoomOut->SetStats(0);
-  h_trk_d0_primary_noCuts_zoomOut->SetStats(0);
-  h_trk_d0_np_noCuts_zoomOut->Draw("HIST");
-  h_trk_d0_primary_noCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_d0_primary_noCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_d0_np_noCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_zoomOut.pdf");
-  delete h_trk_d0_primary_noCuts_zoomOut;
-  delete h_trk_d0_np_noCuts_zoomOut;
-
-  TH1F *h_trk_d0_fake_noCutsNorm = (TH1F*)h_trk_d0_fake_noCuts->Clone(); 
-  h_trk_d0_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_fake_noCutsNorm);
-  TH1F *h_trk_d0_PU_noCutsNorm = (TH1F*)h_trk_d0_PU_noCuts->Clone(); 
-  h_trk_d0_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_PU_noCutsNorm);
-  TH1F *h_trk_d0_notHiggs_noCutsNorm = (TH1F*)h_trk_d0_notHiggs_noCuts->Clone(); 
-  h_trk_d0_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_notHiggs_noCutsNorm);
-  h_trk_d0_fake_noCutsNorm->Scale(1./h_trk_d0_np_noCuts->Integral());
-  h_trk_d0_fake_noCutsNorm->SetLineColor(2);
-  h_trk_d0_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_d0_PU_noCutsNorm->Scale(1./h_trk_d0_np_noCuts->Integral());
-  h_trk_d0_PU_noCutsNorm->SetLineColor(3);
-  h_trk_d0_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_d0_notHiggs_noCutsNorm->Scale(1./h_trk_d0_np_noCuts->Integral());
-  h_trk_d0_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_d0_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_d0_noCuts = new THStack("hs_d0_noCuts","Stacked BG histograms");
-  hs_d0_noCuts->Add(h_trk_d0_fake_noCutsNorm);
-  hs_d0_noCuts->Add(h_trk_d0_PU_noCutsNorm);
-  hs_d0_noCuts->Add(h_trk_d0_notHiggs_noCutsNorm);
-  hs_d0_noCuts->Draw("HIST");
-  h_trk_d0_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_d0_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_d0_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_noCutsNorm.pdf");
-  delete h_trk_d0_fake_noCutsNorm;
-  delete h_trk_d0_PU_noCutsNorm;
-  delete h_trk_d0_notHiggs_noCutsNorm;
-  delete h_trk_d0_np_noCuts;
-  delete hs_d0_noCuts;
-
-  h_trk_d0_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_fake_noCuts);
-  h_trk_d0_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_PU_noCuts);
-  h_trk_d0_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_notHiggs_noCuts);
-  h_trk_d0_fake_noCuts->Scale(1./h_trk_d0_fake_noCuts->Integral());
-  h_trk_d0_fake_noCuts->SetLineColor(2);
-  h_trk_d0_fake_noCuts->SetMarkerColor(2);
-  h_trk_d0_PU_noCuts->Scale(1./h_trk_d0_PU_noCuts->Integral());
-  h_trk_d0_PU_noCuts->SetLineColor(3);
-  h_trk_d0_PU_noCuts->SetMarkerColor(3);
-  h_trk_d0_notHiggs_noCuts->Scale(1./h_trk_d0_notHiggs_noCuts->Integral());
-  h_trk_d0_notHiggs_noCuts->SetLineColor(4);
-  h_trk_d0_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_d0_fake_noCuts->Draw("HIST");
-  h_trk_d0_primary_noCuts->Draw("HIST,SAME");
-  h_trk_d0_PU_noCuts->Draw("HIST,SAME");
-  h_trk_d0_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_d0_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_d0_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_noCuts.pdf");
-  delete h_trk_d0_primary_noCuts;
-  delete h_trk_d0_fake_noCuts;
-  delete h_trk_d0_PU_noCuts;
-  delete h_trk_d0_notHiggs_noCuts;
-
-  h_trk_d0_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_noCuts_H);
-  h_trk_d0_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_noCuts_H);
-  h_trk_d0_primary_noCuts_H->Scale(1./h_trk_d0_primary_noCuts_H->Integral());
-  h_trk_d0_primary_noCuts_H->SetLineColor(1);
-  h_trk_d0_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_d0_np_noCuts_H->Scale(1./h_trk_d0_np_noCuts_H->Integral());
-  h_trk_d0_np_noCuts_H->SetLineColor(2);
-  h_trk_d0_np_noCuts_H->SetMarkerColor(2);
-  h_trk_d0_np_noCuts_H->Draw("HIST");
-  h_trk_d0_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_d0_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_H.pdf");
-  delete h_trk_d0_primary_noCuts_H;
-  delete h_trk_d0_np_noCuts_H;
-
-  h_trk_d0_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_noCuts_L);
-  h_trk_d0_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_noCuts_L);
-  h_trk_d0_primary_noCuts_L->Scale(1./h_trk_d0_primary_noCuts_L->Integral());
-  h_trk_d0_primary_noCuts_L->SetLineColor(1);
-  h_trk_d0_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_d0_np_noCuts_L->Scale(1./h_trk_d0_np_noCuts_L->Integral());
-  h_trk_d0_np_noCuts_L->SetLineColor(2);
-  h_trk_d0_np_noCuts_L->SetMarkerColor(2);
-  h_trk_d0_np_noCuts_L->Draw("HIST");
-  h_trk_d0_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_d0_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_L.pdf");
-  delete h_trk_d0_primary_noCuts_L;
-  delete h_trk_d0_np_noCuts_L;
-
-  h_trk_d0_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_noCuts_barrel);
-  h_trk_d0_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_noCuts_barrel);
-  h_trk_d0_primary_noCuts_barrel->Scale(1./h_trk_d0_primary_noCuts_barrel->Integral());
-  h_trk_d0_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_d0_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_d0_np_noCuts_barrel->Scale(1./h_trk_d0_np_noCuts_barrel->Integral());
-  h_trk_d0_np_noCuts_barrel->SetLineColor(2);
-  h_trk_d0_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_d0_np_noCuts_barrel->Draw("HIST");
-  h_trk_d0_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_d0_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_barrel.pdf");
-  delete h_trk_d0_primary_noCuts_barrel;
-  delete h_trk_d0_np_noCuts_barrel;
-
-  h_trk_d0_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_noCuts_disk);
-  h_trk_d0_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_noCuts_disk);
-  h_trk_d0_primary_noCuts_disk->Scale(1./h_trk_d0_primary_noCuts_disk->Integral());
-  h_trk_d0_primary_noCuts_disk->SetLineColor(1);
-  h_trk_d0_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_d0_np_noCuts_disk->Scale(1./h_trk_d0_np_noCuts_disk->Integral());
-  h_trk_d0_np_noCuts_disk->SetLineColor(2);
-  h_trk_d0_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_d0_np_noCuts_disk->Draw("HIST");
-  h_trk_d0_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_d0_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_noCuts_disk.pdf");
-  delete h_trk_d0_primary_noCuts_disk;
-  delete h_trk_d0_np_noCuts_disk;
-
-  h_trk_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_qualCuts);
-  h_trk_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_qualCuts);
-  h_trk_d0_primary_qualCuts->Scale(1./h_trk_d0_primary_qualCuts->Integral());
-  h_trk_d0_primary_qualCuts->SetLineColor(1);
-  h_trk_d0_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_d0_np_qualCutsNorm = (TH1F*)h_trk_d0_np_qualCuts->Clone(); 
-  h_trk_d0_np_qualCutsNorm->Scale(1./h_trk_d0_np_qualCutsNorm->Integral());
-  h_trk_d0_np_qualCutsNorm->SetLineColor(2);
-  h_trk_d0_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_d0_np_qualCutsNorm->Draw("HIST");
-  h_trk_d0_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_qualCuts.pdf");
-  delete h_trk_d0_np_qualCutsNorm;
-
-  h_trk_d0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_allCuts);
-  h_trk_d0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_allCuts);
-  h_trk_d0_primary_allCuts->Scale(1./h_trk_d0_primary_allCuts->Integral());
-  h_trk_d0_primary_allCuts->SetLineColor(1);
-  h_trk_d0_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_d0_np_allCutsNorm = (TH1F*)h_trk_d0_np_allCuts->Clone(); 
-  h_trk_d0_np_allCutsNorm->Scale(1./h_trk_d0_np_allCutsNorm->Integral());
-  h_trk_d0_np_allCutsNorm->SetLineColor(2);
-  h_trk_d0_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_d0_primary_allCuts,h_trk_d0_np_allCutsNorm);
-  h_trk_d0_np_allCutsNorm->SetStats(0);
-  h_trk_d0_primary_allCuts->SetStats(0);
-  h_trk_d0_primary_allCuts->Draw("HIST");
-  h_trk_d0_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_allCuts.pdf");
-  delete h_trk_d0_np_allCutsNorm;
-
-  h_trk_d0_primary_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_allCuts_zoomOut);
-  h_trk_d0_np_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_allCuts_zoomOut);
-  h_trk_d0_primary_allCuts_zoomOut->Scale(1./h_trk_d0_primary_allCuts_zoomOut->Integral());
-  h_trk_d0_primary_allCuts_zoomOut->SetLineColor(1);
-  h_trk_d0_primary_allCuts_zoomOut->SetMarkerColor(1);
-  h_trk_d0_np_allCuts_zoomOut->Scale(1./h_trk_d0_np_allCuts_zoomOut->Integral());
-  h_trk_d0_np_allCuts_zoomOut->SetLineColor(2);
-  h_trk_d0_np_allCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_d0_np_allCuts_zoomOut,h_trk_d0_primary_allCuts_zoomOut);
-  h_trk_d0_np_allCuts_zoomOut->SetStats(0);
-  h_trk_d0_primary_allCuts_zoomOut->SetStats(0);
-  h_trk_d0_np_allCuts_zoomOut->Draw("HIST");
-  h_trk_d0_primary_allCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_d0_primary_allCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_d0_np_allCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_allCuts_zoomOut.pdf");
-  delete h_trk_d0_primary_allCuts_zoomOut;
-  delete h_trk_d0_np_allCuts_zoomOut;
-
-  h_trk_d0_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_allCuts_barrel);
-  h_trk_d0_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_allCuts_barrel);
-  h_trk_d0_primary_allCuts_barrel->Scale(1./h_trk_d0_primary_allCuts_barrel->Integral());
-  h_trk_d0_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_d0_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_d0_primary_allCuts_barrel->SetStats(0);
-  h_trk_d0_np_allCuts_barrel->Scale(1./h_trk_d0_np_allCuts_barrel->Integral());
-  h_trk_d0_np_allCuts_barrel->SetLineColor(2);
-  h_trk_d0_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_d0_np_allCuts_barrel->SetStats(0);
-  h_trk_d0_np_allCuts_barrel->Draw("HIST");
-  h_trk_d0_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_d0_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_allCuts_barrel.pdf");
-  delete h_trk_d0_primary_allCuts_barrel;
-  delete h_trk_d0_np_allCuts_barrel;
-
-  h_trk_d0_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_primary_allCuts_disk);
-  h_trk_d0_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_np_allCuts_disk);
-  h_trk_d0_primary_allCuts_disk->Scale(1./h_trk_d0_primary_allCuts_disk->Integral());
-  h_trk_d0_primary_allCuts_disk->SetLineColor(1);
-  h_trk_d0_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_d0_primary_allCuts_disk->SetStats(0);
-  h_trk_d0_np_allCuts_disk->Scale(1./h_trk_d0_np_allCuts_disk->Integral());
-  h_trk_d0_np_allCuts_disk->SetLineColor(2);
-  h_trk_d0_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_d0_np_allCuts_disk->SetStats(0);
-  h_trk_d0_np_allCuts_disk->Draw("HIST");
-  h_trk_d0_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_d0_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_d0_allCuts_disk.pdf");
-  delete h_trk_d0_primary_allCuts_disk;
-  delete h_trk_d0_np_allCuts_disk;
-
-  h_trk_pt_vs_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_d0_primary_qualCuts);
-  h_trk_pt_vs_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_d0_np_qualCuts);
-  h_trk_pt_vs_d0_primary_qualCuts->SetLineColor(1);
-  h_trk_pt_vs_d0_primary_qualCuts->SetMarkerColor(1);
-  h_trk_pt_vs_d0_np_qualCuts->SetLineColor(2);
-  h_trk_pt_vs_d0_np_qualCuts->SetMarkerColor(2);
-  h_trk_pt_vs_d0_np_qualCuts->SetStats(false);
-  h_trk_pt_vs_d0_np_qualCuts->Draw("COLZ");
-  auto func = new TF2("fit func","abs(x*pow(y,1.8))<0.7",-2,2,0,30);
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_d0_np_qualCuts.pdf");
-  func->Draw("SAME");
-  c.SaveAs(DIR + "/h_trk_pt_vs_d0_np_qualCutsFit.pdf");
-  h_trk_pt_vs_d0_primary_qualCuts->SetStats(false);
-  h_trk_pt_vs_d0_primary_qualCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_d0_primary_qualCuts.pdf");
-  func->Draw("SAME");
-  c.SaveAs(DIR + "/h_trk_pt_vs_d0_primary_qualCutsFit.pdf");
-  delete h_trk_pt_vs_d0_primary_qualCuts;
-  delete h_trk_pt_vs_d0_np_qualCuts;
-
-  h_trk_pt_vs_d0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_d0_primary_allCuts);
-  h_trk_pt_vs_d0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_d0_np_allCuts);
-  h_trk_pt_vs_d0_primary_allCuts->SetLineColor(1);
-  h_trk_pt_vs_d0_primary_allCuts->SetMarkerColor(1);
-  h_trk_pt_vs_d0_np_allCuts->SetLineColor(2);
-  h_trk_pt_vs_d0_np_allCuts->SetMarkerColor(2);
-  h_trk_pt_vs_d0_np_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_d0_np_allCuts.pdf");
-  h_trk_pt_vs_d0_primary_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_d0_primary_allCuts.pdf");
-  delete h_trk_pt_vs_d0_primary_allCuts;
-  delete h_trk_pt_vs_d0_np_allCuts;
 
   h_trueVertex_charge_vs_numTPs->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_trueVertex_charge_vs_numTPs);
@@ -3964,131 +3223,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   mySmallText(0.4, 0.82, 1, ctxt);
   c.SaveAs(DIR + "/h_false_trackVertex_charge_vs_numTracks.pdf");
   delete h_false_trackVertex_charge_vs_numTracks;
-
-  h_trk_pt_vs_eta_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_eta_primary_qualCuts);
-  h_trk_pt_vs_eta_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_eta_np_qualCuts);
-  h_trk_pt_vs_eta_primary_qualCuts->SetLineColor(1);
-  h_trk_pt_vs_eta_primary_qualCuts->SetMarkerColor(1);
-  h_trk_pt_vs_eta_np_qualCuts->SetLineColor(2);
-  h_trk_pt_vs_eta_np_qualCuts->SetMarkerColor(2);
-  h_trk_pt_vs_eta_np_qualCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_eta_np_qualCuts.pdf");
-  h_trk_pt_vs_eta_primary_qualCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_eta_primary_qualCuts.pdf");
-  delete h_trk_pt_vs_eta_primary_qualCuts;
-  delete h_trk_pt_vs_eta_np_qualCuts;
-
-  h_trk_pt_vs_eta_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_eta_primary_allCuts);
-  h_trk_pt_vs_eta_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_vs_eta_np_allCuts);
-  h_trk_pt_vs_eta_primary_allCuts->SetLineColor(1);
-  h_trk_pt_vs_eta_primary_allCuts->SetMarkerColor(1);
-  h_trk_pt_vs_eta_np_allCuts->SetLineColor(2);
-  h_trk_pt_vs_eta_np_allCuts->SetMarkerColor(2);
-  h_trk_pt_vs_eta_np_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_eta_np_allCuts.pdf");
-  h_trk_pt_vs_eta_primary_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_pt_vs_eta_primary_allCuts.pdf");
-  delete h_trk_pt_vs_eta_primary_allCuts;
-  delete h_trk_pt_vs_eta_np_allCuts;
-
-  h_trk_numStubs_vs_eta_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_numStubs_vs_eta_primary_allCuts);
-  h_trk_numStubs_vs_eta_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_numStubs_vs_eta_np_allCuts);
-  h_trk_numStubs_vs_eta_fake_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_numStubs_vs_eta_fake_allCuts);
-  h_trk_numStubs_vs_eta_PU_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_numStubs_vs_eta_PU_allCuts);
-  h_trk_numStubs_vs_eta_notHiggs_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_numStubs_vs_eta_notHiggs_allCuts);
-  h_trk_numStubs_vs_eta_primary_allCuts->SetLineColor(1);
-  h_trk_numStubs_vs_eta_primary_allCuts->SetMarkerColor(1);
-  h_trk_numStubs_vs_eta_np_allCuts->SetLineColor(2);
-  h_trk_numStubs_vs_eta_np_allCuts->SetMarkerColor(2);
-  h_trk_numStubs_vs_eta_np_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_numStubs_vs_eta_np_allCuts.pdf");
-  h_trk_numStubs_vs_eta_primary_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_numStubs_vs_eta_primary_allCuts.pdf");
-  h_trk_numStubs_vs_eta_fake_allCuts->SetStats(0);
-  h_trk_numStubs_vs_eta_fake_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_numStubs_vs_eta_fake_allCuts.pdf");
-  h_trk_numStubs_vs_eta_PU_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_numStubs_vs_eta_PU_allCuts.pdf");
-  h_trk_numStubs_vs_eta_notHiggs_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_numStubs_vs_eta_notHiggs_allCuts.pdf");
-  delete h_trk_numStubs_vs_eta_primary_allCuts;
-  delete h_trk_numStubs_vs_eta_np_allCuts;
-  delete h_trk_numStubs_vs_eta_fake_allCuts;
-  delete h_trk_numStubs_vs_eta_PU_allCuts;
-  delete h_trk_numStubs_vs_eta_notHiggs_allCuts;
-
-  h_trk_eta_vs_d0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_vs_d0_primary_qualCuts);
-  h_trk_eta_vs_d0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_vs_d0_np_qualCuts);
-  h_trk_eta_vs_d0_primary_qualCuts->SetLineColor(1);
-  h_trk_eta_vs_d0_primary_qualCuts->SetMarkerColor(1);
-  h_trk_eta_vs_d0_np_qualCuts->SetLineColor(2);
-  h_trk_eta_vs_d0_np_qualCuts->SetMarkerColor(2);
-  h_trk_eta_vs_d0_np_qualCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_eta_vs_d0_np_qualCuts.pdf");
-  h_trk_eta_vs_d0_primary_qualCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_eta_vs_d0_primary_qualCuts.pdf");
-  delete h_trk_eta_vs_d0_primary_qualCuts;
-  delete h_trk_eta_vs_d0_np_qualCuts;
-
-  h_trk_eta_vs_d0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_vs_d0_primary_allCuts);
-  h_trk_eta_vs_d0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_vs_d0_np_allCuts);
-  h_trk_eta_vs_d0_primary_allCuts->SetLineColor(1);
-  h_trk_eta_vs_d0_primary_allCuts->SetMarkerColor(1);
-  h_trk_eta_vs_d0_np_allCuts->SetLineColor(2);
-  h_trk_eta_vs_d0_np_allCuts->SetMarkerColor(2);
-  h_trk_eta_vs_d0_np_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_eta_vs_d0_np_allCuts.pdf");
-  h_trk_eta_vs_d0_primary_allCuts->Draw("COLZ");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  c.SaveAs(DIR + "/h_trk_eta_vs_d0_primary_allCuts.pdf");
-  delete h_trk_eta_vs_d0_primary_allCuts;
-  delete h_trk_eta_vs_d0_np_allCuts;
-
-  h_trk_ptWeightedD0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_ptWeightedD0_primary_qualCuts);
-  h_trk_ptWeightedD0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_ptWeightedD0_np_qualCuts);
-  h_trk_ptWeightedD0_primary_qualCuts->Scale(1./h_trk_ptWeightedD0_primary_qualCuts->Integral());
-  h_trk_ptWeightedD0_primary_qualCuts->SetLineColor(1);
-  h_trk_ptWeightedD0_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_ptWeightedD0_np_qualCutsNorm = (TH1F*)h_trk_ptWeightedD0_np_qualCuts->Clone(); 
-  h_trk_ptWeightedD0_np_qualCutsNorm->Scale(1./h_trk_ptWeightedD0_np_qualCutsNorm->Integral());
-  h_trk_ptWeightedD0_np_qualCutsNorm->SetLineColor(2);
-  h_trk_ptWeightedD0_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_ptWeightedD0_np_qualCutsNorm->Draw("HIST");
-  h_trk_ptWeightedD0_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_ptWeightedD0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_ptWeightedD0_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_ptWeightedD0_qualCuts.pdf");
-  delete h_trk_ptWeightedD0_np_qualCutsNorm;
 
   h_correct_trkAssoc_delPhi->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_correct_trkAssoc_delPhi);
@@ -4221,1343 +3355,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   c.SaveAs(DIR + "/h_correctVsFalse_trkAssoc_delz.pdf");
   delete h_false_trkAssoc_delz;
   delete h_correct_trkAssoc_delz;
-
-  TH1F *h_trk_d0_fake_qualCutsNorm = (TH1F*)h_trk_d0_fake_qualCuts->Clone(); 
-  h_trk_d0_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_fake_qualCutsNorm);
-  TH1F *h_trk_d0_PU_qualCutsNorm = (TH1F*)h_trk_d0_PU_qualCuts->Clone(); 
-  h_trk_d0_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_PU_qualCutsNorm);
-  TH1F *h_trk_d0_notHiggs_qualCutsNorm = (TH1F*)h_trk_d0_notHiggs_qualCuts->Clone(); 
-  h_trk_d0_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_notHiggs_qualCutsNorm);
-  h_trk_d0_fake_qualCutsNorm->Scale(1./h_trk_d0_np_qualCuts->Integral());
-  h_trk_d0_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_d0_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_d0_PU_qualCutsNorm->Scale(1./h_trk_d0_np_qualCuts->Integral());
-  h_trk_d0_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_d0_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_d0_notHiggs_qualCutsNorm->Scale(1./h_trk_d0_np_qualCuts->Integral());
-  h_trk_d0_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_d0_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_d0_qualCuts = new THStack("hs_d0_qualCuts","Stacked BG histograms");
-  hs_d0_qualCuts->Add(h_trk_d0_fake_qualCutsNorm);
-  hs_d0_qualCuts->Add(h_trk_d0_PU_qualCutsNorm);
-  hs_d0_qualCuts->Add(h_trk_d0_notHiggs_qualCutsNorm);
-  hs_d0_qualCuts->Draw("HIST");
-  h_trk_d0_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_d0_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_d0_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_qualCutsNorm.pdf");
-  delete h_trk_d0_fake_qualCutsNorm;
-  delete h_trk_d0_PU_qualCutsNorm;
-  delete h_trk_d0_notHiggs_qualCutsNorm;
-  delete h_trk_d0_np_qualCuts;
-  delete hs_d0_qualCuts;
-
-  h_trk_d0_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_fake_qualCuts);
-  h_trk_d0_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_PU_qualCuts);
-  h_trk_d0_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_d0_notHiggs_qualCuts);
-  h_trk_d0_fake_qualCuts->Scale(1./h_trk_d0_fake_qualCuts->Integral());
-  h_trk_d0_fake_qualCuts->SetLineColor(2);
-  h_trk_d0_fake_qualCuts->SetMarkerColor(2);
-  h_trk_d0_PU_qualCuts->Scale(1./h_trk_d0_PU_qualCuts->Integral());
-  h_trk_d0_PU_qualCuts->SetLineColor(3);
-  h_trk_d0_PU_qualCuts->SetMarkerColor(3);
-  h_trk_d0_notHiggs_qualCuts->Scale(1./h_trk_d0_notHiggs_qualCuts->Integral());
-  h_trk_d0_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_d0_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_d0_fake_qualCuts->Draw("HIST");
-  h_trk_d0_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_d0_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_d0_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_d0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_d0_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_d0_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_d0_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_d0_qualCuts.pdf");
-  delete h_trk_d0_primary_qualCuts;
-  delete h_trk_d0_fake_qualCuts;
-  delete h_trk_d0_PU_qualCuts;
-  delete h_trk_d0_notHiggs_qualCuts;
-
-  h_tp_d0->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_d0);
-  h_tp_d0->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_d0->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_d0->GetName() + ".pdf");
-  delete h_tp_d0;
-   
-  h_tp_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_pt_noCuts);
-  h_tp_pt_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_pt_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_pt_noCuts->GetName() + ".pdf");
-  //delete h_tp_pt_noCuts;
-
-  h_tp_eta_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_eta_noCuts);
-  h_tp_eta_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_eta_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_eta_noCuts->GetName() + ".pdf");
-  //delete h_tp_eta_noCuts;
-
-  h_tp_d0_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_d0_noCuts);
-  h_tp_d0_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_d0_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_d0_noCuts->GetName() + ".pdf");
-  //delete h_tp_d0_noCuts;
-
-  h_trk_z0->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0);
-  h_trk_z0->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_z0->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_z0->GetName() + ".pdf");
-  delete h_trk_z0;
-
-  h_trk_z0_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary);
-  h_trk_z0_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_z0_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_z0_primary->GetName() + ".pdf");
-  delete h_trk_z0_primary;
-
-  h_trk_z0_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_noCuts);
-  h_trk_z0_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_z0_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_z0_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_z0_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np);
-  h_trk_z0_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_z0_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_z0_np->GetName() + ".pdf");
-  delete h_trk_z0_np;
-
-  h_trk_z0_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_noCuts);
-  h_trk_z0_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_z0_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_z0_np_noCuts->GetName() + ".pdf");
-
-  h_trk_z0_primary_noCuts->Scale(1./h_trk_z0_primary_noCuts->Integral());
-  h_trk_z0_primary_noCuts->SetLineColor(1);
-  h_trk_z0_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_z0_np_noCutsNorm = (TH1F*)h_trk_z0_np_noCuts->Clone(); 
-  h_trk_z0_np_noCutsNorm->Scale(1./h_trk_z0_np_noCutsNorm->Integral());
-  h_trk_z0_np_noCutsNorm->SetLineColor(2);
-  h_trk_z0_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_z0_np_noCutsNorm,h_trk_z0_primary_noCuts);
-  h_trk_z0_np_noCutsNorm->SetStats(0);
-  h_trk_z0_primary_noCuts->SetStats(0);
-  h_trk_z0_np_noCutsNorm->Draw("HIST");
-  h_trk_z0_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts.pdf");
-  delete h_trk_z0_np_noCutsNorm;
-
-  h_trk_z0_primary_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_noCuts_zoomOut);
-  h_trk_z0_np_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_noCuts_zoomOut);
-  h_trk_z0_primary_noCuts_zoomOut->Scale(1./h_trk_z0_primary_noCuts_zoomOut->Integral());
-  h_trk_z0_primary_noCuts_zoomOut->SetLineColor(1);
-  h_trk_z0_primary_noCuts_zoomOut->SetMarkerColor(1);
-  h_trk_z0_np_noCuts_zoomOut->Scale(1./h_trk_z0_np_noCuts_zoomOut->Integral());
-  h_trk_z0_np_noCuts_zoomOut->SetLineColor(2);
-  h_trk_z0_np_noCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_z0_np_noCuts_zoomOut,h_trk_z0_primary_noCuts_zoomOut);
-  h_trk_z0_np_noCuts_zoomOut->SetStats(0);
-  h_trk_z0_primary_noCuts_zoomOut->SetStats(0);
-  h_trk_z0_np_noCuts_zoomOut->Draw("HIST");
-  h_trk_z0_primary_noCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_z0_primary_noCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_z0_np_noCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_zoomOut.pdf");
-  delete h_trk_z0_primary_noCuts_zoomOut;
-  delete h_trk_z0_np_noCuts_zoomOut;
-
-  TH1F *h_trk_z0_fake_noCutsNorm = (TH1F*)h_trk_z0_fake_noCuts->Clone(); 
-  h_trk_z0_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_fake_noCutsNorm);
-  TH1F *h_trk_z0_PU_noCutsNorm = (TH1F*)h_trk_z0_PU_noCuts->Clone(); 
-  h_trk_z0_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_PU_noCutsNorm);
-  TH1F *h_trk_z0_notHiggs_noCutsNorm = (TH1F*)h_trk_z0_notHiggs_noCuts->Clone(); 
-  h_trk_z0_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_notHiggs_noCutsNorm);
-  h_trk_z0_fake_noCutsNorm->Scale(1./h_trk_z0_np_noCuts->Integral());
-  h_trk_z0_fake_noCutsNorm->SetLineColor(2);
-  h_trk_z0_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_z0_PU_noCutsNorm->Scale(1./h_trk_z0_np_noCuts->Integral());
-  h_trk_z0_PU_noCutsNorm->SetLineColor(3);
-  h_trk_z0_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_z0_notHiggs_noCutsNorm->Scale(1./h_trk_z0_np_noCuts->Integral());
-  h_trk_z0_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_z0_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_z0_noCuts = new THStack("hs_z0_noCuts","Stacked BG histograms");
-  hs_z0_noCuts->Add(h_trk_z0_fake_noCutsNorm);
-  hs_z0_noCuts->Add(h_trk_z0_PU_noCutsNorm);
-  hs_z0_noCuts->Add(h_trk_z0_notHiggs_noCutsNorm);
-  hs_z0_noCuts->Draw("HIST");
-  h_trk_z0_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_z0_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_z0_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_noCutsNorm.pdf");
-  delete h_trk_z0_fake_noCutsNorm;
-  delete h_trk_z0_PU_noCutsNorm;
-  delete h_trk_z0_notHiggs_noCutsNorm;
-  delete h_trk_z0_np_noCuts;
-  delete hs_z0_noCuts;
-
-  h_trk_z0_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_fake_noCuts);
-  h_trk_z0_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_PU_noCuts);
-  h_trk_z0_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_notHiggs_noCuts);
-  h_trk_z0_fake_noCuts->Scale(1./h_trk_z0_fake_noCuts->Integral());
-  h_trk_z0_fake_noCuts->SetLineColor(2);
-  h_trk_z0_fake_noCuts->SetMarkerColor(2);
-  h_trk_z0_PU_noCuts->Scale(1./h_trk_z0_PU_noCuts->Integral());
-  h_trk_z0_PU_noCuts->SetLineColor(3);
-  h_trk_z0_PU_noCuts->SetMarkerColor(3);
-  h_trk_z0_notHiggs_noCuts->Scale(1./h_trk_z0_notHiggs_noCuts->Integral());
-  h_trk_z0_notHiggs_noCuts->SetLineColor(4);
-  h_trk_z0_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_z0_fake_noCuts->Draw("HIST");
-  h_trk_z0_primary_noCuts->Draw("HIST,SAME");
-  h_trk_z0_PU_noCuts->Draw("HIST,SAME");
-  h_trk_z0_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_z0_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_z0_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_noCuts.pdf");
-  delete h_trk_z0_primary_noCuts;
-  delete h_trk_z0_fake_noCuts;
-  delete h_trk_z0_PU_noCuts;
-  delete h_trk_z0_notHiggs_noCuts;
-
-  h_trk_z0_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_noCuts_H);
-  h_trk_z0_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_noCuts_H);
-  h_trk_z0_primary_noCuts_H->Scale(1./h_trk_z0_primary_noCuts_H->Integral());
-  h_trk_z0_primary_noCuts_H->SetLineColor(1);
-  h_trk_z0_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_z0_np_noCuts_H->Scale(1./h_trk_z0_np_noCuts_H->Integral());
-  h_trk_z0_np_noCuts_H->SetLineColor(2);
-  h_trk_z0_np_noCuts_H->SetMarkerColor(2);
-  h_trk_z0_np_noCuts_H->Draw("HIST");
-  h_trk_z0_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_z0_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_H.pdf");
-  delete h_trk_z0_primary_noCuts_H;
-  delete h_trk_z0_np_noCuts_H;
-
-  h_trk_z0_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_noCuts_L);
-  h_trk_z0_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_noCuts_L);
-  h_trk_z0_primary_noCuts_L->Scale(1./h_trk_z0_primary_noCuts_L->Integral());
-  h_trk_z0_primary_noCuts_L->SetLineColor(1);
-  h_trk_z0_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_z0_np_noCuts_L->Scale(1./h_trk_z0_np_noCuts_L->Integral());
-  h_trk_z0_np_noCuts_L->SetLineColor(2);
-  h_trk_z0_np_noCuts_L->SetMarkerColor(2);
-  h_trk_z0_np_noCuts_L->Draw("HIST");
-  h_trk_z0_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_z0_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_L.pdf");
-  delete h_trk_z0_primary_noCuts_L;
-  delete h_trk_z0_np_noCuts_L;
-
-  h_trk_z0_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_noCuts_barrel);
-  h_trk_z0_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_noCuts_barrel);
-  h_trk_z0_primary_noCuts_barrel->Scale(1./h_trk_z0_primary_noCuts_barrel->Integral());
-  h_trk_z0_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_z0_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_z0_np_noCuts_barrel->Scale(1./h_trk_z0_np_noCuts_barrel->Integral());
-  h_trk_z0_np_noCuts_barrel->SetLineColor(2);
-  h_trk_z0_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_z0_np_noCuts_barrel->Draw("HIST");
-  h_trk_z0_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_z0_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_barrel.pdf");
-  delete h_trk_z0_primary_noCuts_barrel;
-  delete h_trk_z0_np_noCuts_barrel;
-
-  h_trk_z0_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_noCuts_disk);
-  h_trk_z0_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_noCuts_disk);
-  h_trk_z0_primary_noCuts_disk->Scale(1./h_trk_z0_primary_noCuts_disk->Integral());
-  h_trk_z0_primary_noCuts_disk->SetLineColor(1);
-  h_trk_z0_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_z0_np_noCuts_disk->Scale(1./h_trk_z0_np_noCuts_disk->Integral());
-  h_trk_z0_np_noCuts_disk->SetLineColor(2);
-  h_trk_z0_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_z0_np_noCuts_disk->Draw("HIST");
-  h_trk_z0_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_z0_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_noCuts_disk.pdf");
-  delete h_trk_z0_primary_noCuts_disk;
-  delete h_trk_z0_np_noCuts_disk;
-
-  h_trk_z0_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_qualCuts);
-  h_trk_z0_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_qualCuts);
-  h_trk_z0_primary_qualCuts->Scale(1./h_trk_z0_primary_qualCuts->Integral());
-  h_trk_z0_primary_qualCuts->SetLineColor(1);
-  h_trk_z0_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_z0_np_qualCutsNorm = (TH1F*)h_trk_z0_np_qualCuts->Clone(); 
-  h_trk_z0_np_qualCutsNorm->Scale(1./h_trk_z0_np_qualCutsNorm->Integral());
-  h_trk_z0_np_qualCutsNorm->SetLineColor(2);
-  h_trk_z0_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_z0_np_qualCutsNorm->Draw("HIST");
-  h_trk_z0_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_qualCuts.pdf");
-  delete h_trk_z0_np_qualCutsNorm;
-
-  h_trk_z0_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_allCuts);
-  h_trk_z0_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_allCuts);
-  h_trk_z0_primary_allCuts->Scale(1./h_trk_z0_primary_allCuts->Integral());
-  h_trk_z0_primary_allCuts->SetLineColor(1);
-  h_trk_z0_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_z0_np_allCutsNorm = (TH1F*)h_trk_z0_np_allCuts->Clone(); 
-  h_trk_z0_np_allCutsNorm->Scale(1./h_trk_z0_np_allCutsNorm->Integral());
-  h_trk_z0_np_allCutsNorm->SetLineColor(2);
-  h_trk_z0_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_z0_primary_allCuts,h_trk_z0_np_allCutsNorm);
-  h_trk_z0_np_allCutsNorm->SetStats(0);
-  h_trk_z0_primary_allCuts->SetStats(0);
-  h_trk_z0_primary_allCuts->Draw("HIST");
-  h_trk_z0_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_allCuts.pdf");
-  delete h_trk_z0_np_allCutsNorm;
-
-  h_trk_z0_primary_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_allCuts_zoomOut);
-  h_trk_z0_np_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_allCuts_zoomOut);
-  h_trk_z0_primary_allCuts_zoomOut->Scale(1./h_trk_z0_primary_allCuts_zoomOut->Integral());
-  h_trk_z0_primary_allCuts_zoomOut->SetLineColor(1);
-  h_trk_z0_primary_allCuts_zoomOut->SetMarkerColor(1);
-  h_trk_z0_np_allCuts_zoomOut->Scale(1./h_trk_z0_np_allCuts_zoomOut->Integral());
-  h_trk_z0_np_allCuts_zoomOut->SetLineColor(2);
-  h_trk_z0_np_allCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_z0_np_allCuts_zoomOut,h_trk_z0_primary_allCuts_zoomOut);
-  h_trk_z0_np_allCuts_zoomOut->SetStats(0);
-  h_trk_z0_primary_allCuts_zoomOut->SetStats(0);
-  h_trk_z0_np_allCuts_zoomOut->Draw("HIST");
-  h_trk_z0_primary_allCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_z0_primary_allCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_z0_np_allCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_allCuts_zoomOut.pdf");
-  delete h_trk_z0_primary_allCuts_zoomOut;
-  delete h_trk_z0_np_allCuts_zoomOut;
-
-  h_trk_z0_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_allCuts_barrel);
-  h_trk_z0_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_allCuts_barrel);
-  h_trk_z0_primary_allCuts_barrel->Scale(1./h_trk_z0_primary_allCuts_barrel->Integral());
-  h_trk_z0_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_z0_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_z0_np_allCuts_barrel->Scale(1./h_trk_z0_np_allCuts_barrel->Integral());
-  h_trk_z0_np_allCuts_barrel->SetLineColor(2);
-  h_trk_z0_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_z0_np_allCuts_barrel->Draw("HIST");
-  h_trk_z0_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_z0_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_allCuts_barrel.pdf");
-  delete h_trk_z0_primary_allCuts_barrel;
-  delete h_trk_z0_np_allCuts_barrel;
-
-  h_trk_z0_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_primary_allCuts_disk);
-  h_trk_z0_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_np_allCuts_disk);
-  h_trk_z0_primary_allCuts_disk->Scale(1./h_trk_z0_primary_allCuts_disk->Integral());
-  h_trk_z0_primary_allCuts_disk->SetLineColor(1);
-  h_trk_z0_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_z0_np_allCuts_disk->Scale(1./h_trk_z0_np_allCuts_disk->Integral());
-  h_trk_z0_np_allCuts_disk->SetLineColor(2);
-  h_trk_z0_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_z0_np_allCuts_disk->Draw("HIST");
-  h_trk_z0_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_z0_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_z0_allCuts_disk.pdf");
-  delete h_trk_z0_primary_allCuts_disk;
-  delete h_trk_z0_np_allCuts_disk;
-
-  TH1F *h_trk_z0_fake_qualCutsNorm = (TH1F*)h_trk_z0_fake_qualCuts->Clone(); 
-  h_trk_z0_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_fake_qualCutsNorm);
-  TH1F *h_trk_z0_PU_qualCutsNorm = (TH1F*)h_trk_z0_PU_qualCuts->Clone(); 
-  h_trk_z0_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_PU_qualCutsNorm);
-  TH1F *h_trk_z0_notHiggs_qualCutsNorm = (TH1F*)h_trk_z0_notHiggs_qualCuts->Clone(); 
-  h_trk_z0_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_notHiggs_qualCutsNorm);
-  h_trk_z0_fake_qualCutsNorm->Scale(1./h_trk_z0_np_qualCuts->Integral());
-  h_trk_z0_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_z0_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_z0_PU_qualCutsNorm->Scale(1./h_trk_z0_np_qualCuts->Integral());
-  h_trk_z0_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_z0_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_z0_notHiggs_qualCutsNorm->Scale(1./h_trk_z0_np_qualCuts->Integral());
-  h_trk_z0_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_z0_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_z0_qualCuts = new THStack("hs_z0_qualCuts","Stacked BG histograms");
-  hs_z0_qualCuts->Add(h_trk_z0_fake_qualCutsNorm);
-  hs_z0_qualCuts->Add(h_trk_z0_PU_qualCutsNorm);
-  hs_z0_qualCuts->Add(h_trk_z0_notHiggs_qualCutsNorm);
-  hs_z0_qualCuts->Draw("HIST");
-  h_trk_z0_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_z0_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_z0_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_qualCutsNorm.pdf");
-  delete h_trk_z0_fake_qualCutsNorm;
-  delete h_trk_z0_PU_qualCutsNorm;
-  delete h_trk_z0_notHiggs_qualCutsNorm;
-  delete h_trk_z0_np_qualCuts;
-  delete hs_z0_qualCuts;
-
-  h_trk_z0_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_fake_qualCuts);
-  h_trk_z0_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_PU_qualCuts);
-  h_trk_z0_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_z0_notHiggs_qualCuts);
-  h_trk_z0_fake_qualCuts->Scale(1./h_trk_z0_fake_qualCuts->Integral());
-  h_trk_z0_fake_qualCuts->SetLineColor(2);
-  h_trk_z0_fake_qualCuts->SetMarkerColor(2);
-  h_trk_z0_PU_qualCuts->Scale(1./h_trk_z0_PU_qualCuts->Integral());
-  h_trk_z0_PU_qualCuts->SetLineColor(3);
-  h_trk_z0_PU_qualCuts->SetMarkerColor(3);
-  h_trk_z0_notHiggs_qualCuts->Scale(1./h_trk_z0_notHiggs_qualCuts->Integral());
-  h_trk_z0_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_z0_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_z0_fake_qualCuts->Draw("HIST");
-  h_trk_z0_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_z0_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_z0_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_z0_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_z0_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_z0_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_z0_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_z0_qualCuts.pdf");
-  delete h_trk_z0_primary_qualCuts;
-  delete h_trk_z0_fake_qualCuts;
-  delete h_trk_z0_PU_qualCuts;
-  delete h_trk_z0_notHiggs_qualCuts;
-
-  h_trk_phi->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi);
-  h_trk_phi->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_phi->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_phi->GetName() + ".pdf");
-  delete h_trk_phi;
-
-  h_trk_phi_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary);
-  h_trk_phi_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_phi_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_phi_primary->GetName() + ".pdf");
-  delete h_trk_phi_primary;
-
-  h_trk_phi_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_noCuts);
-  h_trk_phi_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_phi_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_phi_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_phi_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np);
-  h_trk_phi_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_phi_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_phi_np->GetName() + ".pdf");
-  delete h_trk_phi_np;
-
-  h_trk_phi_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_noCuts);
-  h_trk_phi_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_phi_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_phi_np_noCuts->GetName() + ".pdf");
-
-  h_trk_phi_primary_noCuts->Scale(1./h_trk_phi_primary_noCuts->Integral());
-  h_trk_phi_primary_noCuts->SetLineColor(1);
-  h_trk_phi_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_phi_np_noCutsNorm = (TH1F*)h_trk_phi_np_noCuts->Clone(); 
-  h_trk_phi_np_noCutsNorm->Scale(1./h_trk_phi_np_noCutsNorm->Integral());
-  h_trk_phi_np_noCutsNorm->SetLineColor(2);
-  h_trk_phi_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_phi_primary_noCuts,h_trk_phi_np_noCutsNorm);
-  h_trk_phi_primary_noCuts->SetStats(0);
-  h_trk_phi_np_noCutsNorm->SetStats(0);
-  h_trk_phi_primary_noCuts->Draw("HIST");
-  h_trk_phi_np_noCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts.pdf");
-  delete h_trk_phi_np_noCutsNorm;
-
-  TH1F *h_trk_phi_fake_noCutsNorm = (TH1F*)h_trk_phi_fake_noCuts->Clone(); 
-  h_trk_phi_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_fake_noCutsNorm);
-  TH1F *h_trk_phi_PU_noCutsNorm = (TH1F*)h_trk_phi_PU_noCuts->Clone(); 
-  h_trk_phi_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_PU_noCutsNorm);
-  TH1F *h_trk_phi_notHiggs_noCutsNorm = (TH1F*)h_trk_phi_notHiggs_noCuts->Clone(); 
-  h_trk_phi_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_notHiggs_noCutsNorm);
-  h_trk_phi_fake_noCutsNorm->Scale(1./h_trk_phi_np_noCuts->Integral());
-  h_trk_phi_fake_noCutsNorm->SetLineColor(2);
-  h_trk_phi_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_phi_PU_noCutsNorm->Scale(1./h_trk_phi_np_noCuts->Integral());
-  h_trk_phi_PU_noCutsNorm->SetLineColor(3);
-  h_trk_phi_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_phi_notHiggs_noCutsNorm->Scale(1./h_trk_phi_np_noCuts->Integral());
-  h_trk_phi_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_phi_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_phi_noCuts = new THStack("hs_phi_noCuts","Stacked BG histograms");
-  hs_phi_noCuts->Add(h_trk_phi_fake_noCutsNorm);
-  hs_phi_noCuts->Add(h_trk_phi_PU_noCutsNorm);
-  hs_phi_noCuts->Add(h_trk_phi_notHiggs_noCutsNorm);
-  hs_phi_noCuts->Draw("HIST");
-  h_trk_phi_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_phi_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_phi_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_noCutsNorm.pdf");
-  delete h_trk_phi_fake_noCutsNorm;
-  delete h_trk_phi_PU_noCutsNorm;
-  delete h_trk_phi_notHiggs_noCutsNorm;
-  delete h_trk_phi_np_noCuts;
-  delete hs_phi_noCuts;
-
-  h_trk_phi_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_fake_noCuts);
-  h_trk_phi_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_PU_noCuts);
-  h_trk_phi_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_notHiggs_noCuts);
-  h_trk_phi_fake_noCuts->Scale(1./h_trk_phi_fake_noCuts->Integral());
-  h_trk_phi_fake_noCuts->SetLineColor(2);
-  h_trk_phi_fake_noCuts->SetMarkerColor(2);
-  h_trk_phi_PU_noCuts->Scale(1./h_trk_phi_PU_noCuts->Integral());
-  h_trk_phi_PU_noCuts->SetLineColor(3);
-  h_trk_phi_PU_noCuts->SetMarkerColor(3);
-  h_trk_phi_notHiggs_noCuts->Scale(1./h_trk_phi_notHiggs_noCuts->Integral());
-  h_trk_phi_notHiggs_noCuts->SetLineColor(4);
-  h_trk_phi_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_phi_fake_noCuts->Draw("HIST");
-  h_trk_phi_primary_noCuts->Draw("HIST,SAME");
-  h_trk_phi_PU_noCuts->Draw("HIST,SAME");
-  h_trk_phi_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_phi_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_phi_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_noCuts.pdf");
-  delete h_trk_phi_primary_noCuts;
-  delete h_trk_phi_fake_noCuts;
-  delete h_trk_phi_PU_noCuts;
-  delete h_trk_phi_notHiggs_noCuts;
-
-  h_trk_phi_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_noCuts_H);
-  h_trk_phi_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_noCuts_H);
-  h_trk_phi_primary_noCuts_H->Scale(1./h_trk_phi_primary_noCuts_H->Integral());
-  h_trk_phi_primary_noCuts_H->SetLineColor(1);
-  h_trk_phi_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_phi_np_noCuts_H->Scale(1./h_trk_phi_np_noCuts_H->Integral());
-  h_trk_phi_np_noCuts_H->SetLineColor(2);
-  h_trk_phi_np_noCuts_H->SetMarkerColor(2);
-  h_trk_phi_np_noCuts_H->Draw("HIST");
-  h_trk_phi_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_phi_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts_H.pdf");
-  delete h_trk_phi_primary_noCuts_H;
-  delete h_trk_phi_np_noCuts_H;
-
-  h_trk_phi_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_noCuts_L);
-  h_trk_phi_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_noCuts_L);
-  h_trk_phi_primary_noCuts_L->Scale(1./h_trk_phi_primary_noCuts_L->Integral());
-  h_trk_phi_primary_noCuts_L->SetLineColor(1);
-  h_trk_phi_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_phi_np_noCuts_L->Scale(1./h_trk_phi_np_noCuts_L->Integral());
-  h_trk_phi_np_noCuts_L->SetLineColor(2);
-  h_trk_phi_np_noCuts_L->SetMarkerColor(2);
-  h_trk_phi_np_noCuts_L->Draw("HIST");
-  h_trk_phi_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_phi_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts_L.pdf");
-  delete h_trk_phi_primary_noCuts_L;
-  delete h_trk_phi_np_noCuts_L;
-
-  h_trk_phi_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_noCuts_barrel);
-  h_trk_phi_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_noCuts_barrel);
-  h_trk_phi_primary_noCuts_barrel->Scale(1./h_trk_phi_primary_noCuts_barrel->Integral());
-  h_trk_phi_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_phi_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_phi_np_noCuts_barrel->Scale(1./h_trk_phi_np_noCuts_barrel->Integral());
-  h_trk_phi_np_noCuts_barrel->SetLineColor(2);
-  h_trk_phi_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_phi_np_noCuts_barrel->Draw("HIST");
-  h_trk_phi_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_phi_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts_barrel.pdf");
-  delete h_trk_phi_primary_noCuts_barrel;
-  delete h_trk_phi_np_noCuts_barrel;
-
-  h_trk_phi_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_noCuts_disk);
-  h_trk_phi_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_noCuts_disk);
-  h_trk_phi_primary_noCuts_disk->Scale(1./h_trk_phi_primary_noCuts_disk->Integral());
-  h_trk_phi_primary_noCuts_disk->SetLineColor(1);
-  h_trk_phi_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_phi_np_noCuts_disk->Scale(1./h_trk_phi_np_noCuts_disk->Integral());
-  h_trk_phi_np_noCuts_disk->SetLineColor(2);
-  h_trk_phi_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_phi_np_noCuts_disk->Draw("HIST");
-  h_trk_phi_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_phi_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_noCuts_disk.pdf");
-  delete h_trk_phi_primary_noCuts_disk;
-  delete h_trk_phi_np_noCuts_disk;
-
-  h_trk_phi_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_qualCuts);
-  h_trk_phi_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_qualCuts);
-  h_trk_phi_primary_qualCuts->Scale(1./h_trk_phi_primary_qualCuts->Integral());
-  h_trk_phi_primary_qualCuts->SetLineColor(1);
-  h_trk_phi_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_phi_np_qualCutsNorm = (TH1F*)h_trk_phi_np_qualCuts->Clone(); 
-  h_trk_phi_np_qualCutsNorm->Scale(1./h_trk_phi_np_qualCutsNorm->Integral());
-  h_trk_phi_np_qualCutsNorm->SetLineColor(2);
-  h_trk_phi_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_phi_np_qualCutsNorm->Draw("HIST");
-  h_trk_phi_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_qualCuts.pdf");
-  delete h_trk_phi_np_qualCutsNorm;
-
-  h_trk_phi_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_allCuts);
-  h_trk_phi_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_allCuts);
-  h_trk_phi_primary_allCuts->Scale(1./h_trk_phi_primary_allCuts->Integral());
-  h_trk_phi_primary_allCuts->SetLineColor(1);
-  h_trk_phi_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_phi_np_allCutsNorm = (TH1F*)h_trk_phi_np_allCuts->Clone(); 
-  h_trk_phi_np_allCutsNorm->Scale(1./h_trk_phi_np_allCutsNorm->Integral());
-  h_trk_phi_np_allCutsNorm->SetLineColor(2);
-  h_trk_phi_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_phi_primary_allCuts,h_trk_phi_np_allCutsNorm);
-  h_trk_phi_np_allCutsNorm->SetStats(0);
-  h_trk_phi_primary_allCuts->SetStats(0);
-  h_trk_phi_primary_allCuts->Draw("HIST");
-  h_trk_phi_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_allCuts.pdf");
-  delete h_trk_phi_np_allCutsNorm;
-
-  h_trk_phi_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_allCuts_barrel);
-  h_trk_phi_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_allCuts_barrel);
-  h_trk_phi_primary_allCuts_barrel->Scale(1./h_trk_phi_primary_allCuts_barrel->Integral());
-  h_trk_phi_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_phi_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_phi_np_allCuts_barrel->Scale(1./h_trk_phi_np_allCuts_barrel->Integral());
-  h_trk_phi_np_allCuts_barrel->SetLineColor(2);
-  h_trk_phi_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_phi_np_allCuts_barrel->Draw("HIST");
-  h_trk_phi_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_phi_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_allCuts_barrel.pdf");
-  delete h_trk_phi_primary_allCuts_barrel;
-  delete h_trk_phi_np_allCuts_barrel;
-
-  h_trk_phi_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_primary_allCuts_disk);
-  h_trk_phi_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_np_allCuts_disk);
-  h_trk_phi_primary_allCuts_disk->Scale(1./h_trk_phi_primary_allCuts_disk->Integral());
-  h_trk_phi_primary_allCuts_disk->SetLineColor(1);
-  h_trk_phi_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_phi_np_allCuts_disk->Scale(1./h_trk_phi_np_allCuts_disk->Integral());
-  h_trk_phi_np_allCuts_disk->SetLineColor(2);
-  h_trk_phi_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_phi_np_allCuts_disk->Draw("HIST");
-  h_trk_phi_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_phi_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_phi_allCuts_disk.pdf");
-  delete h_trk_phi_primary_allCuts_disk;
-  delete h_trk_phi_np_allCuts_disk;
-
-  TH1F *h_trk_phi_fake_qualCutsNorm = (TH1F*)h_trk_phi_fake_qualCuts->Clone(); 
-  h_trk_phi_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_fake_qualCutsNorm);
-  TH1F *h_trk_phi_PU_qualCutsNorm = (TH1F*)h_trk_phi_PU_qualCuts->Clone(); 
-  h_trk_phi_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_PU_qualCutsNorm);
-  TH1F *h_trk_phi_notHiggs_qualCutsNorm = (TH1F*)h_trk_phi_notHiggs_qualCuts->Clone(); 
-  h_trk_phi_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_notHiggs_qualCutsNorm);
-  h_trk_phi_fake_qualCutsNorm->Scale(1./h_trk_phi_np_qualCuts->Integral());
-  h_trk_phi_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_phi_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_phi_PU_qualCutsNorm->Scale(1./h_trk_phi_np_qualCuts->Integral());
-  h_trk_phi_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_phi_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_phi_notHiggs_qualCutsNorm->Scale(1./h_trk_phi_np_qualCuts->Integral());
-  h_trk_phi_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_phi_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_phi_qualCuts = new THStack("hs_phi_qualCuts","Stacked BG histograms");
-  hs_phi_qualCuts->Add(h_trk_phi_fake_qualCutsNorm);
-  hs_phi_qualCuts->Add(h_trk_phi_PU_qualCutsNorm);
-  hs_phi_qualCuts->Add(h_trk_phi_notHiggs_qualCutsNorm);
-  hs_phi_qualCuts->Draw("HIST");
-  h_trk_phi_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_phi_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_phi_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_qualCutsNorm.pdf");
-  delete h_trk_phi_fake_qualCutsNorm;
-  delete h_trk_phi_PU_qualCutsNorm;
-  delete h_trk_phi_notHiggs_qualCutsNorm;
-  delete h_trk_phi_np_qualCuts;
-  delete hs_phi_qualCuts;
-
-  h_trk_phi_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_fake_qualCuts);
-  h_trk_phi_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_PU_qualCuts);
-  h_trk_phi_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_phi_notHiggs_qualCuts);
-  h_trk_phi_fake_qualCuts->Scale(1./h_trk_phi_fake_qualCuts->Integral());
-  h_trk_phi_fake_qualCuts->SetLineColor(2);
-  h_trk_phi_fake_qualCuts->SetMarkerColor(2);
-  h_trk_phi_PU_qualCuts->Scale(1./h_trk_phi_PU_qualCuts->Integral());
-  h_trk_phi_PU_qualCuts->SetLineColor(3);
-  h_trk_phi_PU_qualCuts->SetMarkerColor(3);
-  h_trk_phi_notHiggs_qualCuts->Scale(1./h_trk_phi_notHiggs_qualCuts->Integral());
-  h_trk_phi_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_phi_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_phi_fake_qualCuts->Draw("HIST");
-  h_trk_phi_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_phi_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_phi_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_phi_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_phi_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_phi_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_phi_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_phi_qualCuts.pdf");
-  delete h_trk_phi_primary_qualCuts;
-  delete h_trk_phi_fake_qualCuts;
-  delete h_trk_phi_PU_qualCuts;
-  delete h_trk_phi_notHiggs_qualCuts;
-
-  h_trk_sectorPhi->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi);
-  h_trk_sectorPhi->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_sectorPhi->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_sectorPhi->GetName() + ".pdf");
-  delete h_trk_sectorPhi;
-
-  h_trk_sectorPhi_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary);
-  h_trk_sectorPhi_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_sectorPhi_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_primary->GetName() + ".pdf");
-  delete h_trk_sectorPhi_primary;
-
-  h_trk_sectorPhi_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_noCuts);
-  h_trk_sectorPhi_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_sectorPhi_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_sectorPhi_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np);
-  h_trk_sectorPhi_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_sectorPhi_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_np->GetName() + ".pdf");
-  delete h_trk_sectorPhi_np;
-
-  h_trk_sectorPhi_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_noCuts);
-  h_trk_sectorPhi_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_sectorPhi_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_sectorPhi_np_noCuts->GetName() + ".pdf");
-
-  h_trk_sectorPhi_primary_noCuts->Scale(1./h_trk_sectorPhi_primary_noCuts->Integral());
-  h_trk_sectorPhi_primary_noCuts->SetLineColor(1);
-  h_trk_sectorPhi_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_sectorPhi_np_noCutsNorm = (TH1F*)h_trk_sectorPhi_np_noCuts->Clone();
-  h_trk_sectorPhi_np_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCutsNorm->Integral());
-  h_trk_sectorPhi_np_noCutsNorm->SetLineColor(2);
-  h_trk_sectorPhi_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_sectorPhi_primary_noCuts,h_trk_sectorPhi_np_noCutsNorm);
-  h_trk_sectorPhi_primary_noCuts->SetStats(0);
-  h_trk_sectorPhi_np_noCutsNorm->SetStats(0);
-  h_trk_sectorPhi_primary_noCuts->Draw("HIST");
-  h_trk_sectorPhi_np_noCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts.pdf");
-  delete h_trk_sectorPhi_np_noCutsNorm;
-
-  TH1F *h_trk_sectorPhi_fake_noCutsNorm = (TH1F*)h_trk_sectorPhi_fake_noCuts->Clone(); 
-  h_trk_sectorPhi_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_fake_noCutsNorm);
-  TH1F *h_trk_sectorPhi_PU_noCutsNorm = (TH1F*)h_trk_sectorPhi_PU_noCuts->Clone(); 
-  h_trk_sectorPhi_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_PU_noCutsNorm);
-  TH1F *h_trk_sectorPhi_notHiggs_noCutsNorm = (TH1F*)h_trk_sectorPhi_notHiggs_noCuts->Clone(); 
-  h_trk_sectorPhi_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_notHiggs_noCutsNorm);
-  h_trk_sectorPhi_fake_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCuts->Integral());
-  h_trk_sectorPhi_fake_noCutsNorm->SetLineColor(2);
-  h_trk_sectorPhi_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_sectorPhi_PU_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCuts->Integral());
-  h_trk_sectorPhi_PU_noCutsNorm->SetLineColor(3);
-  h_trk_sectorPhi_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_sectorPhi_notHiggs_noCutsNorm->Scale(1./h_trk_sectorPhi_np_noCuts->Integral());
-  h_trk_sectorPhi_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_sectorPhi_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_sectorPhi_noCuts = new THStack("hs_sectorPhi_noCuts","Stacked BG histograms");
-  hs_sectorPhi_noCuts->Add(h_trk_sectorPhi_fake_noCutsNorm);
-  hs_sectorPhi_noCuts->Add(h_trk_sectorPhi_PU_noCutsNorm);
-  hs_sectorPhi_noCuts->Add(h_trk_sectorPhi_notHiggs_noCutsNorm);
-  hs_sectorPhi_noCuts->Draw("HIST");
-  h_trk_sectorPhi_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_sectorPhi_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_sectorPhi_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_noCutsNorm.pdf");
-  delete h_trk_sectorPhi_fake_noCutsNorm;
-  delete h_trk_sectorPhi_PU_noCutsNorm;
-  delete h_trk_sectorPhi_notHiggs_noCutsNorm;
-  delete h_trk_sectorPhi_np_noCuts;
-  delete hs_sectorPhi_noCuts;
-
-  h_trk_sectorPhi_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_fake_noCuts);
-  h_trk_sectorPhi_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_PU_noCuts);
-  h_trk_sectorPhi_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_notHiggs_noCuts);
-  h_trk_sectorPhi_fake_noCuts->Scale(1./h_trk_sectorPhi_fake_noCuts->Integral());
-  h_trk_sectorPhi_fake_noCuts->SetLineColor(2);
-  h_trk_sectorPhi_fake_noCuts->SetMarkerColor(2);
-  h_trk_sectorPhi_PU_noCuts->Scale(1./h_trk_sectorPhi_PU_noCuts->Integral());
-  h_trk_sectorPhi_PU_noCuts->SetLineColor(3);
-  h_trk_sectorPhi_PU_noCuts->SetMarkerColor(3);
-  h_trk_sectorPhi_notHiggs_noCuts->Scale(1./h_trk_sectorPhi_notHiggs_noCuts->Integral());
-  h_trk_sectorPhi_notHiggs_noCuts->SetLineColor(4);
-  h_trk_sectorPhi_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_sectorPhi_fake_noCuts->Draw("HIST");
-  h_trk_sectorPhi_primary_noCuts->Draw("HIST,SAME");
-  h_trk_sectorPhi_PU_noCuts->Draw("HIST,SAME");
-  h_trk_sectorPhi_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_sectorPhi_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_sectorPhi_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_noCuts.pdf");
-  delete h_trk_sectorPhi_primary_noCuts;
-  delete h_trk_sectorPhi_fake_noCuts;
-  delete h_trk_sectorPhi_PU_noCuts;
-  delete h_trk_sectorPhi_notHiggs_noCuts;
-
-  h_trk_sectorPhi_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_noCuts_H);
-  h_trk_sectorPhi_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_noCuts_H);
-  h_trk_sectorPhi_primary_noCuts_H->Scale(1./h_trk_sectorPhi_primary_noCuts_H->Integral());
-  h_trk_sectorPhi_primary_noCuts_H->SetLineColor(1);
-  h_trk_sectorPhi_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_sectorPhi_np_noCuts_H->Scale(1./h_trk_sectorPhi_np_noCuts_H->Integral());
-  h_trk_sectorPhi_np_noCuts_H->SetLineColor(2);
-  h_trk_sectorPhi_np_noCuts_H->SetMarkerColor(2);
-  h_trk_sectorPhi_np_noCuts_H->Draw("HIST");
-  h_trk_sectorPhi_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts_H.pdf");
-  delete h_trk_sectorPhi_primary_noCuts_H;
-  delete h_trk_sectorPhi_np_noCuts_H;
-
-  h_trk_sectorPhi_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_noCuts_L);
-  h_trk_sectorPhi_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_noCuts_L);
-  h_trk_sectorPhi_primary_noCuts_L->Scale(1./h_trk_sectorPhi_primary_noCuts_L->Integral());
-  h_trk_sectorPhi_primary_noCuts_L->SetLineColor(1);
-  h_trk_sectorPhi_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_sectorPhi_np_noCuts_L->Scale(1./h_trk_sectorPhi_np_noCuts_L->Integral());
-  h_trk_sectorPhi_np_noCuts_L->SetLineColor(2);
-  h_trk_sectorPhi_np_noCuts_L->SetMarkerColor(2);
-  h_trk_sectorPhi_np_noCuts_L->Draw("HIST");
-  h_trk_sectorPhi_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts_L.pdf");
-  delete h_trk_sectorPhi_primary_noCuts_L;
-  delete h_trk_sectorPhi_np_noCuts_L;
-
-  h_trk_sectorPhi_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_noCuts_barrel);
-  h_trk_sectorPhi_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_noCuts_barrel);
-  h_trk_sectorPhi_primary_noCuts_barrel->Scale(1./h_trk_sectorPhi_primary_noCuts_barrel->Integral());
-  h_trk_sectorPhi_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_sectorPhi_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_sectorPhi_np_noCuts_barrel->Scale(1./h_trk_sectorPhi_np_noCuts_barrel->Integral());
-  h_trk_sectorPhi_np_noCuts_barrel->SetLineColor(2);
-  h_trk_sectorPhi_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_sectorPhi_np_noCuts_barrel->Draw("HIST");
-  h_trk_sectorPhi_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts_barrel.pdf");
-  delete h_trk_sectorPhi_primary_noCuts_barrel;
-  delete h_trk_sectorPhi_np_noCuts_barrel;
-
-  h_trk_sectorPhi_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_noCuts_disk);
-  h_trk_sectorPhi_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_noCuts_disk);
-  h_trk_sectorPhi_primary_noCuts_disk->Scale(1./h_trk_sectorPhi_primary_noCuts_disk->Integral());
-  h_trk_sectorPhi_primary_noCuts_disk->SetLineColor(1);
-  h_trk_sectorPhi_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_sectorPhi_np_noCuts_disk->Scale(1./h_trk_sectorPhi_np_noCuts_disk->Integral());
-  h_trk_sectorPhi_np_noCuts_disk->SetLineColor(2);
-  h_trk_sectorPhi_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_sectorPhi_np_noCuts_disk->Draw("HIST");
-  h_trk_sectorPhi_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_noCuts_disk.pdf");
-  delete h_trk_sectorPhi_primary_noCuts_disk;
-  delete h_trk_sectorPhi_np_noCuts_disk;
-
-  h_trk_sectorPhi_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_qualCuts);
-  h_trk_sectorPhi_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_qualCuts);
-  h_trk_sectorPhi_primary_qualCuts->Scale(1./h_trk_sectorPhi_primary_qualCuts->Integral());
-  h_trk_sectorPhi_primary_qualCuts->SetLineColor(1);
-  h_trk_sectorPhi_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_sectorPhi_np_qualCutsNorm = (TH1F*)h_trk_sectorPhi_np_qualCuts->Clone(); 
-  h_trk_sectorPhi_np_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCutsNorm->Integral());
-  h_trk_sectorPhi_np_qualCutsNorm->SetLineColor(2);
-  h_trk_sectorPhi_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_sectorPhi_np_qualCutsNorm->Draw("HIST");
-  h_trk_sectorPhi_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_qualCuts.pdf");
-  delete h_trk_sectorPhi_np_qualCutsNorm;
-
-  h_trk_sectorPhi_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_allCuts);
-  h_trk_sectorPhi_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_allCuts);
-  h_trk_sectorPhi_primary_allCuts->Scale(1./h_trk_sectorPhi_primary_allCuts->Integral());
-  h_trk_sectorPhi_primary_allCuts->SetLineColor(1);
-  h_trk_sectorPhi_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_sectorPhi_np_allCutsNorm = (TH1F*)h_trk_sectorPhi_np_allCuts->Clone(); 
-  h_trk_sectorPhi_np_allCutsNorm->Scale(1./h_trk_sectorPhi_np_allCutsNorm->Integral());
-  h_trk_sectorPhi_np_allCutsNorm->SetLineColor(2);
-  h_trk_sectorPhi_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_sectorPhi_primary_allCuts,h_trk_sectorPhi_np_allCutsNorm);
-  h_trk_sectorPhi_np_allCutsNorm->SetStats(0);
-  h_trk_sectorPhi_primary_allCuts->SetStats(0);
-  h_trk_sectorPhi_primary_allCuts->Draw("HIST");
-  h_trk_sectorPhi_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_allCuts.pdf");
-  delete h_trk_sectorPhi_np_allCutsNorm;
-
-  h_trk_sectorPhi_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_allCuts_barrel);
-  h_trk_sectorPhi_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_allCuts_barrel);
-  h_trk_sectorPhi_primary_allCuts_barrel->Scale(1./h_trk_sectorPhi_primary_allCuts_barrel->Integral());
-  h_trk_sectorPhi_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_sectorPhi_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_sectorPhi_np_allCuts_barrel->Scale(1./h_trk_sectorPhi_np_allCuts_barrel->Integral());
-  h_trk_sectorPhi_np_allCuts_barrel->SetLineColor(2);
-  h_trk_sectorPhi_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_sectorPhi_np_allCuts_barrel->Draw("HIST");
-  h_trk_sectorPhi_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_allCuts_barrel.pdf");
-  delete h_trk_sectorPhi_primary_allCuts_barrel;
-  delete h_trk_sectorPhi_np_allCuts_barrel;
-
-  h_trk_sectorPhi_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_primary_allCuts_disk);
-  h_trk_sectorPhi_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_np_allCuts_disk);
-  h_trk_sectorPhi_primary_allCuts_disk->Scale(1./h_trk_sectorPhi_primary_allCuts_disk->Integral());
-  h_trk_sectorPhi_primary_allCuts_disk->SetLineColor(1);
-  h_trk_sectorPhi_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_sectorPhi_np_allCuts_disk->Scale(1./h_trk_sectorPhi_np_allCuts_disk->Integral());
-  h_trk_sectorPhi_np_allCuts_disk->SetLineColor(2);
-  h_trk_sectorPhi_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_sectorPhi_np_allCuts_disk->Draw("HIST");
-  h_trk_sectorPhi_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_sectorPhi_allCuts_disk.pdf");
-  delete h_trk_sectorPhi_primary_allCuts_disk;
-  delete h_trk_sectorPhi_np_allCuts_disk;
-
-  TH1F *h_trk_sectorPhi_fake_qualCutsNorm = (TH1F*)h_trk_sectorPhi_fake_qualCuts->Clone(); 
-  h_trk_sectorPhi_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_fake_qualCutsNorm);
-  TH1F *h_trk_sectorPhi_PU_qualCutsNorm = (TH1F*)h_trk_sectorPhi_PU_qualCuts->Clone(); 
-  h_trk_sectorPhi_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_PU_qualCutsNorm);
-  TH1F *h_trk_sectorPhi_notHiggs_qualCutsNorm = (TH1F*)h_trk_sectorPhi_notHiggs_qualCuts->Clone(); 
-  h_trk_sectorPhi_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_notHiggs_qualCutsNorm);
-  h_trk_sectorPhi_fake_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCuts->Integral());
-  h_trk_sectorPhi_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_sectorPhi_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_sectorPhi_PU_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCuts->Integral());
-  h_trk_sectorPhi_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_sectorPhi_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_sectorPhi_notHiggs_qualCutsNorm->Scale(1./h_trk_sectorPhi_np_qualCuts->Integral());
-  h_trk_sectorPhi_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_sectorPhi_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_sectorPhi_qualCuts = new THStack("hs_sectorPhi_qualCuts","Stacked BG histograms");
-  hs_sectorPhi_qualCuts->Add(h_trk_sectorPhi_fake_qualCutsNorm);
-  hs_sectorPhi_qualCuts->Add(h_trk_sectorPhi_PU_qualCutsNorm);
-  hs_sectorPhi_qualCuts->Add(h_trk_sectorPhi_notHiggs_qualCutsNorm);
-  hs_sectorPhi_qualCuts->Draw("HIST");
-  h_trk_sectorPhi_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_sectorPhi_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_sectorPhi_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_qualCutsNorm.pdf");
-  delete h_trk_sectorPhi_fake_qualCutsNorm;
-  delete h_trk_sectorPhi_PU_qualCutsNorm;
-  delete h_trk_sectorPhi_notHiggs_qualCutsNorm;
-  delete h_trk_sectorPhi_np_qualCuts;
-  delete hs_sectorPhi_qualCuts;
-
-  h_trk_sectorPhi_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_fake_qualCuts);
-  h_trk_sectorPhi_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_PU_qualCuts);
-  h_trk_sectorPhi_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_sectorPhi_notHiggs_qualCuts);
-  h_trk_sectorPhi_fake_qualCuts->Scale(1./h_trk_sectorPhi_fake_qualCuts->Integral());
-  h_trk_sectorPhi_fake_qualCuts->SetLineColor(2);
-  h_trk_sectorPhi_fake_qualCuts->SetMarkerColor(2);
-  h_trk_sectorPhi_PU_qualCuts->Scale(1./h_trk_sectorPhi_PU_qualCuts->Integral());
-  h_trk_sectorPhi_PU_qualCuts->SetLineColor(3);
-  h_trk_sectorPhi_PU_qualCuts->SetMarkerColor(3);
-  h_trk_sectorPhi_notHiggs_qualCuts->Scale(1./h_trk_sectorPhi_notHiggs_qualCuts->Integral());
-  h_trk_sectorPhi_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_sectorPhi_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_sectorPhi_fake_qualCuts->Draw("HIST");
-  h_trk_sectorPhi_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_sectorPhi_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_sectorPhi_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_sectorPhi_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_sectorPhi_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_sectorPhi_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_sectorPhi_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_sectorPhi_qualCuts.pdf");
-  delete h_trk_sectorPhi_primary_qualCuts;
-  delete h_trk_sectorPhi_fake_qualCuts;
-  delete h_trk_sectorPhi_PU_qualCuts;
-  delete h_trk_sectorPhi_notHiggs_qualCuts;
-
-  h_tp_z0_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_z0_noCuts);
-  h_tp_z0_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_z0_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_z0_noCuts->GetName() + ".pdf");
-  delete h_tp_z0_noCuts;
-   
-  h_tp_pt_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_pt_noCuts_primary);
-  h_tp_pt_noCuts_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_pt_noCuts_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_pt_noCuts_primary->GetName() + ".pdf");
-  //delete h_tp_pt_noCuts_primary;
-
-  h_tp_eta_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_eta_noCuts_primary);
-  h_tp_eta_noCuts_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_eta_noCuts_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_eta_noCuts_primary->GetName() + ".pdf");
-  delete h_tp_eta_noCuts_primary;
-
-  h_tp_d0_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_d0_noCuts_primary);
-  h_tp_d0_noCuts_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_d0_noCuts_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_d0_noCuts_primary->GetName() + ".pdf");
-  delete h_tp_d0_noCuts_primary;
-
-  h_tp_z0_noCuts_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_z0_noCuts_primary);
-  h_tp_z0_noCuts_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_z0_noCuts_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_z0_noCuts_primary->GetName() + ".pdf");
-  delete h_tp_z0_noCuts_primary;
-   
-  h_tp_pt_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_pt_noCuts_PU);
-  h_tp_pt_noCuts_PU->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_pt_noCuts_PU->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_pt_noCuts_PU->GetName() + ".pdf");
-  delete h_tp_pt_noCuts_PU;
-
-  h_tp_eta_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_eta_noCuts_PU);
-  h_tp_eta_noCuts_PU->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_eta_noCuts_PU->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_eta_noCuts_PU->GetName() + ".pdf");
-  delete h_tp_eta_noCuts_PU;
-
-  h_tp_d0_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_d0_noCuts_PU);
-  h_tp_d0_noCuts_PU->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_d0_noCuts_PU->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_d0_noCuts_PU->GetName() + ".pdf");
-  delete h_tp_d0_noCuts_PU;
-
-  h_tp_z0_noCuts_PU->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_z0_noCuts_PU);
-  h_tp_z0_noCuts_PU->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_z0_noCuts_PU->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_z0_noCuts_PU->GetName() + ".pdf");
-  delete h_tp_z0_noCuts_PU;
    
   h_numSelectedTrks->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_numSelectedTrks);
@@ -5646,359 +3443,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   h_tp_MET->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_tp_MET->GetName() + ".pdf");
   delete h_tp_MET;
-
-  h_trk_pt->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt);
-  h_trk_pt->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt->GetName() + ".pdf");
-  delete h_trk_pt;
-
-  h_trk_pt_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary);
-  h_trk_pt_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_primary->GetName() + ".pdf");
-
-  h_trk_pt_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_noCuts);
-  h_trk_pt_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_pt_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_allCuts);
-  h_trk_pt_primary_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_primary_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_primary_allCuts->GetName() + ".pdf");
-
-  h_trk_pt_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np);
-  h_trk_pt_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np->GetName() + ".pdf");
-
-  h_trk_pt_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_noCuts);
-  h_trk_pt_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_noCuts->GetName() + ".pdf");
-
-  h_trk_pt_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_allCuts);
-  h_trk_pt_np_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_allCuts->GetName() + ".pdf");
-
-  TH1F *h_trk_pt_primary_noCutsNorm = (TH1F*)h_trk_pt_primary_noCuts->Clone(); 
-  h_trk_pt_primary_noCutsNorm->Scale(1./h_trk_pt_primary_noCutsNorm->Integral());
-  h_trk_pt_primary_noCutsNorm->SetLineColor(1);
-  h_trk_pt_primary_noCutsNorm->SetMarkerColor(1);
-  TH1F *h_trk_pt_np_noCutsNorm = (TH1F*)h_trk_pt_np_noCuts->Clone(); 
-  h_trk_pt_np_noCutsNorm->Scale(1./h_trk_pt_np_noCutsNorm->Integral());
-  h_trk_pt_np_noCutsNorm->SetLineColor(2);
-  h_trk_pt_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_pt_np_noCutsNorm,h_trk_pt_primary_noCutsNorm);
-  h_trk_pt_np_noCutsNorm->SetStats(0);
-  h_trk_pt_primary_noCutsNorm->SetStats(0);
-  h_trk_pt_np_noCutsNorm->Draw("HIST");
-  h_trk_pt_primary_noCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_noCutsNorm,"Primary","l");
-  l->AddEntry(h_trk_pt_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_noCuts.pdf");
-  delete h_trk_pt_np_noCutsNorm;
-
-  h_trk_pt_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_noCuts_barrel);
-  h_trk_pt_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_noCuts_barrel);
-  h_trk_pt_primary_noCuts_barrel->Scale(1./h_trk_pt_primary_noCuts_barrel->Integral());
-  h_trk_pt_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_pt_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_pt_np_noCuts_barrel->Scale(1./h_trk_pt_np_noCuts_barrel->Integral());
-  h_trk_pt_np_noCuts_barrel->SetLineColor(2);
-  h_trk_pt_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_pt_np_noCuts_barrel->Draw("HIST");
-  h_trk_pt_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_pt_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_noCuts_barrel.pdf");
-  delete h_trk_pt_primary_noCuts_barrel;
-  delete h_trk_pt_np_noCuts_barrel;
-
-  h_trk_pt_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_noCuts_disk);
-  h_trk_pt_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_noCuts_disk);
-  h_trk_pt_primary_noCuts_disk->Scale(1./h_trk_pt_primary_noCuts_disk->Integral());
-  h_trk_pt_primary_noCuts_disk->SetLineColor(1);
-  h_trk_pt_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_pt_np_noCuts_disk->Scale(1./h_trk_pt_np_noCuts_disk->Integral());
-  h_trk_pt_np_noCuts_disk->SetLineColor(2);
-  h_trk_pt_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_pt_np_noCuts_disk->Draw("HIST");
-  h_trk_pt_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_pt_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_noCuts_disk.pdf");
-  delete h_trk_pt_primary_noCuts_disk;
-  delete h_trk_pt_np_noCuts_disk;
-
-  TH1F *h_trk_pt_fake_noCutsNorm = (TH1F*)h_trk_pt_fake_noCuts->Clone(); 
-  h_trk_pt_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_fake_noCutsNorm);
-  TH1F *h_trk_pt_PU_noCutsNorm = (TH1F*)h_trk_pt_PU_noCuts->Clone(); 
-  h_trk_pt_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_PU_noCutsNorm);
-  TH1F *h_trk_pt_notHiggs_noCutsNorm = (TH1F*)h_trk_pt_notHiggs_noCuts->Clone(); 
-  h_trk_pt_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_notHiggs_noCutsNorm);
-  h_trk_pt_fake_noCutsNorm->Scale(1./h_trk_pt_np_noCuts->Integral());
-  h_trk_pt_fake_noCutsNorm->SetLineColor(2);
-  h_trk_pt_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_pt_PU_noCutsNorm->Scale(1./h_trk_pt_np_noCuts->Integral());
-  h_trk_pt_PU_noCutsNorm->SetLineColor(3);
-  h_trk_pt_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_pt_notHiggs_noCutsNorm->Scale(1./h_trk_pt_np_noCuts->Integral());
-  h_trk_pt_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_pt_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_pt_noCuts = new THStack("hs_pt_noCuts","Stacked BG histograms");
-  hs_pt_noCuts->Add(h_trk_pt_fake_noCutsNorm);
-  hs_pt_noCuts->Add(h_trk_pt_PU_noCutsNorm);
-  hs_pt_noCuts->Add(h_trk_pt_notHiggs_noCutsNorm);
-  hs_pt_noCuts->Draw("HIST");
-  h_trk_pt_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_pt_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_pt_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_pt_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_noCutsNorm.pdf");
-  delete h_trk_pt_fake_noCutsNorm;
-  delete h_trk_pt_PU_noCutsNorm;
-  delete h_trk_pt_notHiggs_noCutsNorm;
-  delete hs_pt_noCuts;
-
-  h_trk_pt_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_fake_noCuts);
-  h_trk_pt_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_PU_noCuts);
-  h_trk_pt_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_notHiggs_noCuts);
-  h_trk_pt_fake_noCuts->Scale(1./h_trk_pt_fake_noCuts->Integral());
-  h_trk_pt_fake_noCuts->SetLineColor(2);
-  h_trk_pt_fake_noCuts->SetMarkerColor(2);
-  h_trk_pt_PU_noCuts->Scale(1./h_trk_pt_PU_noCuts->Integral());
-  h_trk_pt_PU_noCuts->SetLineColor(3);
-  h_trk_pt_PU_noCuts->SetMarkerColor(3);
-  h_trk_pt_notHiggs_noCuts->Scale(1./h_trk_pt_notHiggs_noCuts->Integral());
-  h_trk_pt_notHiggs_noCuts->SetLineColor(4);
-  h_trk_pt_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_pt_fake_noCuts->Draw("HIST");
-  h_trk_pt_primary_noCuts->Draw("HIST,SAME");
-  h_trk_pt_PU_noCuts->Draw("HIST,SAME");
-  h_trk_pt_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_pt_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_pt_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_pt_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_noCuts.pdf");
-  delete h_trk_pt_fake_noCuts;
-  delete h_trk_pt_PU_noCuts;
-  delete h_trk_pt_notHiggs_noCuts;
-
-  h_trk_pt_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_qualCuts);
-  h_trk_pt_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_qualCuts);
-  h_trk_pt_primary_qualCuts->Scale(1./h_trk_pt_primary_qualCuts->Integral());
-  h_trk_pt_primary_qualCuts->SetLineColor(1);
-  h_trk_pt_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_pt_np_qualCutsNorm = (TH1F*)h_trk_pt_np_qualCuts->Clone(); 
-  h_trk_pt_np_qualCutsNorm->Scale(1./h_trk_pt_np_qualCutsNorm->Integral());
-  h_trk_pt_np_qualCutsNorm->SetLineColor(2);
-  h_trk_pt_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_pt_np_qualCutsNorm->Draw("HIST");
-  h_trk_pt_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_pt_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_qualCuts.pdf");
-  delete h_trk_pt_np_qualCutsNorm;
-
-  TH1F *h_trk_pt_fake_qualCutsNorm = (TH1F*)h_trk_pt_fake_qualCuts->Clone(); 
-  h_trk_pt_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_fake_qualCutsNorm);
-  TH1F *h_trk_pt_PU_qualCutsNorm = (TH1F*)h_trk_pt_PU_qualCuts->Clone(); 
-  h_trk_pt_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_PU_qualCutsNorm);
-  TH1F *h_trk_pt_notHiggs_qualCutsNorm = (TH1F*)h_trk_pt_notHiggs_qualCuts->Clone(); 
-  h_trk_pt_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_notHiggs_qualCutsNorm);
-  h_trk_pt_fake_qualCutsNorm->Scale(1./h_trk_pt_np_qualCuts->Integral());
-  h_trk_pt_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_pt_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_pt_PU_qualCutsNorm->Scale(1./h_trk_pt_np_qualCuts->Integral());
-  h_trk_pt_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_pt_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_pt_notHiggs_qualCutsNorm->Scale(1./h_trk_pt_np_qualCuts->Integral());
-  h_trk_pt_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_pt_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_pt_qualCuts = new THStack("hs_pt_qualCuts","Stacked BG histograms");
-  hs_pt_qualCuts->Add(h_trk_pt_fake_qualCutsNorm);
-  hs_pt_qualCuts->Add(h_trk_pt_PU_qualCutsNorm);
-  hs_pt_qualCuts->Add(h_trk_pt_notHiggs_qualCutsNorm);
-  hs_pt_qualCuts->Draw("HIST");
-  h_trk_pt_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_pt_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_pt_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_pt_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_qualCutsNorm.pdf");
-  delete h_trk_pt_fake_qualCutsNorm;
-  delete h_trk_pt_PU_qualCutsNorm;
-  delete h_trk_pt_notHiggs_qualCutsNorm;
-  delete h_trk_pt_np_qualCuts;
-  delete hs_pt_qualCuts;
-
-  h_trk_pt_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_fake_qualCuts);
-  h_trk_pt_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_PU_qualCuts);
-  h_trk_pt_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_notHiggs_qualCuts);
-  h_trk_pt_fake_qualCuts->Scale(1./h_trk_pt_fake_qualCuts->Integral());
-  h_trk_pt_fake_qualCuts->SetLineColor(2);
-  h_trk_pt_fake_qualCuts->SetMarkerColor(2);
-  h_trk_pt_PU_qualCuts->Scale(1./h_trk_pt_PU_qualCuts->Integral());
-  h_trk_pt_PU_qualCuts->SetLineColor(3);
-  h_trk_pt_PU_qualCuts->SetMarkerColor(3);
-  h_trk_pt_notHiggs_qualCuts->Scale(1./h_trk_pt_notHiggs_qualCuts->Integral());
-  h_trk_pt_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_pt_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_pt_fake_qualCuts->Draw("HIST");
-  h_trk_pt_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_pt_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_pt_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_pt_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_pt_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_pt_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_pt_qualCuts.pdf");
-  delete h_trk_pt_primary_qualCuts;
-  delete h_trk_pt_fake_qualCuts;
-  delete h_trk_pt_PU_qualCuts;
-  delete h_trk_pt_notHiggs_qualCuts;
-  
-  h_trk_pt_primary_ptCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_ptCuts);
-  h_trk_pt_primary_d0Cuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_d0Cuts);
-  h_trk_pt_primary_chi2rzdofCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_chi2rzdofCuts);
-  h_trk_pt_primary_bendchi2Cuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_bendchi2Cuts);
-  h_trk_pt_primary_chi2rphidofCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_chi2rphidofCuts);
-  h_trk_pt_primary_nstubCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_nstubCuts);
-  h_trk_pt_primary_z0Cuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_z0Cuts);
-  h_trk_pt_primary_chi2rzdofCuts->SetName("trkEff_pt_primary");
-  h_trk_pt_primary_chi2rzdofCuts->GetXaxis()->SetTitle("Track p_{T} (GeV)");
-  h_trk_pt_primary_chi2rzdofCuts->GetYaxis()->SetTitle("Cut Efficiency");
-  h_trk_pt_primary_chi2rzdofCuts->Divide(h_trk_pt_primary_chi2rzdofCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_chi2rzdofCuts->SetLineColor(1);
-  h_trk_pt_primary_chi2rzdofCuts->SetMarkerColor(1);
-  h_trk_pt_primary_chi2rzdofCuts->SetStats(0);
-  h_trk_pt_primary_chi2rzdofCuts->Draw();
-  h_trk_pt_primary_bendchi2Cuts->Divide(h_trk_pt_primary_bendchi2Cuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_bendchi2Cuts->SetLineColor(2);
-  h_trk_pt_primary_bendchi2Cuts->SetMarkerColor(2);
-  h_trk_pt_primary_bendchi2Cuts->SetStats(0);
-  h_trk_pt_primary_bendchi2Cuts->Draw("SAME");
-  h_trk_pt_primary_chi2rphidofCuts->Divide(h_trk_pt_primary_chi2rphidofCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_chi2rphidofCuts->SetLineColor(3);
-  h_trk_pt_primary_chi2rphidofCuts->SetMarkerColor(3);
-  h_trk_pt_primary_chi2rphidofCuts->SetStats(0);
-  h_trk_pt_primary_chi2rphidofCuts->Draw("SAME");
-  h_trk_pt_primary_nstubCuts->Divide(h_trk_pt_primary_nstubCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_nstubCuts->SetLineColor(4);
-  h_trk_pt_primary_nstubCuts->SetMarkerColor(4);
-  h_trk_pt_primary_nstubCuts->SetStats(0);
-  h_trk_pt_primary_nstubCuts->Draw("SAME");
-  h_trk_pt_primary_ptCuts->Divide(h_trk_pt_primary_ptCuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_ptCuts->SetLineColor(5);
-  h_trk_pt_primary_ptCuts->SetMarkerColor(5);
-  h_trk_pt_primary_ptCuts->SetStats(0);
-  h_trk_pt_primary_ptCuts->Draw("SAME");
-  h_trk_pt_primary_d0Cuts->Divide(h_trk_pt_primary_d0Cuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_d0Cuts->SetLineColor(6);
-  h_trk_pt_primary_d0Cuts->SetMarkerColor(6);
-  h_trk_pt_primary_d0Cuts->SetStats(0);
-  h_trk_pt_primary_d0Cuts->Draw("SAME");
-  h_trk_pt_primary_z0Cuts->Divide(h_trk_pt_primary_z0Cuts,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_z0Cuts->SetLineColor(7);
-  h_trk_pt_primary_z0Cuts->SetMarkerColor(7);
-  h_trk_pt_primary_z0Cuts->SetStats(0);
-  h_trk_pt_primary_z0Cuts->Draw("SAME");
-  TH1F *h_trk_pt_primary_allCutsEff = (TH1F*)h_trk_pt_primary_allCuts->Clone(); 
-  h_trk_pt_primary_allCutsEff->Divide(h_trk_pt_primary_allCutsEff,h_trk_pt_primary_noCuts,1.0,1.0,"B");
-  h_trk_pt_primary_allCutsEff->SetLineColor(28);
-  h_trk_pt_primary_allCutsEff->SetMarkerColor(28);
-  h_trk_pt_primary_allCutsEff->SetStats(0);
-  h_trk_pt_primary_allCutsEff->Draw("SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_chi2rzdofCuts,"#chi^{2}_{rz}/d.o.f Cut","lp");
-  l->AddEntry(h_trk_pt_primary_bendchi2Cuts,"#chi^{2}_{bend} Cut","lp");
-  l->AddEntry(h_trk_pt_primary_chi2rphidofCuts,"#chi^{2}_{r#phi}/d.o.f Cut","lp");
-  l->AddEntry(h_trk_pt_primary_nstubCuts,"n_{stub} Cut","lp");
-  l->AddEntry(h_trk_pt_primary_ptCuts,"p_{T} Cut","lp");
-  l->AddEntry(h_trk_pt_primary_d0Cuts,"d_{0} Cut","lp");
-  l->AddEntry(h_trk_pt_primary_z0Cuts,"z_{0} Cut","lp");
-  l->AddEntry(h_trk_pt_primary_allCutsEff,"All Cuts","lp");
-  l->Draw();
-  c.SaveAs(DIR + "/h_trkEffOverlay_pt_primary.pdf");
-  delete h_trk_pt_primary;
-  delete h_trk_pt_primary_noCuts;
-  delete h_trk_pt_primary_ptCuts;
-  delete h_trk_pt_primary_d0Cuts;
-  delete h_trk_pt_primary_chi2rzdofCuts;
-  delete h_trk_pt_primary_bendchi2Cuts;
-  delete h_trk_pt_primary_chi2rphidofCuts;
-  delete h_trk_pt_primary_nstubCuts;
-  delete h_trk_pt_primary_z0Cuts;
-  delete h_trk_pt_primary_allCutsEff;
 
   int numPart = numPart_primary_noCuts.size();
   TH1F *h_numPart_primary_noCuts = new TH1F("h_numPart_primary_noCuts","h_numPart_primary_noCuts; pdgid; Number of Particles",numPart,0,numPart);
@@ -6134,118 +3578,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_numPart_primary_nstubCuts;
   delete h_numPart_primary_z0Cuts;
   
-  h_trk_pt_np_ptCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_ptCuts);
-  h_trk_pt_np_ptCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_ptCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_ptCuts->GetName() + ".pdf");
-
-  h_trk_pt_np_d0Cuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_d0Cuts);
-  h_trk_pt_np_d0Cuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_d0Cuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_d0Cuts->GetName() + ".pdf");
-
-  h_trk_pt_np_chi2rzdofCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_chi2rzdofCuts);
-  h_trk_pt_np_chi2rzdofCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_chi2rzdofCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_chi2rzdofCuts->GetName() + ".pdf");
-  
-  h_trk_pt_np_bendchi2Cuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_bendchi2Cuts);
-  h_trk_pt_np_bendchi2Cuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_bendchi2Cuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_bendchi2Cuts->GetName() + ".pdf");
-  
-  h_trk_pt_np_z0Cuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_z0Cuts);
-  h_trk_pt_np_z0Cuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_z0Cuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_z0Cuts->GetName() + ".pdf");
-
-  h_trk_pt_np_chi2rphidofCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_chi2rphidofCuts);
-  h_trk_pt_np_chi2rphidofCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_pt_np_chi2rphidofCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_pt_np_chi2rphidofCuts->GetName() + ".pdf");
-
-  h_trk_pt_np_nstubCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_nstubCuts);
-  h_trk_pt_np_chi2rzdofCuts->SetName("trkEff_pt_np");
-  h_trk_pt_np_chi2rzdofCuts->GetXaxis()->SetTitle("Track p_{T} (GeV)");
-  h_trk_pt_np_chi2rzdofCuts->GetYaxis()->SetTitle("Cut Efficiency");
-  h_trk_pt_np_chi2rzdofCuts->Divide(h_trk_pt_np_chi2rzdofCuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_chi2rzdofCuts->SetLineColor(1);
-  h_trk_pt_np_chi2rzdofCuts->SetMarkerColor(1);
-  h_trk_pt_np_chi2rzdofCuts->SetStats(0);
-  h_trk_pt_np_chi2rzdofCuts->Draw();
-  h_trk_pt_np_bendchi2Cuts->Divide(h_trk_pt_np_bendchi2Cuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_bendchi2Cuts->SetLineColor(2);
-  h_trk_pt_np_bendchi2Cuts->SetMarkerColor(2);
-  h_trk_pt_np_bendchi2Cuts->SetStats(0);
-  h_trk_pt_np_bendchi2Cuts->Draw("SAME");
-  h_trk_pt_np_chi2rphidofCuts->Divide(h_trk_pt_np_chi2rphidofCuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_chi2rphidofCuts->SetLineColor(3);
-  h_trk_pt_np_chi2rphidofCuts->SetMarkerColor(3);
-  h_trk_pt_np_chi2rphidofCuts->SetStats(0);
-  h_trk_pt_np_chi2rphidofCuts->Draw("SAME");
-  h_trk_pt_np_nstubCuts->Divide(h_trk_pt_np_nstubCuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_nstubCuts->SetLineColor(4);
-  h_trk_pt_np_nstubCuts->SetMarkerColor(4);
-  h_trk_pt_np_nstubCuts->SetStats(0);
-  h_trk_pt_np_nstubCuts->Draw("SAME");
-  h_trk_pt_np_ptCuts->Divide(h_trk_pt_np_ptCuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_ptCuts->SetLineColor(5);
-  h_trk_pt_np_ptCuts->SetMarkerColor(5);
-  h_trk_pt_np_ptCuts->SetStats(0);
-  h_trk_pt_np_ptCuts->Draw("SAME");
-  h_trk_pt_np_d0Cuts->Divide(h_trk_pt_np_d0Cuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_d0Cuts->SetLineColor(6);
-  h_trk_pt_np_d0Cuts->SetMarkerColor(6);
-  h_trk_pt_np_d0Cuts->SetStats(0);
-  h_trk_pt_np_d0Cuts->Draw("SAME");
-  h_trk_pt_np_z0Cuts->Divide(h_trk_pt_np_z0Cuts,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_z0Cuts->SetLineColor(7);
-  h_trk_pt_np_z0Cuts->SetMarkerColor(7);
-  h_trk_pt_np_z0Cuts->SetStats(0);
-  h_trk_pt_np_z0Cuts->Draw("SAME");
-  TH1F *h_trk_pt_np_allCutsEff = (TH1F*)h_trk_pt_np_allCuts->Clone();
-  h_trk_pt_np_allCutsEff->Divide(h_trk_pt_np_allCutsEff,h_trk_pt_np_noCuts,1.0,1.0,"B");
-  h_trk_pt_np_allCutsEff->SetLineColor(28);
-  h_trk_pt_np_allCutsEff->SetMarkerColor(28);
-  h_trk_pt_np_allCutsEff->SetStats(0);
-  h_trk_pt_np_allCutsEff->Draw("SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_np_chi2rzdofCuts,"#chi^{2}_{rz}/d.o.f Cut","lp");
-  l->AddEntry(h_trk_pt_np_bendchi2Cuts,"#chi^{2}_{bend} Cut","lp");
-  l->AddEntry(h_trk_pt_np_chi2rphidofCuts,"#chi^{2}_{r#phi}/d.o.f Cut","lp");
-  l->AddEntry(h_trk_pt_np_nstubCuts,"n_{stub} Cut","lp");
-  l->AddEntry(h_trk_pt_np_ptCuts,"p_{T} Cut","lp");
-  l->AddEntry(h_trk_pt_np_d0Cuts,"d_{0} Cut","lp");
-  l->AddEntry(h_trk_pt_np_z0Cuts,"z_{0} Cut","lp");
-  l->AddEntry(h_trk_pt_np_allCutsEff,"All Cuts","lp");
-  l->Draw();
-  c.SaveAs(DIR + "/h_trkEffOverlay_pt_np.pdf");
-  delete h_trk_pt_np;
-  delete h_trk_pt_np_noCuts;
-  delete h_trk_pt_np_ptCuts;
-  delete h_trk_pt_np_d0Cuts;
-  delete h_trk_pt_np_chi2rzdofCuts;
-  delete h_trk_pt_np_bendchi2Cuts;
-  delete h_trk_pt_np_chi2rphidofCuts;
-  delete h_trk_pt_np_nstubCuts;
-  delete h_trk_pt_np_z0Cuts;
-  delete h_trk_pt_np_allCutsEff;
-  
-  
   numPart = numPart_np_noCuts.size();
   TH1F *h_numPart_np_noCuts = new TH1F("h_numPart_np_noCuts","h_numPart_np_noCuts; pdgid; Number of Particles",numPart,0,numPart);
   TH1F *h_numPart_np_chi2rzdofCuts = new TH1F("h_numPart_np_chi2rzdofCuts","h_numPart_np_chi2rzdofCuts; pdgid; Number of Particles",numPart,0,numPart);
@@ -6379,423 +3711,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_numPart_np_chi2rphidofCuts;
   delete h_numPart_np_nstubCuts;
   delete h_numPart_np_z0Cuts;
-
-  h_trk_pt_primary_allCuts->Scale(1./h_trk_pt_primary_allCuts->Integral());
-  h_trk_pt_primary_allCuts->SetLineColor(1);
-  h_trk_pt_primary_allCuts->SetMarkerColor(1);
-  h_trk_pt_np_allCuts->Scale(1./h_trk_pt_np_allCuts->Integral());
-  h_trk_pt_np_allCuts->SetLineColor(2);
-  h_trk_pt_np_allCuts->SetMarkerColor(2);
-  raiseMax(h_trk_pt_primary_allCuts,h_trk_pt_np_allCuts);
-  h_trk_pt_np_allCuts->SetStats(0);
-  h_trk_pt_primary_allCuts->SetStats(0);
-  h_trk_pt_primary_allCuts->Draw("HIST");
-  h_trk_pt_np_allCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_pt_np_allCuts,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_allCuts.pdf");
-  delete h_trk_pt_primary_allCuts;
-  delete h_trk_pt_np_allCuts;
-
-  h_trk_pt_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_allCuts_barrel);
-  h_trk_pt_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_allCuts_barrel);
-  h_trk_pt_primary_allCuts_barrel->Scale(1./h_trk_pt_primary_allCuts_barrel->Integral());
-  h_trk_pt_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_pt_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_pt_np_allCuts_barrel->Scale(1./h_trk_pt_np_allCuts_barrel->Integral());
-  h_trk_pt_np_allCuts_barrel->SetLineColor(2);
-  h_trk_pt_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_pt_np_allCuts_barrel->Draw("HIST");
-  h_trk_pt_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_pt_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_allCuts_barrel.pdf");
-  delete h_trk_pt_primary_allCuts_barrel;
-  delete h_trk_pt_np_allCuts_barrel;
-
-  h_trk_pt_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_primary_allCuts_disk);
-  h_trk_pt_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_pt_np_allCuts_disk);
-  h_trk_pt_primary_allCuts_disk->Scale(1./h_trk_pt_primary_allCuts_disk->Integral());
-  h_trk_pt_primary_allCuts_disk->SetLineColor(1);
-  h_trk_pt_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_pt_np_allCuts_disk->Scale(1./h_trk_pt_np_allCuts_disk->Integral());
-  h_trk_pt_np_allCuts_disk->SetLineColor(2);
-  h_trk_pt_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_pt_np_allCuts_disk->Draw("HIST");
-  h_trk_pt_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_pt_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_pt_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_pt_allCuts_disk.pdf");
-  delete h_trk_pt_primary_allCuts_disk;
-  delete h_trk_pt_np_allCuts_disk;
-
-  h_trk_ptIso4_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_ptIso4_primary_allCuts);
-  h_trk_ptIso4_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_ptIso4_np_allCuts);
-  h_trk_ptIso4_primary_allCuts->Scale(1./h_trk_ptIso4_primary_allCuts->Integral());
-  h_trk_ptIso4_primary_allCuts->SetLineColor(1);
-  h_trk_ptIso4_primary_allCuts->SetMarkerColor(1);
-  h_trk_ptIso4_np_allCuts->Scale(1./h_trk_ptIso4_np_allCuts->Integral());
-  h_trk_ptIso4_np_allCuts->SetLineColor(2);
-  h_trk_ptIso4_np_allCuts->SetMarkerColor(2);
-  raiseMax(h_trk_ptIso4_np_allCuts,h_trk_ptIso4_primary_allCuts);
-  h_trk_ptIso4_np_allCuts->Draw("HIST");
-  h_trk_ptIso4_primary_allCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_ptIso4_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_ptIso4_np_allCuts,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_ptIso4_allCuts.pdf");
-  delete h_trk_ptIso4_primary_allCuts;
-  delete h_trk_ptIso4_np_allCuts;
-
-  h_trk_ptIso8_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_ptIso8_primary_allCuts);
-  h_trk_ptIso8_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_ptIso8_np_allCuts);
-  h_trk_ptIso8_primary_allCuts->Scale(1./h_trk_ptIso8_primary_allCuts->Integral());
-  h_trk_ptIso8_primary_allCuts->SetLineColor(1);
-  h_trk_ptIso8_primary_allCuts->SetMarkerColor(1);
-  h_trk_ptIso8_np_allCuts->Scale(1./h_trk_ptIso8_np_allCuts->Integral());
-  h_trk_ptIso8_np_allCuts->SetLineColor(2);
-  h_trk_ptIso8_np_allCuts->SetMarkerColor(2);
-  raiseMax(h_trk_ptIso8_np_allCuts,h_trk_ptIso8_primary_allCuts);
-  h_trk_ptIso8_np_allCuts->Draw("HIST");
-  h_trk_ptIso8_primary_allCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_ptIso8_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_ptIso8_np_allCuts,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_ptIso8_allCuts.pdf");
-  delete h_trk_ptIso8_primary_allCuts;
-  delete h_trk_ptIso8_np_allCuts;
-
-  h_tp_pt->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_pt);
-  h_tp_pt->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_pt->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_pt->GetName() + ".pdf");
-  delete h_tp_pt;
-
-  h_trk_eta->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta);
-  h_trk_eta->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta->GetName() + ".pdf");
-  delete h_trk_eta;
-
-  h_trk_eta_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_primary);
-  h_trk_eta_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta_primary->GetName() + ".pdf");
-  delete h_trk_eta_primary;
-
-  h_trk_eta_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_primary_noCuts);
-  h_trk_eta_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_eta_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_primary_allCuts);
-  h_trk_eta_primary_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta_primary_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta_primary_allCuts->GetName() + ".pdf");
-
-  h_trk_eta_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_np);
-  h_trk_eta_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta_np->GetName() + ".pdf");
-  delete h_trk_eta_np;
-
-  h_trk_eta_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_np_noCuts);
-  h_trk_eta_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta_np_noCuts->GetName() + ".pdf");
-
-  h_trk_eta_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_np_allCuts);
-  h_trk_eta_np_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_eta_np_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_eta_np_allCuts->GetName() + ".pdf");
-
-  h_trk_eta_primary_noCuts->Scale(1./h_trk_eta_primary_noCuts->Integral());
-  h_trk_eta_primary_noCuts->SetLineColor(1);
-  h_trk_eta_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_eta_np_noCutsNorm = (TH1F*)h_trk_eta_np_noCuts->Clone(); 
-  h_trk_eta_np_noCutsNorm->Scale(1./h_trk_eta_np_noCutsNorm->Integral());
-  h_trk_eta_np_noCutsNorm->SetLineColor(2);
-  h_trk_eta_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_eta_np_noCutsNorm,h_trk_eta_primary_noCuts);
-  h_trk_eta_np_noCutsNorm->SetStats(0);
-  h_trk_eta_primary_noCuts->SetStats(0);
-  h_trk_eta_np_noCutsNorm->Draw("HIST");
-  h_trk_eta_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_eta_noCuts.pdf");
-  delete h_trk_eta_np_noCutsNorm;
-  
-  TH1F *h_trk_eta_fake_noCutsNorm = (TH1F*)h_trk_eta_fake_noCuts->Clone(); 
-  h_trk_eta_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_fake_noCutsNorm);
-  TH1F *h_trk_eta_PU_noCutsNorm = (TH1F*)h_trk_eta_PU_noCuts->Clone(); 
-  h_trk_eta_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_PU_noCutsNorm);
-  TH1F *h_trk_eta_notHiggs_noCutsNorm = (TH1F*)h_trk_eta_notHiggs_noCuts->Clone(); 
-  h_trk_eta_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_notHiggs_noCutsNorm);
-  h_trk_eta_fake_noCutsNorm->Scale(1./h_trk_eta_np_noCuts->Integral());
-  h_trk_eta_fake_noCutsNorm->SetLineColor(2);
-  h_trk_eta_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_eta_PU_noCutsNorm->Scale(1./h_trk_eta_np_noCuts->Integral());
-  h_trk_eta_PU_noCutsNorm->SetLineColor(3);
-  h_trk_eta_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_eta_notHiggs_noCutsNorm->Scale(1./h_trk_eta_np_noCuts->Integral());
-  h_trk_eta_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_eta_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_eta_noCuts = new THStack("hs_eta_noCuts","Stacked BG histograms");
-  hs_eta_noCuts->Add(h_trk_eta_fake_noCutsNorm);
-  hs_eta_noCuts->Add(h_trk_eta_PU_noCutsNorm);
-  hs_eta_noCuts->Add(h_trk_eta_notHiggs_noCutsNorm);
-  hs_eta_noCuts->Draw("HIST");
-  h_trk_eta_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_eta_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_eta_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_noCutsNorm.pdf");
-  delete h_trk_eta_fake_noCutsNorm;
-  delete h_trk_eta_PU_noCutsNorm;
-  delete h_trk_eta_notHiggs_noCutsNorm;
-  delete h_trk_eta_np_noCuts;
-  delete hs_eta_noCuts;
-
-  h_trk_eta_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_fake_noCuts);
-  h_trk_eta_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_PU_noCuts);
-  h_trk_eta_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_notHiggs_noCuts);
-  h_trk_eta_fake_noCuts->Scale(1./h_trk_eta_fake_noCuts->Integral());
-  h_trk_eta_fake_noCuts->SetLineColor(2);
-  h_trk_eta_fake_noCuts->SetMarkerColor(2);
-  h_trk_eta_PU_noCuts->Scale(1./h_trk_eta_PU_noCuts->Integral());
-  h_trk_eta_PU_noCuts->SetLineColor(3);
-  h_trk_eta_PU_noCuts->SetMarkerColor(3);
-  h_trk_eta_notHiggs_noCuts->Scale(1./h_trk_eta_notHiggs_noCuts->Integral());
-  h_trk_eta_notHiggs_noCuts->SetLineColor(4);
-  h_trk_eta_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_eta_fake_noCuts->Draw("HIST");
-  h_trk_eta_primary_noCuts->Draw("HIST,SAME");
-  h_trk_eta_PU_noCuts->Draw("HIST,SAME");
-  h_trk_eta_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_eta_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_eta_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_noCuts.pdf");
-  delete h_trk_eta_primary_noCuts;
-  delete h_trk_eta_fake_noCuts;
-  delete h_trk_eta_PU_noCuts;
-  delete h_trk_eta_notHiggs_noCuts;
-
-  h_trk_eta_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_primary_noCuts_H);
-  h_trk_eta_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_np_noCuts_H);
-  h_trk_eta_primary_noCuts_H->Scale(1./h_trk_eta_primary_noCuts_H->Integral());
-  h_trk_eta_primary_noCuts_H->SetLineColor(1);
-  h_trk_eta_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_eta_np_noCuts_H->Scale(1./h_trk_eta_np_noCuts_H->Integral());
-  h_trk_eta_np_noCuts_H->SetLineColor(2);
-  h_trk_eta_np_noCuts_H->SetMarkerColor(2);
-  h_trk_eta_np_noCuts_H->Draw("HIST");
-  h_trk_eta_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_eta_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_eta_noCuts_H.pdf");
-  delete h_trk_eta_primary_noCuts_H;
-  delete h_trk_eta_np_noCuts_H;
-
-  h_trk_eta_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_primary_noCuts_L);
-  h_trk_eta_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_np_noCuts_L);
-  h_trk_eta_primary_noCuts_L->Scale(1./h_trk_eta_primary_noCuts_L->Integral());
-  h_trk_eta_primary_noCuts_L->SetLineColor(1);
-  h_trk_eta_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_eta_np_noCuts_L->Scale(1./h_trk_eta_np_noCuts_L->Integral());
-  h_trk_eta_np_noCuts_L->SetLineColor(2);
-  h_trk_eta_np_noCuts_L->SetMarkerColor(2);
-  h_trk_eta_np_noCuts_L->Draw("HIST");
-  h_trk_eta_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_eta_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_eta_noCuts_L.pdf");
-  delete h_trk_eta_primary_noCuts_L;
-  delete h_trk_eta_np_noCuts_L;
-
-  h_trk_eta_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_primary_qualCuts);
-  h_trk_eta_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_np_qualCuts);
-  h_trk_eta_primary_qualCuts->Scale(1./h_trk_eta_primary_qualCuts->Integral());
-  h_trk_eta_primary_qualCuts->SetLineColor(1);
-  h_trk_eta_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_eta_np_qualCutsNorm = (TH1F*)h_trk_eta_np_qualCuts->Clone(); 
-  h_trk_eta_np_qualCutsNorm->Scale(1./h_trk_eta_np_qualCutsNorm->Integral());
-  h_trk_eta_np_qualCutsNorm->SetLineColor(2);
-  h_trk_eta_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_eta_np_qualCutsNorm->Draw("HIST");
-  h_trk_eta_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_eta_qualCuts.pdf");
-  delete h_trk_eta_np_qualCutsNorm;
-
-  TH1F *h_trk_eta_fake_qualCutsNorm = (TH1F*)h_trk_eta_fake_qualCuts->Clone(); 
-  h_trk_eta_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_fake_qualCutsNorm);
-  TH1F *h_trk_eta_PU_qualCutsNorm = (TH1F*)h_trk_eta_PU_qualCuts->Clone(); 
-  h_trk_eta_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_PU_qualCutsNorm);
-  TH1F *h_trk_eta_notHiggs_qualCutsNorm = (TH1F*)h_trk_eta_notHiggs_qualCuts->Clone(); 
-  h_trk_eta_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_notHiggs_qualCutsNorm);
-  h_trk_eta_fake_qualCutsNorm->Scale(1./h_trk_eta_np_qualCuts->Integral());
-  h_trk_eta_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_eta_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_eta_PU_qualCutsNorm->Scale(1./h_trk_eta_np_qualCuts->Integral());
-  h_trk_eta_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_eta_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_eta_notHiggs_qualCutsNorm->Scale(1./h_trk_eta_np_qualCuts->Integral());
-  h_trk_eta_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_eta_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_eta_qualCuts = new THStack("hs_eta_qualCuts","Stacked BG histograms");
-  hs_eta_qualCuts->Add(h_trk_eta_fake_qualCutsNorm);
-  hs_eta_qualCuts->Add(h_trk_eta_PU_qualCutsNorm);
-  hs_eta_qualCuts->Add(h_trk_eta_notHiggs_qualCutsNorm);
-  hs_eta_qualCuts->Draw("HIST");
-  h_trk_eta_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_eta_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_eta_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_qualCutsNorm.pdf");
-  delete h_trk_eta_fake_qualCutsNorm;
-  delete h_trk_eta_PU_qualCutsNorm;
-  delete h_trk_eta_notHiggs_qualCutsNorm;
-  delete h_trk_eta_np_qualCuts;
-  delete hs_eta_qualCuts;
-
-  h_trk_eta_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_fake_qualCuts);
-  h_trk_eta_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_PU_qualCuts);
-  h_trk_eta_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_eta_notHiggs_qualCuts);
-  h_trk_eta_fake_qualCuts->Scale(1./h_trk_eta_fake_qualCuts->Integral());
-  h_trk_eta_fake_qualCuts->SetLineColor(2);
-  h_trk_eta_fake_qualCuts->SetMarkerColor(2);
-  h_trk_eta_PU_qualCuts->Scale(1./h_trk_eta_PU_qualCuts->Integral());
-  h_trk_eta_PU_qualCuts->SetLineColor(3);
-  h_trk_eta_PU_qualCuts->SetMarkerColor(3);
-  h_trk_eta_notHiggs_qualCuts->Scale(1./h_trk_eta_notHiggs_qualCuts->Integral());
-  h_trk_eta_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_eta_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_eta_fake_qualCuts->Draw("HIST");
-  h_trk_eta_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_eta_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_eta_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_eta_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_eta_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_eta_qualCuts.pdf");
-  delete h_trk_eta_primary_qualCuts;
-  delete h_trk_eta_fake_qualCuts;
-  delete h_trk_eta_PU_qualCuts;
-  delete h_trk_eta_notHiggs_qualCuts;
-
-  h_trk_eta_primary_allCuts->Scale(1./h_trk_eta_primary_allCuts->Integral());
-  h_trk_eta_primary_allCuts->SetLineColor(1);
-  h_trk_eta_primary_allCuts->SetMarkerColor(1);
-  h_trk_eta_np_allCuts->Scale(1./h_trk_eta_np_allCuts->Integral());
-  h_trk_eta_np_allCuts->SetLineColor(2);
-  h_trk_eta_np_allCuts->SetMarkerColor(2);
-  raiseMax(h_trk_eta_primary_allCuts,h_trk_eta_np_allCuts);
-  h_trk_eta_primary_allCuts->SetStats(0);
-  h_trk_eta_np_allCuts->SetStats(0);
-  h_trk_eta_primary_allCuts->Draw("HIST");
-  h_trk_eta_np_allCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_eta_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_eta_np_allCuts,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_eta_allCuts.pdf");
-  delete h_trk_eta_primary_allCuts;
-  delete h_trk_eta_np_allCuts;
-
-  h_tp_eta->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_tp_eta);
-  h_tp_eta->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_tp_eta->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_tp_eta->GetName() + ".pdf");
-  delete h_tp_eta;
 
   h_trueVertex_numAllCuts->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_trueVertex_numAllCuts);
@@ -7223,58 +4138,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   h_trueVertexCuts_indexPt->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_trueVertexCuts_indexPt->GetName() + ".pdf");
   delete h_trueVertexCuts_indexPt;
-
-  h_trk_chi2rphidof->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof);
-  h_trk_chi2rphidof->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof->GetName() + ".pdf");
-  delete h_trk_chi2rphidof;
-
-  h_trk_chi2rphidof_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary);
-  h_trk_chi2rphidof_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_primary->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_primary;
-
-  h_trk_chi2rphidof_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_noCuts);
-  h_trk_chi2rphidof_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_MVA1_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_primary_noCuts);
-  h_trk_MVA1_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_MVA1_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_MVA1_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_chi2rphidof_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np);
-  h_trk_chi2rphidof_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_np->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_np;
-
-  h_trk_chi2rphidof_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_noCuts);
-  h_trk_chi2rphidof_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_np_noCuts->GetName() + ".pdf");
-
-  h_trk_MVA1_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_np_noCuts);
-  h_trk_MVA1_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_MVA1_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_MVA1_np_noCuts->GetName() + ".pdf");
 
   h_correct_trackVertex_d_T->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_correct_trackVertex_d_T);
@@ -7708,1807 +4571,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_correct_trackVertex_numStubsSum;
   delete h_false_trackVertex_numStubsSum;
 
-  h_trk_chi2rphidof_primary_noCuts->Scale(1./h_trk_chi2rphidof_primary_noCuts->Integral());
-  h_trk_chi2rphidof_primary_noCuts->SetLineColor(1);
-  h_trk_chi2rphidof_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_chi2rphidof_np_noCutsNorm = (TH1F*)h_trk_chi2rphidof_np_noCuts->Clone(); 
-  h_trk_chi2rphidof_np_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCutsNorm->Integral());
-  h_trk_chi2rphidof_np_noCutsNorm->SetLineColor(2);
-  h_trk_chi2rphidof_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rphidof_np_noCutsNorm,h_trk_chi2rphidof_primary_noCuts);
-  h_trk_chi2rphidof_np_noCutsNorm->SetStats(0);
-  h_trk_chi2rphidof_primary_noCuts->SetStats(0);
-  h_trk_chi2rphidof_np_noCutsNorm->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts.pdf");
-  delete h_trk_chi2rphidof_np_noCutsNorm;
-
-  h_trk_chi2rphidof_primary_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_noCuts_zoomOut);
-  h_trk_chi2rphidof_np_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_noCuts_zoomOut);
-  h_trk_chi2rphidof_primary_noCuts_zoomOut->Scale(1./h_trk_chi2rphidof_primary_noCuts_zoomOut->Integral());
-  h_trk_chi2rphidof_primary_noCuts_zoomOut->SetLineColor(1);
-  h_trk_chi2rphidof_primary_noCuts_zoomOut->SetMarkerColor(1);
-  h_trk_chi2rphidof_np_noCuts_zoomOut->Scale(1./h_trk_chi2rphidof_np_noCuts_zoomOut->Integral());
-  h_trk_chi2rphidof_np_noCuts_zoomOut->SetLineColor(2);
-  h_trk_chi2rphidof_np_noCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rphidof_np_noCuts_zoomOut,h_trk_chi2rphidof_primary_noCuts_zoomOut);
-  h_trk_chi2rphidof_np_noCuts_zoomOut->SetStats(0);
-  h_trk_chi2rphidof_primary_noCuts_zoomOut->SetStats(0);
-  h_trk_chi2rphidof_np_noCuts_zoomOut->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_noCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_zoomOut.pdf");
-  delete h_trk_chi2rphidof_primary_noCuts_zoomOut;
-  delete h_trk_chi2rphidof_np_noCuts_zoomOut;
-
-  TH1F *h_trk_chi2rphidof_fake_noCutsNorm = (TH1F*)h_trk_chi2rphidof_fake_noCuts->Clone(); 
-  h_trk_chi2rphidof_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_fake_noCutsNorm);
-  TH1F *h_trk_chi2rphidof_PU_noCutsNorm = (TH1F*)h_trk_chi2rphidof_PU_noCuts->Clone(); 
-  h_trk_chi2rphidof_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_PU_noCutsNorm);
-  TH1F *h_trk_chi2rphidof_notHiggs_noCutsNorm = (TH1F*)h_trk_chi2rphidof_notHiggs_noCuts->Clone(); 
-  h_trk_chi2rphidof_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_notHiggs_noCutsNorm);
-  h_trk_chi2rphidof_fake_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCuts->Integral());
-  h_trk_chi2rphidof_fake_noCutsNorm->SetLineColor(2);
-  h_trk_chi2rphidof_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_chi2rphidof_PU_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCuts->Integral());
-  h_trk_chi2rphidof_PU_noCutsNorm->SetLineColor(3);
-  h_trk_chi2rphidof_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_chi2rphidof_notHiggs_noCutsNorm->Scale(1./h_trk_chi2rphidof_np_noCuts->Integral());
-  h_trk_chi2rphidof_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_chi2rphidof_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_chi2rphidof_noCuts = new THStack("hs_chi2rphidof_noCuts","Stacked BG histograms");
-  hs_chi2rphidof_noCuts->Add(h_trk_chi2rphidof_fake_noCutsNorm);
-  hs_chi2rphidof_noCuts->Add(h_trk_chi2rphidof_PU_noCutsNorm);
-  hs_chi2rphidof_noCuts->Add(h_trk_chi2rphidof_notHiggs_noCutsNorm);
-  hs_chi2rphidof_noCuts->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_chi2rphidof_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_chi2rphidof_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_noCutsNorm.pdf");
-  delete h_trk_chi2rphidof_fake_noCutsNorm;
-  delete h_trk_chi2rphidof_PU_noCutsNorm;
-  delete h_trk_chi2rphidof_notHiggs_noCutsNorm;
-  delete h_trk_chi2rphidof_np_noCuts;
-  delete hs_chi2rphidof_noCuts;
-
-  h_trk_chi2rphidof_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_fake_noCuts);
-  h_trk_chi2rphidof_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_PU_noCuts);
-  h_trk_chi2rphidof_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_notHiggs_noCuts);
-  h_trk_chi2rphidof_fake_noCuts->Scale(1./h_trk_chi2rphidof_fake_noCuts->Integral());
-  h_trk_chi2rphidof_fake_noCuts->SetLineColor(2);
-  h_trk_chi2rphidof_fake_noCuts->SetMarkerColor(2);
-  h_trk_chi2rphidof_PU_noCuts->Scale(1./h_trk_chi2rphidof_PU_noCuts->Integral());
-  h_trk_chi2rphidof_PU_noCuts->SetLineColor(3);
-  h_trk_chi2rphidof_PU_noCuts->SetMarkerColor(3);
-  h_trk_chi2rphidof_notHiggs_noCuts->Scale(1./h_trk_chi2rphidof_notHiggs_noCuts->Integral());
-  h_trk_chi2rphidof_notHiggs_noCuts->SetLineColor(4);
-  h_trk_chi2rphidof_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_chi2rphidof_fake_noCuts->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts->Draw("HIST,SAME");
-  h_trk_chi2rphidof_PU_noCuts->Draw("HIST,SAME");
-  h_trk_chi2rphidof_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_chi2rphidof_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_chi2rphidof_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_noCuts.pdf");
-  delete h_trk_chi2rphidof_primary_noCuts;
-  delete h_trk_chi2rphidof_fake_noCuts;
-  delete h_trk_chi2rphidof_PU_noCuts;
-  delete h_trk_chi2rphidof_notHiggs_noCuts;
-
-  h_trk_chi2rphidof_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_noCuts_H);
-  h_trk_chi2rphidof_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_noCuts_H);
-  h_trk_chi2rphidof_primary_noCuts_H->Scale(1./h_trk_chi2rphidof_primary_noCuts_H->Integral());
-  h_trk_chi2rphidof_primary_noCuts_H->SetLineColor(1);
-  h_trk_chi2rphidof_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_chi2rphidof_np_noCuts_H->Scale(1./h_trk_chi2rphidof_np_noCuts_H->Integral());
-  h_trk_chi2rphidof_np_noCuts_H->SetLineColor(2);
-  h_trk_chi2rphidof_np_noCuts_H->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_noCuts_H->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_H.pdf");
-  delete h_trk_chi2rphidof_primary_noCuts_H;
-  delete h_trk_chi2rphidof_np_noCuts_H;
-
-  h_trk_chi2rphidof_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_noCuts_L);
-  h_trk_chi2rphidof_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_noCuts_L);
-  h_trk_chi2rphidof_primary_noCuts_L->Scale(1./h_trk_chi2rphidof_primary_noCuts_L->Integral());
-  h_trk_chi2rphidof_primary_noCuts_L->SetLineColor(1);
-  h_trk_chi2rphidof_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_chi2rphidof_np_noCuts_L->Scale(1./h_trk_chi2rphidof_np_noCuts_L->Integral());
-  h_trk_chi2rphidof_np_noCuts_L->SetLineColor(2);
-  h_trk_chi2rphidof_np_noCuts_L->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_noCuts_L->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_L.pdf");
-  delete h_trk_chi2rphidof_primary_noCuts_L;
-  delete h_trk_chi2rphidof_np_noCuts_L;
-
-  h_trk_chi2rphidof_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_noCuts_barrel);
-  h_trk_chi2rphidof_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_noCuts_barrel);
-  h_trk_chi2rphidof_primary_noCuts_barrel->Scale(1./h_trk_chi2rphidof_primary_noCuts_barrel->Integral());
-  h_trk_chi2rphidof_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_chi2rphidof_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_chi2rphidof_np_noCuts_barrel->Scale(1./h_trk_chi2rphidof_np_noCuts_barrel->Integral());
-  h_trk_chi2rphidof_np_noCuts_barrel->SetLineColor(2);
-  h_trk_chi2rphidof_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_noCuts_barrel->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_barrel.pdf");
-  delete h_trk_chi2rphidof_primary_noCuts_barrel;
-  delete h_trk_chi2rphidof_np_noCuts_barrel;
-
-  h_trk_chi2rphidof_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_noCuts_disk);
-  h_trk_chi2rphidof_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_noCuts_disk);
-  h_trk_chi2rphidof_primary_noCuts_disk->Scale(1./h_trk_chi2rphidof_primary_noCuts_disk->Integral());
-  h_trk_chi2rphidof_primary_noCuts_disk->SetLineColor(1);
-  h_trk_chi2rphidof_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_chi2rphidof_np_noCuts_disk->Scale(1./h_trk_chi2rphidof_np_noCuts_disk->Integral());
-  h_trk_chi2rphidof_np_noCuts_disk->SetLineColor(2);
-  h_trk_chi2rphidof_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_noCuts_disk->Draw("HIST");
-  h_trk_chi2rphidof_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_noCuts_disk.pdf");
-  delete h_trk_chi2rphidof_primary_noCuts_disk;
-  delete h_trk_chi2rphidof_np_noCuts_disk;
-
-  h_trk_chi2rphidof_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_qualCuts);
-  h_trk_chi2rphidof_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_qualCuts);
-  h_trk_chi2rphidof_primary_qualCuts->Scale(1./h_trk_chi2rphidof_primary_qualCuts->Integral());
-  h_trk_chi2rphidof_primary_qualCuts->SetLineColor(1);
-  h_trk_chi2rphidof_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_chi2rphidof_np_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_np_qualCuts->Clone(); 
-  h_trk_chi2rphidof_np_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCutsNorm->Integral());
-  h_trk_chi2rphidof_np_qualCutsNorm->SetLineColor(2);
-  h_trk_chi2rphidof_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_qualCutsNorm->Draw("HIST");
-  h_trk_chi2rphidof_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_qualCuts.pdf");
-  delete h_trk_chi2rphidof_np_qualCutsNorm;
-
-  h_trk_chi2rphidof_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_allCuts);
-  h_trk_chi2rphidof_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_allCuts);
-  h_trk_chi2rphidof_primary_allCuts->Scale(1./h_trk_chi2rphidof_primary_allCuts->Integral());
-  h_trk_chi2rphidof_primary_allCuts->SetLineColor(1);
-  h_trk_chi2rphidof_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_chi2rphidof_np_allCutsNorm = (TH1F*)h_trk_chi2rphidof_np_allCuts->Clone(); 
-  h_trk_chi2rphidof_np_allCutsNorm->Scale(1./h_trk_chi2rphidof_np_allCutsNorm->Integral());
-  h_trk_chi2rphidof_np_allCutsNorm->SetLineColor(2);
-  h_trk_chi2rphidof_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rphidof_primary_allCuts,h_trk_chi2rphidof_np_allCutsNorm);
-  h_trk_chi2rphidof_np_allCutsNorm->SetStats(0);
-  h_trk_chi2rphidof_primary_allCuts->SetStats(0);
-  h_trk_chi2rphidof_primary_allCuts->Draw("HIST");
-  h_trk_chi2rphidof_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_allCuts.pdf");
-  delete h_trk_chi2rphidof_np_allCutsNorm;
-
-  h_trk_chi2rphidof_primary_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_allCuts_zoomOut);
-  h_trk_chi2rphidof_np_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_allCuts_zoomOut);
-  h_trk_chi2rphidof_primary_allCuts_zoomOut->Scale(1./h_trk_chi2rphidof_primary_allCuts_zoomOut->Integral());
-  h_trk_chi2rphidof_primary_allCuts_zoomOut->SetLineColor(1);
-  h_trk_chi2rphidof_primary_allCuts_zoomOut->SetMarkerColor(1);
-  h_trk_chi2rphidof_np_allCuts_zoomOut->Scale(1./h_trk_chi2rphidof_np_allCuts_zoomOut->Integral());
-  h_trk_chi2rphidof_np_allCuts_zoomOut->SetLineColor(2);
-  h_trk_chi2rphidof_np_allCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rphidof_np_allCuts_zoomOut,h_trk_chi2rphidof_primary_allCuts_zoomOut);
-  h_trk_chi2rphidof_np_allCuts_zoomOut->SetStats(0);
-  h_trk_chi2rphidof_primary_allCuts_zoomOut->SetStats(0);
-  h_trk_chi2rphidof_np_allCuts_zoomOut->Draw("HIST");
-  h_trk_chi2rphidof_primary_allCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_chi2rphidof_primary_allCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_allCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_allCuts_zoomOut.pdf");
-  delete h_trk_chi2rphidof_primary_allCuts_zoomOut;
-  delete h_trk_chi2rphidof_np_allCuts_zoomOut;
-
-  h_trk_chi2rphidof_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_allCuts_barrel);
-  h_trk_chi2rphidof_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_allCuts_barrel);
-  h_trk_chi2rphidof_primary_allCuts_barrel->Scale(1./h_trk_chi2rphidof_primary_allCuts_barrel->Integral());
-  h_trk_chi2rphidof_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_chi2rphidof_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_chi2rphidof_primary_allCuts_barrel->SetStats(0);
-  h_trk_chi2rphidof_np_allCuts_barrel->Scale(1./h_trk_chi2rphidof_np_allCuts_barrel->Integral());
-  h_trk_chi2rphidof_np_allCuts_barrel->SetLineColor(2);
-  h_trk_chi2rphidof_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_allCuts_barrel->SetStats(0);
-  h_trk_chi2rphidof_np_allCuts_barrel->Draw("HIST");
-  h_trk_chi2rphidof_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_allCuts_barrel.pdf");
-  delete h_trk_chi2rphidof_primary_allCuts_barrel;
-  delete h_trk_chi2rphidof_np_allCuts_barrel;
-
-  h_trk_chi2rphidof_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_primary_allCuts_disk);
-  h_trk_chi2rphidof_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_np_allCuts_disk);
-  h_trk_chi2rphidof_primary_allCuts_disk->Scale(1./h_trk_chi2rphidof_primary_allCuts_disk->Integral());
-  h_trk_chi2rphidof_primary_allCuts_disk->SetLineColor(1);
-  h_trk_chi2rphidof_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_chi2rphidof_primary_allCuts_disk->SetStats(0);
-  h_trk_chi2rphidof_np_allCuts_disk->Scale(1./h_trk_chi2rphidof_np_allCuts_disk->Integral());
-  h_trk_chi2rphidof_np_allCuts_disk->SetLineColor(2);
-  h_trk_chi2rphidof_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_chi2rphidof_np_allCuts_disk->SetStats(0);
-  h_trk_chi2rphidof_np_allCuts_disk->Draw("HIST");
-  h_trk_chi2rphidof_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rphidof_allCuts_disk.pdf");
-  delete h_trk_chi2rphidof_primary_allCuts_disk;
-  delete h_trk_chi2rphidof_np_allCuts_disk;
-
-  TH1F *h_trk_chi2rphidof_fake_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_fake_qualCuts->Clone(); 
-  h_trk_chi2rphidof_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_fake_qualCutsNorm);
-  TH1F *h_trk_chi2rphidof_PU_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_PU_qualCuts->Clone(); 
-  h_trk_chi2rphidof_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_PU_qualCutsNorm);
-  TH1F *h_trk_chi2rphidof_notHiggs_qualCutsNorm = (TH1F*)h_trk_chi2rphidof_notHiggs_qualCuts->Clone(); 
-  h_trk_chi2rphidof_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_notHiggs_qualCutsNorm);
-  h_trk_chi2rphidof_fake_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCuts->Integral());
-  h_trk_chi2rphidof_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_chi2rphidof_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_chi2rphidof_PU_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCuts->Integral());
-  h_trk_chi2rphidof_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_chi2rphidof_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_chi2rphidof_notHiggs_qualCutsNorm->Scale(1./h_trk_chi2rphidof_np_qualCuts->Integral());
-  h_trk_chi2rphidof_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_chi2rphidof_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_chi2rphidof_qualCuts = new THStack("hs_chi2rphidof_qualCuts","Stacked BG histograms");
-  hs_chi2rphidof_qualCuts->Add(h_trk_chi2rphidof_fake_qualCutsNorm);
-  hs_chi2rphidof_qualCuts->Add(h_trk_chi2rphidof_PU_qualCutsNorm);
-  hs_chi2rphidof_qualCuts->Add(h_trk_chi2rphidof_notHiggs_qualCutsNorm);
-  hs_chi2rphidof_qualCuts->Draw("HIST");
-  h_trk_chi2rphidof_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_chi2rphidof_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_chi2rphidof_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_qualCutsNorm.pdf");
-  delete h_trk_chi2rphidof_fake_qualCutsNorm;
-  delete h_trk_chi2rphidof_PU_qualCutsNorm;
-  delete h_trk_chi2rphidof_notHiggs_qualCutsNorm;
-  delete h_trk_chi2rphidof_np_qualCuts;
-  delete hs_chi2rphidof_qualCuts;
-
-  h_trk_chi2rphidof_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_fake_qualCuts);
-  h_trk_chi2rphidof_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_PU_qualCuts);
-  h_trk_chi2rphidof_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_notHiggs_qualCuts);
-  h_trk_chi2rphidof_fake_qualCuts->Scale(1./h_trk_chi2rphidof_fake_qualCuts->Integral());
-  h_trk_chi2rphidof_fake_qualCuts->SetLineColor(2);
-  h_trk_chi2rphidof_fake_qualCuts->SetMarkerColor(2);
-  h_trk_chi2rphidof_PU_qualCuts->Scale(1./h_trk_chi2rphidof_PU_qualCuts->Integral());
-  h_trk_chi2rphidof_PU_qualCuts->SetLineColor(3);
-  h_trk_chi2rphidof_PU_qualCuts->SetMarkerColor(3);
-  h_trk_chi2rphidof_notHiggs_qualCuts->Scale(1./h_trk_chi2rphidof_notHiggs_qualCuts->Integral());
-  h_trk_chi2rphidof_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_chi2rphidof_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_chi2rphidof_fake_qualCuts->Draw("HIST");
-  h_trk_chi2rphidof_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_chi2rphidof_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_chi2rphidof_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rphidof_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rphidof_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_chi2rphidof_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_chi2rphidof_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rphidof_qualCuts.pdf");
-  delete h_trk_chi2rphidof_primary_qualCuts;
-  delete h_trk_chi2rphidof_fake_qualCuts;
-  delete h_trk_chi2rphidof_PU_qualCuts;
-  delete h_trk_chi2rphidof_notHiggs_qualCuts;
-
-  removeFlows(h_trk_MVA1_primary_noCuts);
-  h_trk_MVA1_primary_noCuts->Scale(1./h_trk_MVA1_primary_noCuts->Integral());
-  h_trk_MVA1_primary_noCuts->SetLineColor(1);
-  h_trk_MVA1_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_MVA1_np_noCutsNorm = (TH1F*)h_trk_MVA1_np_noCuts->Clone(); 
-  h_trk_MVA1_np_noCutsNorm->Scale(1./h_trk_MVA1_np_noCutsNorm->Integral());
-  h_trk_MVA1_np_noCutsNorm->SetLineColor(2);
-  h_trk_MVA1_np_noCutsNorm->SetMarkerColor(2);
-  h_trk_MVA1_np_noCutsNorm->Draw("HIST");
-  h_trk_MVA1_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts.pdf");
-  delete h_trk_MVA1_np_noCutsNorm;
-
-  removeFlows(h_trk_MVA2_primary_noCuts);
-  h_trk_MVA2_primary_noCuts->Scale(1./h_trk_MVA2_primary_noCuts->Integral());
-  h_trk_MVA2_primary_noCuts->SetLineColor(1);
-  h_trk_MVA2_primary_noCuts->SetMarkerColor(1);
-  h_trk_MVA2_primary_noCuts->SetStats(0);
-  removeFlows(h_trk_MVA2_np_noCuts);
-  h_trk_MVA2_np_noCuts->Scale(1./h_trk_MVA2_np_noCuts->Integral());
-  h_trk_MVA2_np_noCuts->SetLineColor(2);
-  h_trk_MVA2_np_noCuts->SetMarkerColor(2);
-  h_trk_MVA2_np_noCuts->SetStats(0);
-  raiseMax(h_trk_MVA2_np_noCuts,h_trk_MVA2_primary_noCuts);
-  h_trk_MVA2_np_noCuts->Draw("HIST");
-  h_trk_MVA2_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA2_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA2_np_noCuts,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA2_noCuts.pdf");
-  delete h_trk_MVA2_primary_noCuts;
-  delete h_trk_MVA2_np_noCuts;
-
-  TH1F *h_trk_MVA1_fake_noCutsNorm = (TH1F*)h_trk_MVA1_fake_noCuts->Clone(); 
-  h_trk_MVA1_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_fake_noCutsNorm);
-  TH1F *h_trk_MVA1_PU_noCutsNorm = (TH1F*)h_trk_MVA1_PU_noCuts->Clone(); 
-  h_trk_MVA1_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_PU_noCutsNorm);
-  TH1F *h_trk_MVA1_notHiggs_noCutsNorm = (TH1F*)h_trk_MVA1_notHiggs_noCuts->Clone(); 
-  h_trk_MVA1_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_notHiggs_noCutsNorm);
-  h_trk_MVA1_fake_noCutsNorm->Scale(1./h_trk_MVA1_np_noCuts->Integral());
-  h_trk_MVA1_fake_noCutsNorm->SetLineColor(2);
-  h_trk_MVA1_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_MVA1_PU_noCutsNorm->Scale(1./h_trk_MVA1_np_noCuts->Integral());
-  h_trk_MVA1_PU_noCutsNorm->SetLineColor(3);
-  h_trk_MVA1_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_MVA1_notHiggs_noCutsNorm->Scale(1./h_trk_MVA1_np_noCuts->Integral());
-  h_trk_MVA1_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_MVA1_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_MVA1_noCuts = new THStack("hs_MVA1_noCuts","Stacked BG histograms");
-  hs_MVA1_noCuts->Add(h_trk_MVA1_fake_noCutsNorm);
-  hs_MVA1_noCuts->Add(h_trk_MVA1_PU_noCutsNorm);
-  hs_MVA1_noCuts->Add(h_trk_MVA1_notHiggs_noCutsNorm);
-  hs_MVA1_noCuts->Draw("HIST");
-  h_trk_MVA1_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_MVA1_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_MVA1_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_noCutsNorm.pdf");
-  delete h_trk_MVA1_fake_noCutsNorm;
-  delete h_trk_MVA1_PU_noCutsNorm;
-  delete h_trk_MVA1_notHiggs_noCutsNorm;
-  delete h_trk_MVA1_np_noCuts;
-  delete hs_MVA1_noCuts;
-
-  h_trk_MVA1_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_fake_noCuts);
-  h_trk_MVA1_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_PU_noCuts);
-  h_trk_MVA1_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_notHiggs_noCuts);
-  h_trk_MVA1_fake_noCuts->Scale(1./h_trk_MVA1_fake_noCuts->Integral());
-  h_trk_MVA1_fake_noCuts->SetLineColor(2);
-  h_trk_MVA1_fake_noCuts->SetMarkerColor(2);
-  h_trk_MVA1_PU_noCuts->Scale(1./h_trk_MVA1_PU_noCuts->Integral());
-  h_trk_MVA1_PU_noCuts->SetLineColor(3);
-  h_trk_MVA1_PU_noCuts->SetMarkerColor(3);
-  h_trk_MVA1_notHiggs_noCuts->Scale(1./h_trk_MVA1_notHiggs_noCuts->Integral());
-  h_trk_MVA1_notHiggs_noCuts->SetLineColor(4);
-  h_trk_MVA1_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_MVA1_fake_noCuts->Draw("HIST");
-  h_trk_MVA1_primary_noCuts->Draw("HIST,SAME");
-  h_trk_MVA1_PU_noCuts->Draw("HIST,SAME");
-  h_trk_MVA1_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_MVA1_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_MVA1_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_noCuts.pdf");
-  delete h_trk_MVA1_primary_noCuts;
-  delete h_trk_MVA1_fake_noCuts;
-  delete h_trk_MVA1_PU_noCuts;
-  delete h_trk_MVA1_notHiggs_noCuts;
-
-  h_trk_MVA1_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_primary_noCuts_H);
-  h_trk_MVA1_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_np_noCuts_H);
-  h_trk_MVA1_primary_noCuts_H->Scale(1./h_trk_MVA1_primary_noCuts_H->Integral());
-  h_trk_MVA1_primary_noCuts_H->SetLineColor(1);
-  h_trk_MVA1_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_MVA1_np_noCuts_H->Scale(1./h_trk_MVA1_np_noCuts_H->Integral());
-  h_trk_MVA1_np_noCuts_H->SetLineColor(2);
-  h_trk_MVA1_np_noCuts_H->SetMarkerColor(2);
-  h_trk_MVA1_np_noCuts_H->Draw("HIST");
-  h_trk_MVA1_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts_H.pdf");
-  delete h_trk_MVA1_primary_noCuts_H;
-  delete h_trk_MVA1_np_noCuts_H;
-
-  h_trk_MVA1_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_primary_noCuts_L);
-  h_trk_MVA1_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_np_noCuts_L);
-  h_trk_MVA1_primary_noCuts_L->Scale(1./h_trk_MVA1_primary_noCuts_L->Integral());
-  h_trk_MVA1_primary_noCuts_L->SetLineColor(1);
-  h_trk_MVA1_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_MVA1_np_noCuts_L->Scale(1./h_trk_MVA1_np_noCuts_L->Integral());
-  h_trk_MVA1_np_noCuts_L->SetLineColor(2);
-  h_trk_MVA1_np_noCuts_L->SetMarkerColor(2);
-  h_trk_MVA1_np_noCuts_L->Draw("HIST");
-  h_trk_MVA1_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_noCuts_L.pdf");
-  delete h_trk_MVA1_primary_noCuts_L;
-  delete h_trk_MVA1_np_noCuts_L;
-
-  h_trk_MVA1_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_primary_qualCuts);
-  h_trk_MVA1_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_np_qualCuts);
-  h_trk_MVA1_primary_qualCuts->Scale(1./h_trk_MVA1_primary_qualCuts->Integral());
-  h_trk_MVA1_primary_qualCuts->SetLineColor(1);
-  h_trk_MVA1_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_MVA1_np_qualCutsNorm = (TH1F*)h_trk_MVA1_np_qualCuts->Clone(); 
-  h_trk_MVA1_np_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCutsNorm->Integral());
-  h_trk_MVA1_np_qualCutsNorm->SetLineColor(2);
-  h_trk_MVA1_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_MVA1_np_qualCutsNorm->Draw("HIST");
-  h_trk_MVA1_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_qualCuts.pdf");
-  delete h_trk_MVA1_np_qualCutsNorm;
-
-  h_trk_MVA1_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_primary_allCuts);
-  h_trk_MVA1_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_np_allCuts);
-  h_trk_MVA1_primary_allCuts->Scale(1./h_trk_MVA1_primary_allCuts->Integral());
-  h_trk_MVA1_primary_allCuts->SetLineColor(1);
-  h_trk_MVA1_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_MVA1_np_allCutsNorm = (TH1F*)h_trk_MVA1_np_allCuts->Clone(); 
-  h_trk_MVA1_np_allCutsNorm->Scale(1./h_trk_MVA1_np_allCutsNorm->Integral());
-  h_trk_MVA1_np_allCutsNorm->SetLineColor(2);
-  h_trk_MVA1_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_MVA1_primary_allCuts,h_trk_MVA1_np_allCutsNorm);
-  h_trk_MVA1_primary_allCuts->Draw("HIST");
-  h_trk_MVA1_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_allCuts.pdf");
-  delete h_trk_MVA1_np_allCutsNorm;
-
-  removeFlows(h_trk_MVA2_primary_allCuts);
-  h_trk_MVA2_primary_allCuts->Scale(1./h_trk_MVA2_primary_allCuts->Integral());
-  h_trk_MVA2_primary_allCuts->SetLineColor(1);
-  h_trk_MVA2_primary_allCuts->SetMarkerColor(1);
-  h_trk_MVA2_primary_allCuts->SetStats(0);
-  removeFlows(h_trk_MVA2_np_allCuts);
-  h_trk_MVA2_np_allCuts->Scale(1./h_trk_MVA2_np_allCuts->Integral());
-  h_trk_MVA2_np_allCuts->SetLineColor(2);
-  h_trk_MVA2_np_allCuts->SetMarkerColor(2);
-  h_trk_MVA2_np_allCuts->SetStats(0);
-  raiseMax(h_trk_MVA2_np_allCuts,h_trk_MVA2_primary_allCuts);
-  h_trk_MVA2_primary_allCuts->Draw("HIST");
-  h_trk_MVA2_np_allCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA2_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA2_np_allCuts,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA2_allCuts.pdf");
-  delete h_trk_MVA2_primary_allCuts;
-  delete h_trk_MVA2_np_allCuts;
-
-  removeFlows(h_trk_MVA1_primary_allCuts_P);
-  h_trk_MVA1_primary_allCuts_P->Scale(1./h_trk_MVA1_primary_allCuts_P->Integral());
-  h_trk_MVA1_primary_allCuts_P->SetLineColor(1);
-  h_trk_MVA1_primary_allCuts_P->SetMarkerColor(1);
-  h_trk_MVA1_primary_allCuts_P->SetStats(0);
-  removeFlows(h_trk_MVA1_np_allCuts_P);
-  h_trk_MVA1_np_allCuts_P->Scale(1./h_trk_MVA1_np_allCuts_P->Integral());
-  h_trk_MVA1_np_allCuts_P->SetLineColor(2);
-  h_trk_MVA1_np_allCuts_P->SetMarkerColor(2);
-  h_trk_MVA1_np_allCuts_P->SetStats(0);
-  raiseMax(h_trk_MVA1_np_allCuts_P,h_trk_MVA1_primary_allCuts_P);
-  h_trk_MVA1_np_allCuts_P->Draw("HIST");
-  h_trk_MVA1_primary_allCuts_P->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_allCuts_P,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_allCuts_P,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_allCuts_P.pdf");
-  delete h_trk_MVA1_primary_allCuts_P;
-  delete h_trk_MVA1_np_allCuts_P;
-
-  removeFlows(h_trk_MVA1_primary_allCuts_D);
-  h_trk_MVA1_primary_allCuts_D->Scale(1./h_trk_MVA1_primary_allCuts_D->Integral());
-  h_trk_MVA1_primary_allCuts_D->SetLineColor(1);
-  h_trk_MVA1_primary_allCuts_D->SetMarkerColor(1);
-  h_trk_MVA1_primary_allCuts_D->SetStats(0);
-  removeFlows(h_trk_MVA1_np_allCuts_D);
-  h_trk_MVA1_np_allCuts_D->Scale(1./h_trk_MVA1_np_allCuts_D->Integral());
-  h_trk_MVA1_np_allCuts_D->SetLineColor(2);
-  h_trk_MVA1_np_allCuts_D->SetMarkerColor(2);
-  h_trk_MVA1_np_allCuts_D->SetStats(0);
-  raiseMax(h_trk_MVA1_np_allCuts_D,h_trk_MVA1_primary_allCuts_D);
-  h_trk_MVA1_np_allCuts_D->Draw("HIST");
-  h_trk_MVA1_primary_allCuts_D->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_allCuts_D,"Primary","l");
-  l->AddEntry(h_trk_MVA1_np_allCuts_D,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA1_allCuts_D.pdf");
-  delete h_trk_MVA1_primary_allCuts_D;
-  delete h_trk_MVA1_np_allCuts_D;
-
-  removeFlows(h_trk_MVA2_primary_allCuts_P);
-  h_trk_MVA2_primary_allCuts_P->Scale(1./h_trk_MVA2_primary_allCuts_P->Integral());
-  h_trk_MVA2_primary_allCuts_P->SetLineColor(1);
-  h_trk_MVA2_primary_allCuts_P->SetMarkerColor(1);
-  h_trk_MVA2_primary_allCuts_P->SetStats(0);
-  removeFlows(h_trk_MVA2_np_allCuts_P);
-  h_trk_MVA2_np_allCuts_P->Scale(1./h_trk_MVA2_np_allCuts_P->Integral());
-  h_trk_MVA2_np_allCuts_P->SetLineColor(2);
-  h_trk_MVA2_np_allCuts_P->SetMarkerColor(2);
-  h_trk_MVA2_np_allCuts_P->SetStats(0);
-  raiseMax(h_trk_MVA2_np_allCuts_P,h_trk_MVA2_primary_allCuts_P);
-  h_trk_MVA2_np_allCuts_P->Draw("HIST");
-  h_trk_MVA2_primary_allCuts_P->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA2_primary_allCuts_P,"Primary","l");
-  l->AddEntry(h_trk_MVA2_np_allCuts_P,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA2_allCuts_P.pdf");
-  delete h_trk_MVA2_primary_allCuts_P;
-  delete h_trk_MVA2_np_allCuts_P;
-
-  removeFlows(h_trk_MVA2_primary_allCuts_D);
-  h_trk_MVA2_primary_allCuts_D->Scale(1./h_trk_MVA2_primary_allCuts_D->Integral());
-  h_trk_MVA2_primary_allCuts_D->SetLineColor(1);
-  h_trk_MVA2_primary_allCuts_D->SetMarkerColor(1);
-  h_trk_MVA2_primary_allCuts_D->SetStats(0);
-  removeFlows(h_trk_MVA2_np_allCuts_D);
-  h_trk_MVA2_np_allCuts_D->Scale(1./h_trk_MVA2_np_allCuts_D->Integral());
-  h_trk_MVA2_np_allCuts_D->SetLineColor(2);
-  h_trk_MVA2_np_allCuts_D->SetMarkerColor(2);
-  h_trk_MVA2_np_allCuts_D->SetStats(0);
-  raiseMax(h_trk_MVA2_np_allCuts_D,h_trk_MVA2_primary_allCuts_D);
-  h_trk_MVA2_np_allCuts_D->Draw("HIST");
-  h_trk_MVA2_primary_allCuts_D->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA2_primary_allCuts_D,"Primary","l");
-  l->AddEntry(h_trk_MVA2_np_allCuts_D,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_MVA2_allCuts_D.pdf");
-  delete h_trk_MVA2_primary_allCuts_D;
-  delete h_trk_MVA2_np_allCuts_D;
-
-  TH1F *h_trk_MVA1_fake_qualCutsNorm = (TH1F*)h_trk_MVA1_fake_qualCuts->Clone(); 
-  h_trk_MVA1_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_fake_qualCutsNorm);
-  TH1F *h_trk_MVA1_PU_qualCutsNorm = (TH1F*)h_trk_MVA1_PU_qualCuts->Clone(); 
-  h_trk_MVA1_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_PU_qualCutsNorm);
-  TH1F *h_trk_MVA1_notHiggs_qualCutsNorm = (TH1F*)h_trk_MVA1_notHiggs_qualCuts->Clone(); 
-  h_trk_MVA1_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_notHiggs_qualCutsNorm);
-  h_trk_MVA1_fake_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCuts->Integral());
-  h_trk_MVA1_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_MVA1_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_MVA1_PU_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCuts->Integral());
-  h_trk_MVA1_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_MVA1_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_MVA1_notHiggs_qualCutsNorm->Scale(1./h_trk_MVA1_np_qualCuts->Integral());
-  h_trk_MVA1_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_MVA1_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_MVA1_qualCuts = new THStack("hs_MVA1_qualCuts","Stacked BG histograms");
-  hs_MVA1_qualCuts->Add(h_trk_MVA1_fake_qualCutsNorm);
-  hs_MVA1_qualCuts->Add(h_trk_MVA1_PU_qualCutsNorm);
-  hs_MVA1_qualCuts->Add(h_trk_MVA1_notHiggs_qualCutsNorm);
-  hs_MVA1_qualCuts->Draw("HIST");
-  h_trk_MVA1_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_MVA1_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_MVA1_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_qualCutsNorm.pdf");
-  delete h_trk_MVA1_fake_qualCutsNorm;
-  delete h_trk_MVA1_PU_qualCutsNorm;
-  delete h_trk_MVA1_notHiggs_qualCutsNorm;
-  delete h_trk_MVA1_np_qualCuts;
-  delete hs_MVA1_qualCuts;
-
-  h_trk_MVA1_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_fake_qualCuts);
-  h_trk_MVA1_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_PU_qualCuts);
-  h_trk_MVA1_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_MVA1_notHiggs_qualCuts);
-  h_trk_MVA1_fake_qualCuts->Scale(1./h_trk_MVA1_fake_qualCuts->Integral());
-  h_trk_MVA1_fake_qualCuts->SetLineColor(2);
-  h_trk_MVA1_fake_qualCuts->SetMarkerColor(2);
-  h_trk_MVA1_PU_qualCuts->Scale(1./h_trk_MVA1_PU_qualCuts->Integral());
-  h_trk_MVA1_PU_qualCuts->SetLineColor(3);
-  h_trk_MVA1_PU_qualCuts->SetMarkerColor(3);
-  h_trk_MVA1_notHiggs_qualCuts->Scale(1./h_trk_MVA1_notHiggs_qualCuts->Integral());
-  h_trk_MVA1_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_MVA1_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_MVA1_fake_qualCuts->Draw("HIST");
-  h_trk_MVA1_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_MVA1_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_MVA1_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_MVA1_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_MVA1_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_MVA1_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_MVA1_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_MVA1_qualCuts.pdf");
-  delete h_trk_MVA1_primary_qualCuts;
-  delete h_trk_MVA1_fake_qualCuts;
-  delete h_trk_MVA1_PU_qualCuts;
-  delete h_trk_MVA1_notHiggs_qualCuts;
-
-  h_trk_chi2rzdof->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof);
-  h_trk_chi2rzdof->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof->GetName() + ".pdf");
-  delete h_trk_chi2rzdof;
-
-  h_trk_chi2rzdof_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary);
-  h_trk_chi2rzdof_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_primary->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_primary;
-
-  h_trk_chi2rzdof_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_noCuts);
-  h_trk_chi2rzdof_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_chi2rzdof_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np);
-  h_trk_chi2rzdof_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_np->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_np;
-
-  h_trk_chi2rzdof_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_noCuts);
-  h_trk_chi2rzdof_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_np_noCuts->GetName() + ".pdf");
-   
-  h_trk_chi2rzdof_primary_noCuts->Scale(1./h_trk_chi2rzdof_primary_noCuts->Integral());
-  h_trk_chi2rzdof_primary_noCuts->SetLineColor(1);
-  h_trk_chi2rzdof_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_chi2rzdof_np_noCutsNorm = (TH1F*)h_trk_chi2rzdof_np_noCuts->Clone(); 
-  h_trk_chi2rzdof_np_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCutsNorm->Integral());
-  h_trk_chi2rzdof_np_noCutsNorm->SetLineColor(2);
-  h_trk_chi2rzdof_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rzdof_primary_noCuts,h_trk_chi2rzdof_np_noCutsNorm);
-  h_trk_chi2rzdof_primary_noCuts->SetStats(0);
-  h_trk_chi2rzdof_np_noCutsNorm->SetStats(0);
-  h_trk_chi2rzdof_primary_noCuts->Draw("HIST");
-  h_trk_chi2rzdof_np_noCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts.pdf");
-  delete h_trk_chi2rzdof_np_noCutsNorm;
-
-  h_trk_chi2rzdof_primary_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_noCuts_zoomOut);
-  h_trk_chi2rzdof_np_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_noCuts_zoomOut);
-  h_trk_chi2rzdof_primary_noCuts_zoomOut->Scale(1./h_trk_chi2rzdof_primary_noCuts_zoomOut->Integral());
-  h_trk_chi2rzdof_primary_noCuts_zoomOut->SetLineColor(1);
-  h_trk_chi2rzdof_primary_noCuts_zoomOut->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_noCuts_zoomOut->Scale(1./h_trk_chi2rzdof_np_noCuts_zoomOut->Integral());
-  h_trk_chi2rzdof_np_noCuts_zoomOut->SetLineColor(2);
-  h_trk_chi2rzdof_np_noCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rzdof_np_noCuts_zoomOut,h_trk_chi2rzdof_primary_noCuts_zoomOut);
-  h_trk_chi2rzdof_np_noCuts_zoomOut->SetStats(0);
-  h_trk_chi2rzdof_primary_noCuts_zoomOut->SetStats(0);
-  h_trk_chi2rzdof_np_noCuts_zoomOut->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_noCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_zoomOut.pdf");
-  delete h_trk_chi2rzdof_primary_noCuts_zoomOut;
-  delete h_trk_chi2rzdof_np_noCuts_zoomOut;
-
-  TH1F *h_trk_chi2rzdof_fake_noCutsNorm = (TH1F*)h_trk_chi2rzdof_fake_noCuts->Clone(); 
-  h_trk_chi2rzdof_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_fake_noCutsNorm);
-  TH1F *h_trk_chi2rzdof_PU_noCutsNorm = (TH1F*)h_trk_chi2rzdof_PU_noCuts->Clone(); 
-  h_trk_chi2rzdof_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_PU_noCutsNorm);
-  TH1F *h_trk_chi2rzdof_notHiggs_noCutsNorm = (TH1F*)h_trk_chi2rzdof_notHiggs_noCuts->Clone(); 
-  h_trk_chi2rzdof_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_notHiggs_noCutsNorm);
-  h_trk_chi2rzdof_fake_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCuts->Integral());
-  h_trk_chi2rzdof_fake_noCutsNorm->SetLineColor(2);
-  h_trk_chi2rzdof_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_chi2rzdof_PU_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCuts->Integral());
-  h_trk_chi2rzdof_PU_noCutsNorm->SetLineColor(3);
-  h_trk_chi2rzdof_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_chi2rzdof_notHiggs_noCutsNorm->Scale(1./h_trk_chi2rzdof_np_noCuts->Integral());
-  h_trk_chi2rzdof_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_chi2rzdof_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_chi2rzdof_noCuts = new THStack("hs_chi2rzdof_noCuts","Stacked BG histograms");
-  hs_chi2rzdof_noCuts->Add(h_trk_chi2rzdof_fake_noCutsNorm);
-  hs_chi2rzdof_noCuts->Add(h_trk_chi2rzdof_PU_noCutsNorm);
-  hs_chi2rzdof_noCuts->Add(h_trk_chi2rzdof_notHiggs_noCutsNorm);
-  hs_chi2rzdof_noCuts->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_chi2rzdof_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_chi2rzdof_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_noCutsNorm.pdf");
-  delete h_trk_chi2rzdof_fake_noCutsNorm;
-  delete h_trk_chi2rzdof_PU_noCutsNorm;
-  delete h_trk_chi2rzdof_notHiggs_noCutsNorm;
-  delete h_trk_chi2rzdof_np_noCuts;
-  delete hs_chi2rzdof_noCuts;
-
-  h_trk_chi2rzdof_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_fake_noCuts);
-  h_trk_chi2rzdof_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_PU_noCuts);
-  h_trk_chi2rzdof_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_notHiggs_noCuts);
-  h_trk_chi2rzdof_fake_noCuts->Scale(1./h_trk_chi2rzdof_fake_noCuts->Integral());
-  h_trk_chi2rzdof_fake_noCuts->SetLineColor(2);
-  h_trk_chi2rzdof_fake_noCuts->SetMarkerColor(2);
-  h_trk_chi2rzdof_PU_noCuts->Scale(1./h_trk_chi2rzdof_PU_noCuts->Integral());
-  h_trk_chi2rzdof_PU_noCuts->SetLineColor(3);
-  h_trk_chi2rzdof_PU_noCuts->SetMarkerColor(3);
-  h_trk_chi2rzdof_notHiggs_noCuts->Scale(1./h_trk_chi2rzdof_notHiggs_noCuts->Integral());
-  h_trk_chi2rzdof_notHiggs_noCuts->SetLineColor(4);
-  h_trk_chi2rzdof_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_chi2rzdof_fake_noCuts->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts->Draw("HIST,SAME");
-  h_trk_chi2rzdof_PU_noCuts->Draw("HIST,SAME");
-  h_trk_chi2rzdof_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_chi2rzdof_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_chi2rzdof_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_noCuts.pdf");
-  delete h_trk_chi2rzdof_primary_noCuts;
-  delete h_trk_chi2rzdof_fake_noCuts;
-  delete h_trk_chi2rzdof_PU_noCuts;
-  delete h_trk_chi2rzdof_notHiggs_noCuts;
-
-  h_trk_chi2rzdof_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_noCuts_H);
-  h_trk_chi2rzdof_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_noCuts_H);
-  h_trk_chi2rzdof_primary_noCuts_H->Scale(1./h_trk_chi2rzdof_primary_noCuts_H->Integral());
-  h_trk_chi2rzdof_primary_noCuts_H->SetLineColor(1);
-  h_trk_chi2rzdof_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_noCuts_H->Scale(1./h_trk_chi2rzdof_np_noCuts_H->Integral());
-  h_trk_chi2rzdof_np_noCuts_H->SetLineColor(2);
-  h_trk_chi2rzdof_np_noCuts_H->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_noCuts_H->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_H.pdf");
-  delete h_trk_chi2rzdof_primary_noCuts_H;
-  delete h_trk_chi2rzdof_np_noCuts_H;
-
-  h_trk_chi2rzdof_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_noCuts_L);
-  h_trk_chi2rzdof_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_noCuts_L);
-  h_trk_chi2rzdof_primary_noCuts_L->Scale(1./h_trk_chi2rzdof_primary_noCuts_L->Integral());
-  h_trk_chi2rzdof_primary_noCuts_L->SetLineColor(1);
-  h_trk_chi2rzdof_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_noCuts_L->Scale(1./h_trk_chi2rzdof_np_noCuts_L->Integral());
-  h_trk_chi2rzdof_np_noCuts_L->SetLineColor(2);
-  h_trk_chi2rzdof_np_noCuts_L->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_noCuts_L->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_L.pdf");
-  delete h_trk_chi2rzdof_primary_noCuts_L;
-  delete h_trk_chi2rzdof_np_noCuts_L;
-
-  h_trk_chi2rzdof_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_noCuts_barrel);
-  h_trk_chi2rzdof_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_noCuts_barrel);
-  h_trk_chi2rzdof_primary_noCuts_barrel->Scale(1./h_trk_chi2rzdof_primary_noCuts_barrel->Integral());
-  h_trk_chi2rzdof_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_chi2rzdof_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_noCuts_barrel->Scale(1./h_trk_chi2rzdof_np_noCuts_barrel->Integral());
-  h_trk_chi2rzdof_np_noCuts_barrel->SetLineColor(2);
-  h_trk_chi2rzdof_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_noCuts_barrel->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_barrel.pdf");
-  delete h_trk_chi2rzdof_primary_noCuts_barrel;
-  delete h_trk_chi2rzdof_np_noCuts_barrel;
-
-  h_trk_chi2rzdof_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_noCuts_disk);
-  h_trk_chi2rzdof_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_noCuts_disk);
-  h_trk_chi2rzdof_primary_noCuts_disk->Scale(1./h_trk_chi2rzdof_primary_noCuts_disk->Integral());
-  h_trk_chi2rzdof_primary_noCuts_disk->SetLineColor(1);
-  h_trk_chi2rzdof_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_noCuts_disk->Scale(1./h_trk_chi2rzdof_np_noCuts_disk->Integral());
-  h_trk_chi2rzdof_np_noCuts_disk->SetLineColor(2);
-  h_trk_chi2rzdof_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_noCuts_disk->Draw("HIST");
-  h_trk_chi2rzdof_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_noCuts_disk.pdf");
-  delete h_trk_chi2rzdof_primary_noCuts_disk;
-  delete h_trk_chi2rzdof_np_noCuts_disk;
-
-  h_trk_chi2rzdof_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_qualCuts);
-  h_trk_chi2rzdof_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_qualCuts);
-  h_trk_chi2rzdof_primary_qualCuts->Scale(1./h_trk_chi2rzdof_primary_qualCuts->Integral());
-  h_trk_chi2rzdof_primary_qualCuts->SetLineColor(1);
-  h_trk_chi2rzdof_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_chi2rzdof_np_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_np_qualCuts->Clone(); 
-  h_trk_chi2rzdof_np_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCutsNorm->Integral());
-  h_trk_chi2rzdof_np_qualCutsNorm->SetLineColor(2);
-  h_trk_chi2rzdof_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_qualCutsNorm->Draw("HIST");
-  h_trk_chi2rzdof_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_qualCuts.pdf");
-  delete h_trk_chi2rzdof_np_qualCutsNorm;
-
-  h_trk_chi2rzdof_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_allCuts);
-  h_trk_chi2rzdof_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_allCuts);
-  h_trk_chi2rzdof_primary_allCuts->Scale(1./h_trk_chi2rzdof_primary_allCuts->Integral());
-  h_trk_chi2rzdof_primary_allCuts->SetLineColor(1);
-  h_trk_chi2rzdof_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_chi2rzdof_np_allCutsNorm = (TH1F*)h_trk_chi2rzdof_np_allCuts->Clone(); 
-  h_trk_chi2rzdof_np_allCutsNorm->Scale(1./h_trk_chi2rzdof_np_allCutsNorm->Integral());
-  h_trk_chi2rzdof_np_allCutsNorm->SetLineColor(2);
-  h_trk_chi2rzdof_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rzdof_primary_allCuts,h_trk_chi2rzdof_np_allCutsNorm);
-  h_trk_chi2rzdof_np_allCutsNorm->SetStats(0);
-  h_trk_chi2rzdof_primary_allCuts->SetStats(0);
-  h_trk_chi2rzdof_primary_allCuts->Draw("HIST");
-  h_trk_chi2rzdof_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_allCuts.pdf");
-  delete h_trk_chi2rzdof_np_allCutsNorm;
-
-  h_trk_chi2rzdof_primary_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_allCuts_zoomOut);
-  h_trk_chi2rzdof_np_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_allCuts_zoomOut);
-  h_trk_chi2rzdof_primary_allCuts_zoomOut->Scale(1./h_trk_chi2rzdof_primary_allCuts_zoomOut->Integral());
-  h_trk_chi2rzdof_primary_allCuts_zoomOut->SetLineColor(1);
-  h_trk_chi2rzdof_primary_allCuts_zoomOut->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_allCuts_zoomOut->Scale(1./h_trk_chi2rzdof_np_allCuts_zoomOut->Integral());
-  h_trk_chi2rzdof_np_allCuts_zoomOut->SetLineColor(2);
-  h_trk_chi2rzdof_np_allCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_chi2rzdof_np_allCuts_zoomOut,h_trk_chi2rzdof_primary_allCuts_zoomOut);
-  h_trk_chi2rzdof_np_allCuts_zoomOut->SetStats(0);
-  h_trk_chi2rzdof_primary_allCuts_zoomOut->SetStats(0);
-  h_trk_chi2rzdof_np_allCuts_zoomOut->Draw("HIST");
-  h_trk_chi2rzdof_primary_allCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_chi2rzdof_primary_allCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_allCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_allCuts_zoomOut.pdf");
-  delete h_trk_chi2rzdof_primary_allCuts_zoomOut;
-  delete h_trk_chi2rzdof_np_allCuts_zoomOut;
-
-  h_trk_chi2rzdof_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_allCuts_barrel);
-  h_trk_chi2rzdof_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_allCuts_barrel);
-  h_trk_chi2rzdof_primary_allCuts_barrel->Scale(1./h_trk_chi2rzdof_primary_allCuts_barrel->Integral());
-  h_trk_chi2rzdof_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_chi2rzdof_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_allCuts_barrel->Scale(1./h_trk_chi2rzdof_np_allCuts_barrel->Integral());
-  h_trk_chi2rzdof_np_allCuts_barrel->SetLineColor(2);
-  h_trk_chi2rzdof_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_allCuts_barrel->Draw("HIST");
-  h_trk_chi2rzdof_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_allCuts_barrel.pdf");
-  delete h_trk_chi2rzdof_primary_allCuts_barrel;
-  delete h_trk_chi2rzdof_np_allCuts_barrel;
-
-  h_trk_chi2rzdof_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_primary_allCuts_disk);
-  h_trk_chi2rzdof_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_np_allCuts_disk);
-  h_trk_chi2rzdof_primary_allCuts_disk->Scale(1./h_trk_chi2rzdof_primary_allCuts_disk->Integral());
-  h_trk_chi2rzdof_primary_allCuts_disk->SetLineColor(1);
-  h_trk_chi2rzdof_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_chi2rzdof_np_allCuts_disk->Scale(1./h_trk_chi2rzdof_np_allCuts_disk->Integral());
-  h_trk_chi2rzdof_np_allCuts_disk->SetLineColor(2);
-  h_trk_chi2rzdof_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_chi2rzdof_np_allCuts_disk->Draw("HIST");
-  h_trk_chi2rzdof_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_chi2rzdof_allCuts_disk.pdf");
-  delete h_trk_chi2rzdof_primary_allCuts_disk;
-  delete h_trk_chi2rzdof_np_allCuts_disk;
-
-  TH1F *h_trk_chi2rzdof_fake_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_fake_qualCuts->Clone(); 
-  h_trk_chi2rzdof_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_fake_qualCutsNorm);
-  TH1F *h_trk_chi2rzdof_PU_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_PU_qualCuts->Clone(); 
-  h_trk_chi2rzdof_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_PU_qualCutsNorm);
-  TH1F *h_trk_chi2rzdof_notHiggs_qualCutsNorm = (TH1F*)h_trk_chi2rzdof_notHiggs_qualCuts->Clone(); 
-  h_trk_chi2rzdof_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_notHiggs_qualCutsNorm);
-  h_trk_chi2rzdof_fake_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCuts->Integral());
-  h_trk_chi2rzdof_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_chi2rzdof_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_chi2rzdof_PU_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCuts->Integral());
-  h_trk_chi2rzdof_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_chi2rzdof_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_chi2rzdof_notHiggs_qualCutsNorm->Scale(1./h_trk_chi2rzdof_np_qualCuts->Integral());
-  h_trk_chi2rzdof_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_chi2rzdof_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_chi2rzdof_qualCuts = new THStack("hs_chi2rzdof_qualCuts","Stacked BG histograms");
-  hs_chi2rzdof_qualCuts->Add(h_trk_chi2rzdof_fake_qualCutsNorm);
-  hs_chi2rzdof_qualCuts->Add(h_trk_chi2rzdof_PU_qualCutsNorm);
-  hs_chi2rzdof_qualCuts->Add(h_trk_chi2rzdof_notHiggs_qualCutsNorm);
-  hs_chi2rzdof_qualCuts->Draw("HIST");
-  h_trk_chi2rzdof_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_chi2rzdof_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_chi2rzdof_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_qualCutsNorm.pdf");
-  delete h_trk_chi2rzdof_fake_qualCutsNorm;
-  delete h_trk_chi2rzdof_PU_qualCutsNorm;
-  delete h_trk_chi2rzdof_notHiggs_qualCutsNorm;
-  delete h_trk_chi2rzdof_np_qualCuts;
-  delete hs_chi2rzdof_qualCuts;
-
-  h_trk_chi2rzdof_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_fake_qualCuts);
-  h_trk_chi2rzdof_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_PU_qualCuts);
-  h_trk_chi2rzdof_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_notHiggs_qualCuts);
-  h_trk_chi2rzdof_fake_qualCuts->Scale(1./h_trk_chi2rzdof_fake_qualCuts->Integral());
-  h_trk_chi2rzdof_fake_qualCuts->SetLineColor(2);
-  h_trk_chi2rzdof_fake_qualCuts->SetMarkerColor(2);
-  h_trk_chi2rzdof_PU_qualCuts->Scale(1./h_trk_chi2rzdof_PU_qualCuts->Integral());
-  h_trk_chi2rzdof_PU_qualCuts->SetLineColor(3);
-  h_trk_chi2rzdof_PU_qualCuts->SetMarkerColor(3);
-  h_trk_chi2rzdof_notHiggs_qualCuts->Scale(1./h_trk_chi2rzdof_notHiggs_qualCuts->Integral());
-  h_trk_chi2rzdof_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_chi2rzdof_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_chi2rzdof_fake_qualCuts->Draw("HIST");
-  h_trk_chi2rzdof_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_chi2rzdof_PU_qualCuts->Draw("HIST,SAME");
-  h_trk_chi2rzdof_notHiggs_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_chi2rzdof_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_chi2rzdof_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_chi2rzdof_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_chi2rzdof_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_chi2rzdof_qualCuts.pdf");
-  delete h_trk_chi2rzdof_primary_qualCuts;
-  delete h_trk_chi2rzdof_fake_qualCuts;
-  delete h_trk_chi2rzdof_PU_qualCuts;
-  delete h_trk_chi2rzdof_notHiggs_qualCuts;
-
-  h_trk_bendchi2->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2);
-  h_trk_bendchi2->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2->GetName() + ".pdf");
-  delete h_trk_bendchi2;
-
-  h_trk_bendchi2_primary->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary);
-  h_trk_bendchi2_primary->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_primary->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_primary->GetName() + ".pdf");
-  delete h_trk_bendchi2_primary;
-
-  h_trk_bendchi2_primary_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_noCuts);
-  h_trk_bendchi2_primary_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_primary_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_primary_noCuts->GetName() + ".pdf");
-
-  h_trk_bendchi2_np->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np);
-  h_trk_bendchi2_np->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_np->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_np->GetName() + ".pdf");
-  delete h_trk_bendchi2_np;
-
-  h_trk_bendchi2_np_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_noCuts);
-  h_trk_bendchi2_np_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_np_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_np_noCuts->GetName() + ".pdf");
-
-  h_trk_bendchi2_primary_noCuts->Scale(1./h_trk_bendchi2_primary_noCuts->Integral());
-  h_trk_bendchi2_primary_noCuts->SetLineColor(1);
-  h_trk_bendchi2_primary_noCuts->SetMarkerColor(1);
-  TH1F *h_trk_bendchi2_np_noCutsNorm = (TH1F*)h_trk_bendchi2_np_noCuts->Clone(); 
-  h_trk_bendchi2_np_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCutsNorm->Integral());
-  h_trk_bendchi2_np_noCutsNorm->SetLineColor(2);
-  h_trk_bendchi2_np_noCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_bendchi2_np_noCutsNorm,h_trk_bendchi2_primary_noCuts);
-  h_trk_bendchi2_np_noCutsNorm->SetStats(0);
-  h_trk_bendchi2_primary_noCuts->SetStats(0);
-  h_trk_bendchi2_np_noCutsNorm->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_noCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts.pdf");
-  delete h_trk_bendchi2_np_noCutsNorm;
-
-  h_trk_bendchi2_primary_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_noCuts_zoomOut);
-  h_trk_bendchi2_np_noCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_noCuts_zoomOut);
-  h_trk_bendchi2_primary_noCuts_zoomOut->Scale(1./h_trk_bendchi2_primary_noCuts_zoomOut->Integral());
-  h_trk_bendchi2_primary_noCuts_zoomOut->SetLineColor(1);
-  h_trk_bendchi2_primary_noCuts_zoomOut->SetMarkerColor(1);
-  h_trk_bendchi2_np_noCuts_zoomOut->Scale(1./h_trk_bendchi2_np_noCuts_zoomOut->Integral());
-  h_trk_bendchi2_np_noCuts_zoomOut->SetLineColor(2);
-  h_trk_bendchi2_np_noCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_bendchi2_np_noCuts_zoomOut,h_trk_bendchi2_primary_noCuts_zoomOut);
-  h_trk_bendchi2_np_noCuts_zoomOut->SetStats(0);
-  h_trk_bendchi2_primary_noCuts_zoomOut->SetStats(0);
-  h_trk_bendchi2_np_noCuts_zoomOut->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_bendchi2_primary_noCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_noCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_zoomOut.pdf");
-  delete h_trk_bendchi2_primary_noCuts_zoomOut;
-  delete h_trk_bendchi2_np_noCuts_zoomOut;
-
-  TH1F *h_trk_bendchi2_fake_noCutsNorm = (TH1F*)h_trk_bendchi2_fake_noCuts->Clone(); 
-  h_trk_bendchi2_fake_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_fake_noCutsNorm);
-  TH1F *h_trk_bendchi2_PU_noCutsNorm = (TH1F*)h_trk_bendchi2_PU_noCuts->Clone(); 
-  h_trk_bendchi2_PU_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_PU_noCutsNorm);
-  TH1F *h_trk_bendchi2_notHiggs_noCutsNorm = (TH1F*)h_trk_bendchi2_notHiggs_noCuts->Clone(); 
-  h_trk_bendchi2_notHiggs_noCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_notHiggs_noCutsNorm);
-  h_trk_bendchi2_fake_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCuts->Integral());
-  h_trk_bendchi2_fake_noCutsNorm->SetLineColor(2);
-  h_trk_bendchi2_fake_noCutsNorm->SetMarkerColor(2);
-  h_trk_bendchi2_PU_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCuts->Integral());
-  h_trk_bendchi2_PU_noCutsNorm->SetLineColor(3);
-  h_trk_bendchi2_PU_noCutsNorm->SetMarkerColor(3);
-  h_trk_bendchi2_notHiggs_noCutsNorm->Scale(1./h_trk_bendchi2_np_noCuts->Integral());
-  h_trk_bendchi2_notHiggs_noCutsNorm->SetLineColor(4);
-  h_trk_bendchi2_notHiggs_noCutsNorm->SetMarkerColor(4);
-  auto hs_bendchi2_noCuts = new THStack("hs_bendchi2_noCuts","Stacked BG histograms");
-  hs_bendchi2_noCuts->Add(h_trk_bendchi2_fake_noCutsNorm);
-  hs_bendchi2_noCuts->Add(h_trk_bendchi2_PU_noCutsNorm);
-  hs_bendchi2_noCuts->Add(h_trk_bendchi2_notHiggs_noCutsNorm);
-  hs_bendchi2_noCuts->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_fake_noCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_bendchi2_PU_noCutsNorm,"PU","l");
-  l->AddEntry(h_trk_bendchi2_notHiggs_noCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_noCutsNorm.pdf");
-  delete h_trk_bendchi2_fake_noCutsNorm;
-  delete h_trk_bendchi2_PU_noCutsNorm;
-  delete h_trk_bendchi2_notHiggs_noCutsNorm;
-  delete h_trk_bendchi2_np_noCuts;
-  delete hs_bendchi2_noCuts;
-
-  h_trk_bendchi2_fake_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_fake_noCuts);
-  h_trk_bendchi2_PU_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_PU_noCuts);
-  h_trk_bendchi2_notHiggs_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_notHiggs_noCuts);
-  h_trk_bendchi2_fake_noCuts->Scale(1./h_trk_bendchi2_fake_noCuts->Integral());
-  h_trk_bendchi2_fake_noCuts->SetLineColor(2);
-  h_trk_bendchi2_fake_noCuts->SetMarkerColor(2);
-  h_trk_bendchi2_PU_noCuts->Scale(1./h_trk_bendchi2_PU_noCuts->Integral());
-  h_trk_bendchi2_PU_noCuts->SetLineColor(3);
-  h_trk_bendchi2_PU_noCuts->SetMarkerColor(3);
-  h_trk_bendchi2_notHiggs_noCuts->Scale(1./h_trk_bendchi2_notHiggs_noCuts->Integral());
-  h_trk_bendchi2_notHiggs_noCuts->SetLineColor(4);
-  h_trk_bendchi2_notHiggs_noCuts->SetMarkerColor(4);
-  h_trk_bendchi2_fake_noCuts->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts->Draw("HIST,SAME");
-  h_trk_bendchi2_PU_noCuts->Draw("HIST,SAME");
-  h_trk_bendchi2_notHiggs_noCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_fake_noCuts,"Fake","l");
-  l->AddEntry(h_trk_bendchi2_PU_noCuts,"PU","l");
-  l->AddEntry(h_trk_bendchi2_notHiggs_noCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_noCuts.pdf");
-  delete h_trk_bendchi2_primary_noCuts;
-  delete h_trk_bendchi2_fake_noCuts;
-  delete h_trk_bendchi2_PU_noCuts;
-  delete h_trk_bendchi2_notHiggs_noCuts;
-
-  h_trk_bendchi2_primary_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_noCuts_H);
-  h_trk_bendchi2_np_noCuts_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_noCuts_H);
-  h_trk_bendchi2_primary_noCuts_H->Scale(1./h_trk_bendchi2_primary_noCuts_H->Integral());
-  h_trk_bendchi2_primary_noCuts_H->SetLineColor(1);
-  h_trk_bendchi2_primary_noCuts_H->SetMarkerColor(1);
-  h_trk_bendchi2_np_noCuts_H->Scale(1./h_trk_bendchi2_np_noCuts_H->Integral());
-  h_trk_bendchi2_np_noCuts_H->SetLineColor(2);
-  h_trk_bendchi2_np_noCuts_H->SetMarkerColor(2);
-  h_trk_bendchi2_np_noCuts_H->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts_H->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts_H,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_noCuts_H,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_H.pdf");
-  delete h_trk_bendchi2_primary_noCuts_H;
-  delete h_trk_bendchi2_np_noCuts_H;
-
-  h_trk_bendchi2_primary_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_noCuts_L);
-  h_trk_bendchi2_np_noCuts_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_noCuts_L);
-  h_trk_bendchi2_primary_noCuts_L->Scale(1./h_trk_bendchi2_primary_noCuts_L->Integral());
-  h_trk_bendchi2_primary_noCuts_L->SetLineColor(1);
-  h_trk_bendchi2_primary_noCuts_L->SetMarkerColor(1);
-  h_trk_bendchi2_np_noCuts_L->Scale(1./h_trk_bendchi2_np_noCuts_L->Integral());
-  h_trk_bendchi2_np_noCuts_L->SetLineColor(2);
-  h_trk_bendchi2_np_noCuts_L->SetMarkerColor(2);
-  h_trk_bendchi2_np_noCuts_L->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts_L->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts_L,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_noCuts_L,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_L.pdf");
-  delete h_trk_bendchi2_primary_noCuts_L;
-  delete h_trk_bendchi2_np_noCuts_L;
-
-  h_trk_bendchi2_primary_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_noCuts_barrel);
-  h_trk_bendchi2_np_noCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_noCuts_barrel);
-  h_trk_bendchi2_primary_noCuts_barrel->Scale(1./h_trk_bendchi2_primary_noCuts_barrel->Integral());
-  h_trk_bendchi2_primary_noCuts_barrel->SetLineColor(1);
-  h_trk_bendchi2_primary_noCuts_barrel->SetMarkerColor(1);
-  h_trk_bendchi2_np_noCuts_barrel->Scale(1./h_trk_bendchi2_np_noCuts_barrel->Integral());
-  h_trk_bendchi2_np_noCuts_barrel->SetLineColor(2);
-  h_trk_bendchi2_np_noCuts_barrel->SetMarkerColor(2);
-  h_trk_bendchi2_np_noCuts_barrel->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_noCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_barrel.pdf");
-  delete h_trk_bendchi2_primary_noCuts_barrel;
-  delete h_trk_bendchi2_np_noCuts_barrel;
-
-  h_trk_bendchi2_primary_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_noCuts_disk);
-  h_trk_bendchi2_np_noCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_noCuts_disk);
-  h_trk_bendchi2_primary_noCuts_disk->Scale(1./h_trk_bendchi2_primary_noCuts_disk->Integral());
-  h_trk_bendchi2_primary_noCuts_disk->SetLineColor(1);
-  h_trk_bendchi2_primary_noCuts_disk->SetMarkerColor(1);
-  h_trk_bendchi2_np_noCuts_disk->Scale(1./h_trk_bendchi2_np_noCuts_disk->Integral());
-  h_trk_bendchi2_np_noCuts_disk->SetLineColor(2);
-  h_trk_bendchi2_np_noCuts_disk->SetMarkerColor(2);
-  h_trk_bendchi2_np_noCuts_disk->Draw("HIST");
-  h_trk_bendchi2_primary_noCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_noCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_noCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_noCuts_disk.pdf");
-  delete h_trk_bendchi2_primary_noCuts_disk;
-  delete h_trk_bendchi2_np_noCuts_disk;
-
-  h_trk_bendchi2_primary_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_qualCuts);
-  h_trk_bendchi2_np_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_qualCuts);
-  h_trk_bendchi2_primary_qualCuts->Scale(1./h_trk_bendchi2_primary_qualCuts->Integral());
-  h_trk_bendchi2_primary_qualCuts->SetLineColor(1);
-  h_trk_bendchi2_primary_qualCuts->SetMarkerColor(1);
-  TH1F *h_trk_bendchi2_np_qualCutsNorm = (TH1F*)h_trk_bendchi2_np_qualCuts->Clone(); 
-  h_trk_bendchi2_np_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCutsNorm->Integral());
-  h_trk_bendchi2_np_qualCutsNorm->SetLineColor(2);
-  h_trk_bendchi2_np_qualCutsNorm->SetMarkerColor(2);
-  h_trk_bendchi2_np_qualCutsNorm->Draw("HIST");
-  h_trk_bendchi2_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_qualCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_qualCuts.pdf");
-  delete h_trk_bendchi2_np_qualCutsNorm;
-
-  h_trk_bendchi2_primary_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_allCuts);
-  h_trk_bendchi2_np_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_allCuts);
-  h_trk_bendchi2_primary_allCuts->Scale(1./h_trk_bendchi2_primary_allCuts->Integral());
-  h_trk_bendchi2_primary_allCuts->SetLineColor(1);
-  h_trk_bendchi2_primary_allCuts->SetMarkerColor(1);
-  TH1F *h_trk_bendchi2_np_allCutsNorm = (TH1F*)h_trk_bendchi2_np_allCuts->Clone(); 
-  h_trk_bendchi2_np_allCutsNorm->Scale(1./h_trk_bendchi2_np_allCutsNorm->Integral());
-  h_trk_bendchi2_np_allCutsNorm->SetLineColor(2);
-  h_trk_bendchi2_np_allCutsNorm->SetMarkerColor(2);
-  raiseMax(h_trk_bendchi2_primary_allCuts,h_trk_bendchi2_np_allCutsNorm);
-  h_trk_bendchi2_np_allCutsNorm->SetStats(0);
-  h_trk_bendchi2_primary_allCuts->SetStats(0);
-  h_trk_bendchi2_primary_allCuts->Draw("HIST");
-  h_trk_bendchi2_np_allCutsNorm->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_allCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_allCutsNorm,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_allCuts.pdf");
-  delete h_trk_bendchi2_np_allCutsNorm;
-
-  h_trk_bendchi2_primary_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_allCuts_zoomOut);
-  h_trk_bendchi2_np_allCuts_zoomOut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_allCuts_zoomOut);
-  h_trk_bendchi2_primary_allCuts_zoomOut->Scale(1./h_trk_bendchi2_primary_allCuts_zoomOut->Integral());
-  h_trk_bendchi2_primary_allCuts_zoomOut->SetLineColor(1);
-  h_trk_bendchi2_primary_allCuts_zoomOut->SetMarkerColor(1);
-  h_trk_bendchi2_np_allCuts_zoomOut->Scale(1./h_trk_bendchi2_np_allCuts_zoomOut->Integral());
-  h_trk_bendchi2_np_allCuts_zoomOut->SetLineColor(2);
-  h_trk_bendchi2_np_allCuts_zoomOut->SetMarkerColor(2);
-  raiseMax(h_trk_bendchi2_np_allCuts_zoomOut,h_trk_bendchi2_primary_allCuts_zoomOut);
-  h_trk_bendchi2_np_allCuts_zoomOut->SetStats(0);
-  h_trk_bendchi2_primary_allCuts_zoomOut->SetStats(0);
-  h_trk_bendchi2_np_allCuts_zoomOut->Draw("HIST");
-  h_trk_bendchi2_primary_allCuts_zoomOut->Draw("HIST,SAME");
-  mySmallText(0.3, 0.9, 1, ctxt);
-  l->Clear();
-  l->SetFillColor(0);
-  l->SetLineColor(0);
-  l->SetTextSize(0.04);
-  l->AddEntry(h_trk_bendchi2_primary_allCuts_zoomOut,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_allCuts_zoomOut,"NP","l");
-  l->SetTextFont(42);
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_allCuts_zoomOut.pdf");
-  delete h_trk_bendchi2_primary_allCuts_zoomOut;
-  delete h_trk_bendchi2_np_allCuts_zoomOut;
-
-  h_trk_bendchi2_primary_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_allCuts_barrel);
-  h_trk_bendchi2_np_allCuts_barrel->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_allCuts_barrel);
-  h_trk_bendchi2_primary_allCuts_barrel->Scale(1./h_trk_bendchi2_primary_allCuts_barrel->Integral());
-  h_trk_bendchi2_primary_allCuts_barrel->SetLineColor(1);
-  h_trk_bendchi2_primary_allCuts_barrel->SetMarkerColor(1);
-  h_trk_bendchi2_np_allCuts_barrel->Scale(1./h_trk_bendchi2_np_allCuts_barrel->Integral());
-  h_trk_bendchi2_np_allCuts_barrel->SetLineColor(2);
-  h_trk_bendchi2_np_allCuts_barrel->SetMarkerColor(2);
-  h_trk_bendchi2_np_allCuts_barrel->Draw("HIST");
-  h_trk_bendchi2_primary_allCuts_barrel->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_allCuts_barrel,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_allCuts_barrel,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_allCuts_barrel.pdf");
-  delete h_trk_bendchi2_primary_allCuts_barrel;
-  delete h_trk_bendchi2_np_allCuts_barrel;
-
-  h_trk_bendchi2_primary_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_primary_allCuts_disk);
-  h_trk_bendchi2_np_allCuts_disk->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_np_allCuts_disk);
-  h_trk_bendchi2_primary_allCuts_disk->Scale(1./h_trk_bendchi2_primary_allCuts_disk->Integral());
-  h_trk_bendchi2_primary_allCuts_disk->SetLineColor(1);
-  h_trk_bendchi2_primary_allCuts_disk->SetMarkerColor(1);
-  h_trk_bendchi2_np_allCuts_disk->Scale(1./h_trk_bendchi2_np_allCuts_disk->Integral());
-  h_trk_bendchi2_np_allCuts_disk->SetLineColor(2);
-  h_trk_bendchi2_np_allCuts_disk->SetMarkerColor(2);
-  h_trk_bendchi2_np_allCuts_disk->Draw("HIST");
-  h_trk_bendchi2_primary_allCuts_disk->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_allCuts_disk,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_np_allCuts_disk,"NP","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBG_bendchi2_allCuts_disk.pdf");
-  delete h_trk_bendchi2_primary_allCuts_disk;
-  delete h_trk_bendchi2_np_allCuts_disk;
-
-  TH1F *h_trk_bendchi2_fake_qualCutsNorm = (TH1F*)h_trk_bendchi2_fake_qualCuts->Clone(); 
-  h_trk_bendchi2_fake_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_fake_qualCutsNorm);
-  TH1F *h_trk_bendchi2_PU_qualCutsNorm = (TH1F*)h_trk_bendchi2_PU_qualCuts->Clone(); 
-  h_trk_bendchi2_PU_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_PU_qualCutsNorm);
-  TH1F *h_trk_bendchi2_notHiggs_qualCutsNorm = (TH1F*)h_trk_bendchi2_notHiggs_qualCuts->Clone(); 
-  h_trk_bendchi2_notHiggs_qualCutsNorm->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_notHiggs_qualCutsNorm);
-  h_trk_bendchi2_fake_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCuts->Integral());
-  h_trk_bendchi2_fake_qualCutsNorm->SetLineColor(2);
-  h_trk_bendchi2_fake_qualCutsNorm->SetMarkerColor(2);
-  h_trk_bendchi2_PU_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCuts->Integral());
-  h_trk_bendchi2_PU_qualCutsNorm->SetLineColor(3);
-  h_trk_bendchi2_PU_qualCutsNorm->SetMarkerColor(3);
-  h_trk_bendchi2_notHiggs_qualCutsNorm->Scale(1./h_trk_bendchi2_np_qualCuts->Integral());
-  h_trk_bendchi2_notHiggs_qualCutsNorm->SetLineColor(4);
-  h_trk_bendchi2_notHiggs_qualCutsNorm->SetMarkerColor(4);
-  auto hs_bendchi2_qualCuts = new THStack("hs_bendchi2_qualCuts","Stacked BG histograms");
-  hs_bendchi2_qualCuts->Add(h_trk_bendchi2_fake_qualCutsNorm);
-  hs_bendchi2_qualCuts->Add(h_trk_bendchi2_PU_qualCutsNorm);
-  hs_bendchi2_qualCuts->Add(h_trk_bendchi2_notHiggs_qualCutsNorm);
-  hs_bendchi2_qualCuts->Draw("HIST");
-  h_trk_bendchi2_primary_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_fake_qualCutsNorm,"Fake","l");
-  l->AddEntry(h_trk_bendchi2_PU_qualCutsNorm,"PU","l");
-  l->AddEntry(h_trk_bendchi2_notHiggs_qualCutsNorm,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_qualCutsNorm.pdf");
-  delete h_trk_bendchi2_fake_qualCutsNorm;
-  delete h_trk_bendchi2_PU_qualCutsNorm;
-  delete h_trk_bendchi2_notHiggs_qualCutsNorm;
-  delete h_trk_bendchi2_np_qualCuts;
-  delete hs_bendchi2_qualCuts;
-
-  h_trk_bendchi2_fake_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_fake_qualCuts);
-  h_trk_bendchi2_PU_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_PU_qualCuts);
-  h_trk_bendchi2_notHiggs_qualCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_notHiggs_qualCuts);
-  h_trk_bendchi2_fake_qualCuts->Scale(1./h_trk_bendchi2_fake_qualCuts->Integral());
-  h_trk_bendchi2_fake_qualCuts->SetLineColor(2);
-  h_trk_bendchi2_fake_qualCuts->SetMarkerColor(2);
-  h_trk_bendchi2_PU_qualCuts->Scale(1./h_trk_bendchi2_PU_qualCuts->Integral());
-  h_trk_bendchi2_PU_qualCuts->SetLineColor(3);
-  h_trk_bendchi2_PU_qualCuts->SetMarkerColor(3);
-  h_trk_bendchi2_notHiggs_qualCuts->Scale(1./h_trk_bendchi2_notHiggs_qualCuts->Integral());
-  h_trk_bendchi2_notHiggs_qualCuts->SetLineColor(4);
-  h_trk_bendchi2_notHiggs_qualCuts->SetMarkerColor(4);
-  h_trk_bendchi2_notHiggs_qualCuts->Draw("HIST");
-  h_trk_bendchi2_primary_qualCuts->Draw("HIST,SAME");
-  h_trk_bendchi2_fake_qualCuts->Draw("HIST,SAME");
-  h_trk_bendchi2_PU_qualCuts->Draw("HIST,SAME");
-  mySmallText(0.4, 0.82, 1, ctxt);
-  l->Clear();
-  l->AddEntry(h_trk_bendchi2_primary_qualCuts,"Primary","l");
-  l->AddEntry(h_trk_bendchi2_fake_qualCuts,"Fake","l");
-  l->AddEntry(h_trk_bendchi2_PU_qualCuts,"PU","l");
-  l->AddEntry(h_trk_bendchi2_notHiggs_qualCuts,"Not H->4b","l");
-  l->Draw();
-  c.SaveAs(DIR + "/h_signalVsBGOverlay_bendchi2_qualCuts.pdf");
-  delete h_trk_bendchi2_primary_qualCuts;
-  delete h_trk_bendchi2_fake_qualCuts;
-  delete h_trk_bendchi2_PU_qualCuts;
-  delete h_trk_bendchi2_notHiggs_qualCuts;
-
-  h_trk_chi2rphidof_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_H);
-  h_trk_chi2rphidof_H->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_H->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_H->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_H;
-
-  h_trk_chi2rzdof_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_H);
-  h_trk_chi2rzdof_H->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_H->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_H->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_H;
-   
-  h_trk_bendchi2_H->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_H);
-  h_trk_bendchi2_H->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_H->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_H->GetName() + ".pdf");
-  delete h_trk_bendchi2_H;
-
-  h_trk_chi2rphidof_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_L);
-  h_trk_chi2rphidof_L->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_L->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_L->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_L;
-
-  h_trk_chi2rzdof_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_L);
-  h_trk_chi2rzdof_L->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_L->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_L->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_L;
-
-  h_trk_bendchi2_L->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_L);
-  h_trk_bendchi2_L->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_L->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_L->GetName() + ".pdf");
-  delete h_trk_bendchi2_L;
-
-  h_trk_chi2rphidof_C->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_C);
-  h_trk_chi2rphidof_C->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_C->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_C->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_C;
-
-  h_trk_chi2rzdof_C->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_C);
-  h_trk_chi2rzdof_C->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_C->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_C->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_C;
-
-  h_trk_bendchi2_C->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_C);
-  h_trk_bendchi2_C->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_C->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_C->GetName() + ".pdf");
-  delete h_trk_bendchi2_C;
-
-  h_trk_chi2rphidof_I->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_I);
-  h_trk_chi2rphidof_I->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_I->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_I->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_I;
-   
-  h_trk_chi2rzdof_I->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_I);
-  h_trk_chi2rzdof_I->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_I->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_I->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_I;
-   
-  h_trk_bendchi2_I->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_I);
-  h_trk_bendchi2_I->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_I->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_I->GetName() + ".pdf");
-  delete h_trk_bendchi2_I;
-   
-  h_trk_chi2rphidof_F->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_F);
-  h_trk_chi2rphidof_F->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_F->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_F->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_F;
-   
-  h_trk_chi2rzdof_F->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_F);
-  h_trk_chi2rzdof_F->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_F->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_F->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_F;
-   
-  h_trk_bendchi2_F->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_F);
-  h_trk_bendchi2_F->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_F->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_F->GetName() + ".pdf");
-  delete h_trk_bendchi2_F;
-   
-  h_trk_chi2rphidof_P->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_P);
-  h_trk_chi2rphidof_P->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_P->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_P->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_P;
-   
-  h_trk_chi2rzdof_P->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_P);
-  h_trk_chi2rzdof_P->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_P->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_P->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_P;
-   
-  h_trk_bendchi2_P->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_P);
-  h_trk_bendchi2_P->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_P->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_P->GetName() + ".pdf");
-  delete h_trk_bendchi2_P;
-   
-  h_trk_chi2rphidof_D->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rphidof_D);
-  h_trk_chi2rphidof_D->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rphidof_D->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rphidof_D->GetName() + ".pdf");
-  delete h_trk_chi2rphidof_D;
-   
-  h_trk_chi2rzdof_D->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_chi2rzdof_D);
-  h_trk_chi2rzdof_D->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_chi2rzdof_D->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_chi2rzdof_D->GetName() + ".pdf");
-  delete h_trk_chi2rzdof_D;
-   
-  h_trk_bendchi2_D->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trk_bendchi2_D);
-  h_trk_bendchi2_D->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trk_bendchi2_D->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trk_bendchi2_D->GetName() + ".pdf");
-  delete h_trk_bendchi2_D;
-   
-  h_match_tp_pt_noCuts->Sumw2();
-  h_tp_pt_noCuts->Sumw2();
-  TH1F* h_eff_pt_noCuts = (TH1F*)h_match_tp_pt_noCuts->Clone();
-  h_eff_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_noCuts);
-  h_eff_pt_noCuts->SetName("eff_pt_noCuts");
-  h_eff_pt_noCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_noCuts->Divide(h_match_tp_pt_noCuts, h_tp_pt_noCuts, 1.0, 1.0, "B");
-  h_eff_pt_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_noCuts->GetName() + ".pdf");
-  delete h_eff_pt_noCuts;
-  delete h_match_tp_pt_noCuts;
-  delete h_tp_pt_noCuts;
-
   h_tpAssoc_pt_matched->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_tpAssoc_pt_matched);
   h_tpAssoc_pt->GetYaxis()->SetNoExponent(kTRUE);
@@ -9548,590 +4610,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_assocFakeRate_pt;
   delete h_trkAssoc_pt_noMatch;
   delete h_trkAssoc_pt;
-
-  h_match_tp_eta_noCuts->Sumw2();
-  h_tp_eta_noCuts->Sumw2();
-  TH1F* h_eff_eta_noCuts = (TH1F*)h_match_tp_eta_noCuts->Clone();
-  h_eff_eta_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_noCuts);
-  h_eff_eta_noCuts->SetName("eff_eta_noCuts");
-  h_eff_eta_noCuts->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_noCuts->Divide(h_match_tp_eta_noCuts, h_tp_eta_noCuts, 1.0, 1.0, "B");
-  h_eff_eta_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_noCuts->GetName() + ".pdf");
-  delete h_eff_eta_noCuts;
-  delete h_match_tp_eta_noCuts;
-  
-
-  h_match_tp_d0_noCuts->Sumw2();
-  h_tp_d0_noCuts->Sumw2();
-  TH1F* h_eff_d0_noCuts = (TH1F*)h_match_tp_d0_noCuts->Clone();
-  h_eff_d0_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_noCuts);
-  h_eff_d0_noCuts->SetName("eff_d0_noCuts");
-  h_eff_d0_noCuts->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_noCuts->Divide(h_match_tp_d0_noCuts, h_tp_d0_noCuts, 1.0, 1.0, "B");
-  h_eff_d0_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_noCuts->GetName() + ".pdf");
-  delete h_eff_d0_noCuts;
-  delete h_match_tp_d0_noCuts;
-  delete h_tp_d0_noCuts;
-
-  h_match_tp_pt_maxD0Cut->Sumw2();
-  h_tp_pt_maxD0Cut->Sumw2();
-  TH1F* h_eff_pt_maxD0Cut = (TH1F*)h_match_tp_pt_maxD0Cut->Clone();
-  h_eff_pt_maxD0Cut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_maxD0Cut);
-  h_eff_pt_maxD0Cut->SetName("eff_pt_maxD0Cut");
-  h_eff_pt_maxD0Cut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_maxD0Cut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_maxD0Cut->Divide(h_match_tp_pt_maxD0Cut, h_tp_pt_maxD0Cut, 1.0, 1.0, "B");
-  h_eff_pt_maxD0Cut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_maxD0Cut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_maxD0Cut->GetName() + ".pdf");
-  delete h_eff_pt_maxD0Cut;
-  delete h_match_tp_pt_maxD0Cut;
-  delete h_tp_pt_maxD0Cut;
-
-  h_match_tp_eta_maxD0Cut->Sumw2();
-  h_tp_eta_maxD0Cut->Sumw2();
-  TH1F* h_eff_eta_maxD0Cut = (TH1F*)h_match_tp_eta_maxD0Cut->Clone();
-  h_eff_eta_maxD0Cut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_maxD0Cut);
-  h_eff_eta_maxD0Cut->SetName("eff_eta_maxD0Cut");
-  h_eff_eta_maxD0Cut->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_maxD0Cut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_maxD0Cut->Divide(h_match_tp_eta_maxD0Cut, h_tp_eta_maxD0Cut, 1.0, 1.0, "B");
-  h_eff_eta_maxD0Cut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_maxD0Cut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_maxD0Cut->GetName() + ".pdf");
-  delete h_eff_eta_maxD0Cut;
-  delete h_match_tp_eta_maxD0Cut;
-  delete h_tp_eta_maxD0Cut;
-
-  h_match_tp_d0_maxD0Cut->Sumw2();
-  h_tp_d0_maxD0Cut->Sumw2();
-  TH1F* h_eff_d0_maxD0Cut = (TH1F*)h_match_tp_d0_maxD0Cut->Clone();
-  h_eff_d0_maxD0Cut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_maxD0Cut);
-  h_eff_d0_maxD0Cut->SetName("eff_d0_maxD0Cut");
-  h_eff_d0_maxD0Cut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_maxD0Cut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_maxD0Cut->Divide(h_match_tp_d0_maxD0Cut, h_tp_d0_maxD0Cut, 1.0, 1.0, "B");
-  h_eff_d0_maxD0Cut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_maxD0Cut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_maxD0Cut->GetName() + ".pdf");
-  delete h_eff_d0_maxD0Cut;
-  delete h_match_tp_d0_maxD0Cut;
-  delete h_tp_d0_maxD0Cut;
-
-  h_match_tp_pt_minD0Cut->Sumw2();
-  h_tp_pt_minD0Cut->Sumw2();
-  TH1F* h_eff_pt_minD0Cut = (TH1F*)h_match_tp_pt_minD0Cut->Clone();
-  h_eff_pt_minD0Cut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_minD0Cut);
-  h_eff_pt_minD0Cut->SetName("eff_pt_minD0Cut");
-  h_eff_pt_minD0Cut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_minD0Cut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_minD0Cut->Divide(h_match_tp_pt_minD0Cut, h_tp_pt_minD0Cut, 1.0, 1.0, "B");
-  h_eff_pt_minD0Cut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_minD0Cut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_minD0Cut->GetName() + ".pdf");
-  delete h_eff_pt_minD0Cut;
-  delete h_match_tp_pt_minD0Cut;
-  delete h_tp_pt_minD0Cut;
-
-  h_match_tp_eta_minD0Cut->Sumw2();
-  h_tp_eta_minD0Cut->Sumw2();
-  TH1F* h_eff_eta_minD0Cut = (TH1F*)h_match_tp_eta_minD0Cut->Clone();
-  h_eff_eta_minD0Cut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_minD0Cut);
-  h_eff_eta_minD0Cut->SetName("eff_eta_minD0Cut");
-  h_eff_eta_minD0Cut->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_minD0Cut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_minD0Cut->Divide(h_match_tp_eta_minD0Cut, h_tp_eta_minD0Cut, 1.0, 1.0, "B");
-  h_eff_eta_minD0Cut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_minD0Cut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_minD0Cut->GetName() + ".pdf");
-  delete h_eff_eta_minD0Cut;
-  delete h_match_tp_eta_minD0Cut;
-  delete h_tp_eta_minD0Cut;
-   
-  h_match_tp_d0_minD0Cut->Sumw2();
-  h_tp_d0_minD0Cut->Sumw2();
-  TH1F* h_eff_d0_minD0Cut = (TH1F*)h_match_tp_d0_minD0Cut->Clone();
-  h_eff_d0_minD0Cut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_minD0Cut);
-  h_eff_d0_minD0Cut->SetName("eff_d0_minD0Cut");
-  h_eff_d0_minD0Cut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_minD0Cut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_minD0Cut->Divide(h_match_tp_d0_minD0Cut, h_tp_d0_minD0Cut, 1.0, 1.0, "B");
-  h_eff_d0_minD0Cut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_minD0Cut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_minD0Cut->GetName() + ".pdf");
-  delete h_eff_d0_minD0Cut;
-  delete h_match_tp_d0_minD0Cut;
-  delete h_tp_d0_minD0Cut;
-
-  h_match_tp_pt_minPtCut->Sumw2();
-  h_tp_pt_minPtCut->Sumw2();
-  TH1F* h_eff_pt_minPtCut = (TH1F*)h_match_tp_pt_minPtCut->Clone();
-  h_eff_pt_minPtCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_minPtCut);
-  h_eff_pt_minPtCut->SetName("eff_pt_minPtCut");
-  h_eff_pt_minPtCut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_minPtCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_minPtCut->Divide(h_match_tp_pt_minPtCut, h_tp_pt_minPtCut, 1.0, 1.0, "B");
-  h_eff_pt_minPtCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_minPtCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_minPtCut->GetName() + ".pdf");
-  delete h_eff_pt_minPtCut;
-  delete h_match_tp_pt_minPtCut;
-  delete h_tp_pt_minPtCut;
-
-  h_match_tp_eta_minPtCut->Sumw2();
-  h_tp_eta_minPtCut->Sumw2();
-  TH1F* h_eff_eta_minPtCut = (TH1F*)h_match_tp_eta_minPtCut->Clone();
-  h_eff_eta_minPtCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_minPtCut);
-  h_eff_eta_minPtCut->SetName("eff_eta_minPtCut");
-  h_eff_eta_minPtCut->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_minPtCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_minPtCut->Divide(h_match_tp_eta_minPtCut, h_tp_eta_minPtCut, 1.0, 1.0, "B");
-  h_eff_eta_minPtCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_minPtCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_minPtCut->GetName() + ".pdf");
-  delete h_eff_eta_minPtCut;
-  delete h_match_tp_eta_minPtCut;
-  delete h_tp_eta_minPtCut;
-
-  h_match_tp_d0_minPtCut->Sumw2();
-  h_tp_d0_minPtCut->Sumw2();
-  TH1F* h_eff_d0_minPtCut = (TH1F*)h_match_tp_d0_minPtCut->Clone();
-  h_eff_d0_minPtCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_minPtCut);
-  h_eff_d0_minPtCut->SetName("eff_d0_minPtCut");
-  h_eff_d0_minPtCut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_minPtCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_minPtCut->Divide(h_match_tp_d0_minPtCut, h_tp_d0_minPtCut, 1.0, 1.0, "B");
-  h_eff_d0_minPtCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_minPtCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_minPtCut->GetName() + ".pdf");
-  delete h_eff_d0_minPtCut;
-  delete h_match_tp_d0_minPtCut;
-  delete h_tp_d0_minPtCut;
-
-  h_match_tp_pt_maxPtCut->Sumw2();
-  h_tp_pt_maxPtCut->Sumw2();
-  TH1F* h_eff_pt_maxPtCut = (TH1F*)h_match_tp_pt_maxPtCut->Clone();
-  h_eff_pt_maxPtCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_maxPtCut);
-  h_eff_pt_maxPtCut->SetName("eff_pt_maxPtCut");
-  h_eff_pt_maxPtCut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_maxPtCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_maxPtCut->Divide(h_match_tp_pt_maxPtCut, h_tp_pt_maxPtCut, 1.0, 1.0, "B");
-  h_eff_pt_maxPtCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_maxPtCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_maxPtCut->GetName() + ".pdf");
-  delete h_eff_pt_maxPtCut;
-  delete h_match_tp_pt_maxPtCut;
-  delete h_tp_pt_maxPtCut;
-
-  h_match_tp_eta_maxPtCut->Sumw2();
-  h_tp_eta_maxPtCut->Sumw2();
-  TH1F* h_eff_eta_maxPtCut = (TH1F*)h_match_tp_eta_maxPtCut->Clone();
-  h_eff_eta_maxPtCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_maxPtCut);
-  h_eff_eta_maxPtCut->SetName("eff_eta_maxPtCut");
-  h_eff_eta_maxPtCut->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_maxPtCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_maxPtCut->Divide(h_match_tp_eta_maxPtCut, h_tp_eta_maxPtCut, 1.0, 1.0, "B");
-  h_eff_eta_maxPtCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_maxPtCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_maxPtCut->GetName() + ".pdf");
-  delete h_eff_eta_maxPtCut;
-  delete h_match_tp_eta_maxPtCut;
-  delete h_tp_eta_maxPtCut;
-
-  h_match_tp_d0_maxPtCut->Sumw2();
-  h_tp_d0_maxPtCut->Sumw2();
-  TH1F* h_eff_d0_maxPtCut = (TH1F*)h_match_tp_d0_maxPtCut->Clone();
-  h_eff_d0_maxPtCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_maxPtCut);
-  h_eff_d0_maxPtCut->SetName("eff_d0_maxPtCut");
-  h_eff_d0_maxPtCut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_maxPtCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_maxPtCut->Divide(h_match_tp_d0_maxPtCut, h_tp_d0_maxPtCut, 1.0, 1.0, "B");
-  h_eff_d0_maxPtCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_maxPtCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_maxPtCut->GetName() + ".pdf");
-  delete h_eff_d0_maxPtCut;
-  delete h_match_tp_d0_maxPtCut;
-  delete h_tp_d0_maxPtCut;
-
-  h_match_tp_pt_maxEtaCut->Sumw2();
-  h_tp_pt_maxEtaCut->Sumw2();
-  TH1F* h_eff_pt_maxEtaCut = (TH1F*)h_match_tp_pt_maxEtaCut->Clone();
-  h_eff_pt_maxEtaCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_maxEtaCut);
-  h_eff_pt_maxEtaCut->SetName("eff_pt_maxEtaCut");
-  h_eff_pt_maxEtaCut->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_maxEtaCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_maxEtaCut->Divide(h_match_tp_pt_maxEtaCut, h_tp_pt_maxEtaCut, 1.0, 1.0, "B");
-  h_eff_pt_maxEtaCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_maxEtaCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_maxEtaCut->GetName() + ".pdf");
-  delete h_eff_pt_maxEtaCut;
-  //delete h_match_tp_pt_maxEtaCut;  
-
-  h_match_tp_eta_maxEtaCut->Sumw2();
-  h_tp_eta_maxEtaCut->Sumw2();
-  TH1F* h_eff_eta_maxEtaCut = (TH1F*)h_match_tp_eta_maxEtaCut->Clone();
-  h_eff_eta_maxEtaCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_maxEtaCut);
-  h_eff_eta_maxEtaCut->SetName("eff_eta_maxEtaCut");
-  h_eff_eta_maxEtaCut->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_maxEtaCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_maxEtaCut->Divide(h_match_tp_eta_maxEtaCut, h_tp_eta_maxEtaCut, 1.0, 1.0, "B");
-  h_eff_eta_maxEtaCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_maxEtaCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_maxEtaCut->GetName() + ".pdf");
-  delete h_eff_eta_maxEtaCut;
-  delete h_match_tp_eta_maxEtaCut;
-  
-
-  h_match_tp_d0_maxEtaCut->Sumw2();
-  h_tp_d0_maxEtaCut->Sumw2();
-  TH1F* h_eff_d0_maxEtaCut = (TH1F*)h_match_tp_d0_maxEtaCut->Clone();
-  h_eff_d0_maxEtaCut->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_maxEtaCut);
-  h_eff_d0_maxEtaCut->SetName("eff_d0_maxEtaCut");
-  h_eff_d0_maxEtaCut->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_maxEtaCut->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_maxEtaCut->Divide(h_match_tp_d0_maxEtaCut, h_tp_d0_maxEtaCut, 1.0, 1.0, "B");
-  h_eff_d0_maxEtaCut->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_maxEtaCut->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_maxEtaCut->GetName() + ".pdf");
-  delete h_eff_d0_maxEtaCut;
-  delete h_match_tp_d0_maxEtaCut;
-  delete h_tp_d0_maxEtaCut;
-
-  h_match_tp_pt_allCuts->Sumw2();
-  h_tp_pt_allCuts->Sumw2();
-  TH1F* h_eff_pt_allCuts = (TH1F*)h_match_tp_pt_allCuts->Clone();
-  h_eff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_pt_allCuts);
-  h_eff_pt_allCuts->SetName("eff_pt_allCuts");
-  h_eff_pt_allCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_eff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_eff_pt_allCuts->Divide(h_match_tp_pt_allCuts, h_tp_pt_allCuts, 1.0, 1.0, "B");
-  h_eff_pt_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_pt_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_pt_allCuts->GetName() + ".pdf");
-  delete h_eff_pt_allCuts;
-  //delete h_match_tp_pt_allCuts;
-  
-
-  h_match_tp_eta_allCuts->Sumw2();
-  h_tp_eta_allCuts->Sumw2();
-  TH1F* h_eff_eta_allCuts = (TH1F*)h_match_tp_eta_allCuts->Clone();
-  h_eff_eta_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_eta_allCuts);
-  h_eff_eta_allCuts->SetName("eff_eta_allCuts");
-  h_eff_eta_allCuts->GetXaxis()->SetTitle("Tracking Particle #eta");
-  h_eff_eta_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_eff_eta_allCuts->Divide(h_match_tp_eta_allCuts, h_tp_eta_allCuts, 1.0, 1.0, "B");
-  h_eff_eta_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_eta_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_eta_allCuts->GetName() + ".pdf");
-  delete h_eff_eta_allCuts;
-  delete h_match_tp_eta_allCuts;
-  
-
-  h_match_tp_d0_allCuts->Sumw2();
-  h_tp_d0_allCuts->Sumw2();
-  TH1F* h_eff_d0_allCuts = (TH1F*)h_match_tp_d0_allCuts->Clone();
-  h_eff_d0_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_d0_allCuts);
-  h_eff_d0_allCuts->SetName("eff_d0_allCuts");
-  h_eff_d0_allCuts->GetXaxis()->SetTitle("Tracking Particle d_{0} (cm)");
-  h_eff_d0_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_eff_d0_allCuts->Divide(h_match_tp_d0_allCuts, h_tp_d0_allCuts, 1.0, 1.0, "B");
-  h_eff_d0_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_eff_d0_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_eff_d0_allCuts->GetName() + ".pdf");
-  delete h_eff_d0_allCuts;
-  delete h_match_tp_d0_allCuts;
-  delete h_tp_d0_allCuts;
-
-  h_trk_matchtp_pt_allCuts->Sumw2();
-  //h_tp_pt_allCuts->Sumw2();
-  TH1F* h_psEff_pt_allCuts = (TH1F*)h_trk_matchtp_pt_allCuts->Clone();
-  h_psEff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_pt_allCuts);
-  h_psEff_pt_allCuts->SetName("psEff_pt_allCuts");
-  h_psEff_pt_allCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_psEff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_pt_allCuts->Divide(h_trk_matchtp_pt_allCuts, h_tp_pt_allCuts, 1.0, 1.0, "B");
-  h_psEff_pt_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_pt_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_pt_allCuts->GetName() + ".pdf");
-  delete h_psEff_pt_allCuts;
-  delete h_trk_matchtp_pt_allCuts;
-  delete h_tp_pt_allCuts;
-
-  h_trk_matchtp_eta_allCuts->Sumw2();
-  //h_tp_eta_allCuts->Sumw2();
-  TH1F* h_psEff_eta_allCuts = (TH1F*)h_trk_matchtp_eta_allCuts->Clone();
-  h_psEff_eta_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_eta_allCuts);
-  h_psEff_eta_allCuts->SetName("psEff_eta_allCuts");
-  h_psEff_eta_allCuts->GetXaxis()->SetTitle("Tracking Particle #eta (GeV)");
-  h_psEff_eta_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_eta_allCuts->Divide(h_trk_matchtp_eta_allCuts, h_tp_eta_allCuts, 1.0, 1.0, "B");
-  h_psEff_eta_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_eta_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_eta_allCuts->GetName() + ".pdf");
-  delete h_psEff_eta_allCuts;
-  delete h_trk_matchtp_eta_allCuts;
-  delete h_tp_eta_allCuts;
-
-  h_trk_matchtp_dxy_allCuts->Sumw2();
-  h_tp_dxy_allCuts->Sumw2();
-  TH1F* h_psEff_dxy_allCuts = (TH1F*)h_trk_matchtp_dxy_allCuts->Clone();
-  h_psEff_dxy_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_dxy_allCuts);
-  h_psEff_dxy_allCuts->SetName("psEff_dxy_allCuts");
-  h_psEff_dxy_allCuts->GetXaxis()->SetTitle("Tracking Particle #dxy (GeV)");
-  h_psEff_dxy_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_dxy_allCuts->Divide(h_trk_matchtp_dxy_allCuts, h_tp_dxy_allCuts, 1.0, 1.0, "B");
-  h_psEff_dxy_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_dxy_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_dxy_allCuts->GetName() + ".pdf");
-  delete h_psEff_dxy_allCuts;
-  delete h_trk_matchtp_dxy_allCuts;
-  delete h_tp_dxy_allCuts;
-
-  h_trk_matchtp_pt_noCuts->Sumw2();
-  h_tp_pt_noCuts_primary->Sumw2();
-  TH1F* h_psEff_pt_noCuts = (TH1F*)h_trk_matchtp_pt_noCuts->Clone();
-  h_psEff_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_pt_noCuts);
-  h_psEff_pt_noCuts->SetName("psEff_pt_noCuts");
-  h_psEff_pt_noCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_psEff_pt_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_pt_noCuts->Divide(h_trk_matchtp_pt_noCuts, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
-  h_psEff_pt_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_pt_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_pt_noCuts->GetName() + ".pdf");
-  delete h_psEff_pt_noCuts;
-  delete h_trk_matchtp_pt_noCuts;
-
-  h_trk_matchtp_eta_noCuts->Sumw2();
-  //h_tp_eta_noCuts->Sumw2();
-  TH1F* h_psEff_eta_noCuts = (TH1F*)h_trk_matchtp_eta_noCuts->Clone();
-  h_psEff_eta_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_eta_noCuts);
-  h_psEff_eta_noCuts->SetName("psEff_eta_noCuts");
-  h_psEff_eta_noCuts->GetXaxis()->SetTitle("Tracking Particle #eta (GeV)");
-  h_psEff_eta_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_eta_noCuts->Divide(h_trk_matchtp_eta_noCuts, h_tp_eta_noCuts, 1.0, 1.0, "B");
-  h_psEff_eta_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_eta_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_eta_noCuts->GetName() + ".pdf");
-  delete h_psEff_eta_noCuts;
-  delete h_trk_matchtp_eta_noCuts;
-  delete h_tp_eta_noCuts;
-
-  h_trk_matchtp_dxy_noCuts->Sumw2();
-  h_tp_dxy_noCuts->Sumw2();
-  TH1F* h_psEff_dxy_noCuts = (TH1F*)h_trk_matchtp_dxy_noCuts->Clone();
-  h_psEff_dxy_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_dxy_noCuts);
-  h_psEff_dxy_noCuts->SetName("psEff_dxy_noCuts");
-  h_psEff_dxy_noCuts->GetXaxis()->SetTitle("Tracking Particle #dxy (GeV)");
-  h_psEff_dxy_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_dxy_noCuts->Divide(h_trk_matchtp_dxy_noCuts, h_tp_dxy_noCuts, 1.0, 1.0, "B");
-  h_psEff_dxy_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_dxy_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_dxy_noCuts->GetName() + ".pdf");
-  delete h_psEff_dxy_noCuts;
-  delete h_trk_matchtp_dxy_noCuts;
-  delete h_tp_dxy_noCuts;
-
-  h_trk_matchtp_pt_oldCuts->Sumw2();
-  //h_tp_pt_maxEtaCut->Sumw2();
-  TH1F* h_psEff_pt_oldCuts = (TH1F*)h_trk_matchtp_pt_oldCuts->Clone();
-  h_psEff_pt_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_pt_oldCuts);
-  h_psEff_pt_oldCuts->SetName("psEff_pt_oldCuts");
-  h_psEff_pt_oldCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_psEff_pt_oldCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_pt_oldCuts->Divide(h_trk_matchtp_pt_oldCuts, h_tp_pt_maxEtaCut, 1.0, 1.0, "B");
-  h_psEff_pt_oldCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_pt_oldCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_pt_oldCuts->GetName() + ".pdf");
-  delete h_psEff_pt_oldCuts;
-  delete h_trk_matchtp_pt_oldCuts;
-  delete h_tp_pt_maxEtaCut;
-
-  h_trk_matchtp_eta_oldCuts->Sumw2();
-  //h_tp_eta_maxEtaCut->Sumw2();
-  TH1F* h_psEff_eta_oldCuts = (TH1F*)h_trk_matchtp_eta_oldCuts->Clone();
-  h_psEff_eta_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_eta_oldCuts);
-  h_psEff_eta_oldCuts->SetName("psEff_eta_oldCuts");
-  h_psEff_eta_oldCuts->GetXaxis()->SetTitle("Tracking Particle #eta (GeV)");
-  h_psEff_eta_oldCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_eta_oldCuts->Divide(h_trk_matchtp_eta_oldCuts, h_tp_eta_maxEtaCut, 1.0, 1.0, "B");
-  h_psEff_eta_oldCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_eta_oldCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_eta_oldCuts->GetName() + ".pdf");
-  delete h_psEff_eta_oldCuts;
-  delete h_trk_matchtp_eta_oldCuts;
-  delete h_tp_eta_maxEtaCut;
-
-  h_trk_matchtp_dxy_oldCuts->Sumw2();
-  h_tp_dxy_oldCuts->Sumw2();
-  TH1F* h_psEff_dxy_oldCuts = (TH1F*)h_trk_matchtp_dxy_oldCuts->Clone();
-  h_psEff_dxy_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_psEff_dxy_oldCuts);
-  h_psEff_dxy_oldCuts->SetName("psEff_dxy_oldCuts");
-  h_psEff_dxy_oldCuts->GetXaxis()->SetTitle("Tracking Particle #dxy (GeV)");
-  h_psEff_dxy_oldCuts->GetYaxis()->SetTitle("Efficiency");
-  h_psEff_dxy_oldCuts->Divide(h_trk_matchtp_dxy_oldCuts, h_tp_dxy_oldCuts, 1.0, 1.0, "B");
-  h_psEff_dxy_oldCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_psEff_dxy_oldCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_psEff_dxy_oldCuts->GetName() + ".pdf");
-  delete h_psEff_dxy_oldCuts;
-  delete h_trk_matchtp_dxy_oldCuts;
-  delete h_tp_dxy_oldCuts;
-
-  h_match_tp_pt_noCuts_primary->Sumw2();
-  TH1F* h_primaryEff_pt_noCuts = (TH1F*)h_match_tp_pt_noCuts_primary->Clone();
-  h_primaryEff_pt_noCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_primaryEff_pt_noCuts);
-  h_primaryEff_pt_noCuts->SetName("primaryEff_pt_noCuts");
-  h_primaryEff_pt_noCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_primaryEff_pt_noCuts->GetYaxis()->SetTitle("Efficiency");
-  h_primaryEff_pt_noCuts->Divide(h_match_tp_pt_noCuts_primary, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
-  h_primaryEff_pt_noCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_primaryEff_pt_noCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_primaryEff_pt_noCuts->GetName() + ".pdf");
-  delete h_primaryEff_pt_noCuts;
-  delete h_match_tp_pt_noCuts_primary;
-  
-  //h_match_tp_pt_allCuts->Sumw2();
-  TH1F* h_primaryEff_pt_allCuts = (TH1F*)h_match_tp_pt_allCuts->Clone();
-  h_primaryEff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_primaryEff_pt_allCuts);
-  h_primaryEff_pt_allCuts->SetName("primaryEff_pt_allCuts");
-  h_primaryEff_pt_allCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_primaryEff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_primaryEff_pt_allCuts->Divide(h_match_tp_pt_allCuts, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
-  h_primaryEff_pt_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_primaryEff_pt_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_primaryEff_pt_allCuts->GetName() + ".pdf");
-  delete h_primaryEff_pt_allCuts;
-  delete h_match_tp_pt_allCuts;
-
-  h_match_tp_pt_allCuts_trkCuts->Sumw2();
-  TH1F* h_primaryEff_pt_allCuts_trkCuts = (TH1F*)h_match_tp_pt_allCuts_trkCuts->Clone();
-  h_primaryEff_pt_allCuts_trkCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_primaryEff_pt_allCuts_trkCuts);
-  h_primaryEff_pt_allCuts_trkCuts->SetName("primaryEff_pt_allCuts_trkCuts");
-  h_primaryEff_pt_allCuts_trkCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_primaryEff_pt_allCuts_trkCuts->GetYaxis()->SetTitle("Efficiency");
-  h_primaryEff_pt_allCuts_trkCuts->Divide(h_match_tp_pt_allCuts_trkCuts, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
-  h_primaryEff_pt_allCuts_trkCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_primaryEff_pt_allCuts_trkCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_primaryEff_pt_allCuts_trkCuts->GetName() + ".pdf");
-  delete h_primaryEff_pt_allCuts_trkCuts;
-  delete h_match_tp_pt_allCuts_trkCuts;
-  
-  //h_match_tp_pt_maxEtaCut->Sumw2();
-  TH1F* h_primaryEff_pt_oldCuts = (TH1F*)h_match_tp_pt_maxEtaCut->Clone();
-  h_primaryEff_pt_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_primaryEff_pt_oldCuts);
-  h_primaryEff_pt_oldCuts->SetName("primaryEff_pt_oldCuts");
-  h_primaryEff_pt_oldCuts->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
-  h_primaryEff_pt_oldCuts->GetYaxis()->SetTitle("Efficiency");
-  h_primaryEff_pt_oldCuts->Divide(h_match_tp_pt_maxEtaCut, h_tp_pt_noCuts_primary, 1.0, 1.0, "B");
-  h_primaryEff_pt_oldCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_primaryEff_pt_oldCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_primaryEff_pt_oldCuts->GetName() + ".pdf");
-  delete h_primaryEff_pt_oldCuts;
-  delete h_match_tp_pt_maxEtaCut;
-  delete h_tp_pt_noCuts_primary;
-  
-  h_trk_pt_oldCuts->Sumw2();
-  h_trk_pt_noCuts->Sumw2();
-  TH1F* h_trkEff_pt_oldCuts = (TH1F*)h_trk_pt_oldCuts->Clone();
-  h_trkEff_pt_oldCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trkEff_pt_oldCuts);
-  h_trkEff_pt_oldCuts->SetName("trkEff_pt_oldCuts");
-  h_trkEff_pt_oldCuts->GetXaxis()->SetTitle("Track p_{T} (GeV)");
-  h_trkEff_pt_oldCuts->GetYaxis()->SetTitle("Efficiency");
-  h_trkEff_pt_oldCuts->Divide(h_trk_pt_oldCuts, h_trk_pt_noCuts, 1.0, 1.0, "B");
-  h_trkEff_pt_oldCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trkEff_pt_oldCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trkEff_pt_oldCuts->GetName() + ".pdf");
-  delete h_trkEff_pt_oldCuts;
-  delete h_trk_pt_oldCuts;
-
-  h_trk_pt_allCuts->Sumw2();
-  TH1F* h_trkEff_pt_allCuts = (TH1F*)h_trk_pt_allCuts->Clone();
-  h_trkEff_pt_allCuts->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_trkEff_pt_allCuts);
-  h_trkEff_pt_allCuts->SetName("trkEff_pt_allCuts");
-  h_trkEff_pt_allCuts->GetXaxis()->SetTitle("Track p_{T} (GeV)");
-  h_trkEff_pt_allCuts->GetYaxis()->SetTitle("Efficiency");
-  h_trkEff_pt_allCuts->Divide(h_trk_pt_allCuts, h_trk_pt_noCuts, 1.0, 1.0, "B");
-  h_trkEff_pt_allCuts->Draw();
-  mySmallText(0.4, 0.82, 1, ctxt);
-  h_trkEff_pt_allCuts->Write("", TObject::kOverwrite);
-  c.SaveAs(DIR + "/"+ h_trkEff_pt_allCuts->GetName() + ".pdf");
-  delete h_trkEff_pt_allCuts;
-  delete h_trk_pt_allCuts;
-  delete h_trk_pt_noCuts;
 
   h_delta_dist_xy->GetYaxis()->SetNoExponent(kTRUE);
   removeFlows(h_delta_dist_xy);
