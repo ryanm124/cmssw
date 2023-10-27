@@ -559,6 +559,32 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   float TP_minD0_disk = 0.08;
   //float minChi2rphidof_disk = 10000.0;
 
+  //Vertex parameter vectors
+  vector<int> *trkVert_firstIndexTrk;
+  vector<int> *trkVert_secondIndexTrk;
+  vector<int> *trkVert_firstIndexPt;
+  vector<int> *trkVert_secondIndexPt;
+  vector<int> *trkVert_inTraj;
+  vector<float> *trkVert_d_T;
+  vector<float> *trkVert_R_T;
+  vector<float> *trkVert_cos_T;
+  vector<float> *trkVert_del_Z;
+  vector<float> *trkVert_x;
+  vector<float> *trkVert_y;
+  vector<float> *trkVert_z;
+  vector<float> *trkVert_openingAngle;
+  vector<float> *trkVert_parentPt;
+  vector<int> *trkVert_delIndexPt;
+
+  vector<float> *tpVert_d_T;
+  vector<float> *tpVert_R_T;
+  vector<float> *tpVert_cos_T;
+  vector<float> *tpVert_x;
+  vector<float> *tpVert_y;
+  vector<float> *tpVert_z;
+  vector<float> *tpVert_openingAngle;
+  vector<float> *tpVert_parentPt;
+
   vector<float>   *trk_pt;
   vector<float>   *trk_eta;
   vector<float>   *trk_phi;
@@ -921,9 +947,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertTree->SetBranchAddress("vert_z", &vert_z, &b_vert_z);
   tree->AddFriend(vertTree);
 #endif  
-
+  //preselection cuts and plots definitions
   std::vector<std::unique_ptr<Cut>> preselCuts;
-  //Cut preselCuts[preselCutsSize]  = {TypedCut<float>("maxEta",&trk_eta,2.4), TypedCut<float>("maxChi2rzdof",&trk_chi2rz,3.0), TypedCut<float>("maxChi2rphidof_barrel",&trk_chi2rphi,5.0), TypedCut<float>("minMVA2",&trk_MVA2,0.2), TypedCut<float>("minMVA1",&trk_MVA1,0.2), TypedCut<float>("minMVA1_D",&trk_MVA1,0.8), TypedCut<int>("minNumStub_overlap",&trk_nstub,5), TypedCut<float>("minPt",&trk_pt,3.0), TypedCut<float>("minD0_barrel",&trk_d0,0.06), TypedCut<float>("minD0_disk",&trk_d0,0.08)};
   std::unique_ptr<TypedCut<float>> cut0(new TypedCut<float>("maxEta",&trk_eta,2.4));
   preselCuts.push_back(std::move(cut0));
   std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof",&trk_chi2rz,3.0));
@@ -955,19 +980,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::unique_ptr<TypedCut<float>> tpCut3(new TypedCut<float>("minD0_disk",&tp_d0,0.08));
   preselCutsTP.push_back(std::move(tpCut3));
 
-  /*Plot varCutFlows[varCutFlowsSize] = { TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0),
-					TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,100.0),
-					TypedPlot<float>("eta","",&trk_eta,50,-2.5,2.5),
-					TypedPlot<float>("z0","cm",&trk_z0,100,-20.0,20.0),
-					TypedPlot<float>("phi","",&trk_phi,100,-2*TMath::Pi(),2*TMath::Pi()),
-					TypedPlot<float>("sectorPhi","",&trk_phi,100,-1.0,1.0),
-					TypedPlot<float>("MVA1","",&trk_MVA1,100,0.0,1.0),
-					TypedPlot<float>("MVA2","",&trk_MVA2,100,0.0,1.0),
-					TypedPlot<float>("chi2rphidof","",&trk_chi2rphi,100,0.0,6.0),
-					TypedPlot<float>("chi2rzdof","",&trk_chi2rz,100,0.0,6.0),
-					TypedPlot<float>("bendchi2","",&trk_bendchi2,100,0.0,10.0)
-					};*/
-
   std::vector<std::unique_ptr<Plot>> varCutFlows;
   std::unique_ptr<TypedPlot<float>> plot0(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
   varCutFlows.push_back(std::move(plot0));
@@ -992,15 +1004,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::unique_ptr<TypedPlot<float>> plot10(new TypedPlot<float>("bendchi2","",&trk_bendchi2,100,0.0,10.0));
   varCutFlows.push_back(std::move(plot10));
 
-  /*Plot varCutFlowsTP[varCutFlowsTPSize] = {  TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0),
-					     TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,100.0),
-					     TypedPlot<float>("eta","",&tp_eta,50,-2.5,2.5),
-					     TypedPlot<float>("z0","cm",&tp_z0,100,-20.0,20.0),
-					     TypedPlot<float>("phi","",&tp_phi,100,-2*TMath::Pi(),2*TMath::Pi()),
-					     TypedPlot<float>("sectorPhi","",&tp_phi,100,-1.0,1.0),
-					     TypedPlot<float>("dxy","cm",&tp_dxy,50,-2.0,2.0)
-					     };*/
-
   std::vector<std::unique_ptr<Plot>> varCutFlowsTP;
   std::unique_ptr<TypedPlot<float>> tpPlot0(new TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0));
   varCutFlowsTP.push_back(std::move(tpPlot0));
@@ -1017,12 +1020,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::unique_ptr<TypedPlot<float>> tpPlot6(new TypedPlot<float>("dxy","cm",&tp_dxy,50,-2.0,2.0));
   varCutFlowsTP.push_back(std::move(tpPlot6));
   
-  /*std::pair<Plot,Plot> varCutFlows2D[varCutFlows2DSize] = { {TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0),TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0)},
-							    {TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4),TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0)},
-							    {TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0),TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4)},
-							    {TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4),TypedPlot<int>("nstub","",&trk_nstub,7,0.0,7.0)}
-							    };*/
-
   std::vector<std::pair<std::unique_ptr<Plot>,std::unique_ptr<Plot> > > varCutFlows2D;
   std::unique_ptr<TypedPlot<float>> plot0X(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
   std::unique_ptr<TypedPlot<float>> plot0Y(new TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,30.0));
@@ -1036,12 +1033,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::unique_ptr<TypedPlot<float>> plot3X(new TypedPlot<float>("eta","",&trk_eta,200,-2.4,2.4));
   std::unique_ptr<TypedPlot<int>> plot3Y(new TypedPlot<int>("nstub","",&trk_nstub,7,0.0,7.0));
   varCutFlows2D.push_back({std::move(plot3X),std::move(plot3Y)});
-
-  /*std::pair<Plot,Plot> varCutFlowsTP2D[varCutFlowsTP2DSize] = { {TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0),TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,30.0)},
-								{TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4),TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,30.0)},
-								{TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0),TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4)},
-								{TypedPlot<float>("eta","",&tp_eta,200,-2.4,2.4),TypedPlot<int>("nstub","",&tp_nstub,7,0.0,7.0)}
-								};*/
 
   std::vector<std::pair<std::unique_ptr<Plot>,std::unique_ptr<Plot> > > varCutFlowsTP2D;
   std::unique_ptr<TypedPlot<float>> tpPlot0X(new TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0));
@@ -1124,6 +1115,173 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     }
   }
 
+  //vertex cuts and plots definitions
+  std::vector<std::unique_ptr<Cut>> vertCuts;
+  std::unique_ptr<TypedCut<float>> vertCut0(new TypedCut<float>("minR_T",&trkVert_R_T,d0_res));
+  vertCuts.push_back(std::move(vertCut0));
+  std::unique_ptr<TypedCut<float>> vertCut1(new TypedCut<float>("maxR_T",&trkVert_R_T,20.0));
+  vertCuts.push_back(std::move(vertCut1));
+  std::unique_ptr<TypedCut<float>> vertCut2(new TypedCut<float>("max_trk_sumCharge",&trk_rinv,0));
+  vertCuts.push_back(std::move(vertCut2));
+  std::unique_ptr<TypedCut<float>> vertCut3(new TypedCut<float>("min_trk_sumCharge",&trk_rinv,0));
+  vertCuts.push_back(std::move(vertCut3));
+  std::unique_ptr<TypedCut<float>> vertCut4(new TypedCut<float>("max_trk_sumBendChi2",&trk_bendchi2,14.0));
+  vertCuts.push_back(std::move(vertCut4));
+  std::unique_ptr<TypedCut<float>> vertCut5(new TypedCut<float>("minCos_T",&trkVert_cos_T,0.96));
+  vertCuts.push_back(std::move(vertCut5));
+  std::unique_ptr<TypedCut<float>> vertCut6(new TypedCut<float>("max_trk_deltaEta",&trk_eta,2.0));
+  vertCuts.push_back(std::move(vertCut6));
+  std::unique_ptr<TypedCut<float>> vertCut7(new TypedCut<float>("max_delZ",&trkVert_del_Z,0.5));
+  vertCuts.push_back(std::move(vertCut7));
+  std::unique_ptr<TypedCut<float>> vertCut8(new TypedCut<float>("minR_T",&trkVert_R_T,0.25));
+  vertCuts.push_back(std::move(vertCut8));
+  std::unique_ptr<TypedCut<float>> vertCut9(new TypedCut<float>("min_trk_highPt",&trk_pt,13.0));
+  vertCuts.push_back(std::move(vertCut9));
+  std::unique_ptr<TypedCut<float>> vertCut10(new TypedCut<float>("max_trk_sumChi2rphidof",&trk_chi2rphi,6.0));
+  vertCuts.push_back(std::move(vertCut10));
+  std::unique_ptr<TypedCut<int>> vertCut11(new TypedCut<int>("min_trk_sumNumStubs",&trk_nstub,11));
+  vertCuts.push_back(std::move(vertCut11));
+  std::unique_ptr<TypedCut<float>> vertCut12(new TypedCut<float>("min_trk_highD0",&trk_d0,0.3));
+  vertCuts.push_back(std::move(vertCut12));
+
+  std::vector<std::unique_ptr<Plot>> vertCutFlows;
+  std::unique_ptr<TypedPlot<float>> vertPlot0(new TypedPlot<float>("x","cm",&trkVert_x,100,-5.0,5.0));
+  vertCutFlows.push_back(std::move(vertPlot0));
+  std::unique_ptr<TypedPlot<float>> vertPlot1(new TypedPlot<float>("y","cm",&trkVert_y,100,-5.0,5.0));
+  vertCutFlows.push_back(std::move(vertPlot1));
+  std::unique_ptr<TypedPlot<float>> vertPlot2(new TypedPlot<float>("z","cm",&trkVert_z,100,-50.0,50.0));
+  vertCutFlows.push_back(std::move(vertPlot2));
+  std::unique_ptr<TypedPlot<int>> vertPlot3(new TypedPlot<int>("firstIndexPt","",&trkVert_firstIndexPt,50,0.0,50.0));
+  vertCutFlows.push_back(std::move(vertPlot3));
+  std::unique_ptr<TypedPlot<int>> vertPlot4(new TypedPlot<int>("secondIndexPt","",&trkVert_secondIndexPt,50,0.0,50.0));
+  vertCutFlows.push_back(std::move(vertPlot4));
+  std::unique_ptr<TypedPlot<float>> vertPlot5(new TypedPlot<float>("cos_T","",&trkVert_cos_T,40,-1.0,1.0));
+  vertCutFlows.push_back(std::move(vertPlot5));
+  std::unique_ptr<TypedPlot<float>> vertPlot6(new TypedPlot<float>("openingAngle","",&trkVert_openingAngle,40,-3.14,3.14));
+  vertCutFlows.push_back(std::move(vertPlot6));
+  std::unique_ptr<TypedPlot<float>> vertPlot7(new TypedPlot<float>("parentPt","GeV",&trkVert_parentPt,200,0.0,200.0));
+  vertCutFlows.push_back(std::move(vertPlot7));
+  std::unique_ptr<TypedPlot<float>> vertPlot8(new TypedPlot<float>("d_T","cm",&trkVert_d_T,40,0.0,1.0));
+  vertCutFlows.push_back(std::move(vertPlot8));
+  std::unique_ptr<TypedPlot<float>> vertPlot9(new TypedPlot<float>("R_T","cm",&trkVert_R_T,80,0.0,20.0));
+  vertCutFlows.push_back(std::move(vertPlot9));
+  std::unique_ptr<TypedPlot<float>> vertPlot10(new TypedPlot<float>("highPt","GeV",&trk_pt,100,0.0,100.0));
+  vertCutFlows.push_back(std::move(vertPlot10));
+  std::unique_ptr<TypedPlot<float>> vertPlot11(new TypedPlot<float>("lowPt","GeV",&trk_pt,100,0.0,100.0));
+  vertCutFlows.push_back(std::move(vertPlot11));
+  std::unique_ptr<TypedPlot<float>> vertPlot12(new TypedPlot<float>("highD0","cm",&trk_d0,80,-2.0,2.0));
+  vertCutFlows.push_back(std::move(vertPlot12));
+  std::unique_ptr<TypedPlot<float>> vertPlot13(new TypedPlot<float>("lowD0","cm",&trk_d0,80,-2.0,2.0));
+  vertCutFlows.push_back(std::move(vertPlot13));
+  std::unique_ptr<TypedPlot<float>> vertPlot14(new TypedPlot<float>("delZ","cm",&trkVert_del_Z,100,0.0,1.5));
+  vertCutFlows.push_back(std::move(vertPlot14));
+  std::unique_ptr<TypedPlot<float>> vertPlot15(new TypedPlot<float>("deltaZ0","cm",&trk_z0,100,0.0,10.0));
+  vertCutFlows.push_back(std::move(vertPlot15));
+  std::unique_ptr<TypedPlot<float>> vertPlot16(new TypedPlot<float>("deltaEta","",&trk_eta,100,0.0,2.4));
+  vertCutFlows.push_back(std::move(vertPlot16));
+  std::unique_ptr<TypedPlot<float>> vertPlot17(new TypedPlot<float>("deltaD0","cm",&trk_d0,100,0.0,10.0));
+  vertCutFlows.push_back(std::move(vertPlot17));
+  std::unique_ptr<TypedPlot<float>> vertPlot18(new TypedPlot<float>("deltaPhi","",&trk_phi,100,0.0,6.3));
+  vertCutFlows.push_back(std::move(vertPlot18));
+  std::unique_ptr<TypedPlot<int>> vertPlot19(new TypedPlot<int>("delIndexPt","",&trkVert_delIndexPt,20,0.0,20.0));
+  vertCutFlows.push_back(std::move(vertPlot19));
+  std::unique_ptr<TypedPlot<int>> vertPlot20(new TypedPlot<int>("sumNumStubs","",&trk_nstub,12,0.0,12.0));
+  vertCutFlows.push_back(std::move(vertPlot20));
+  std::unique_ptr<TypedPlot<float>> vertPlot21(new TypedPlot<float>("sumChi2rphidof","",&trk_chi2rphi,200,0.0,8.0));
+  vertCutFlows.push_back(std::move(vertPlot21));
+  std::unique_ptr<TypedPlot<float>> vertPlot22(new TypedPlot<float>("sumChi2rzdof","",&trk_chi2rz,200,0.0,3.0));
+  vertCutFlows.push_back(std::move(vertPlot22));
+  std::unique_ptr<TypedPlot<float>> vertPlot23(new TypedPlot<float>("sumBendChi2","",&trk_bendchi2,200,0.0,14.0));
+  vertCutFlows.push_back(std::move(vertPlot23));
+  std::unique_ptr<TypedPlot<float>> vertPlot24(new TypedPlot<float>("sumMVA1","",&trk_MVA1,100,0.0,2.0));
+  vertCutFlows.push_back(std::move(vertPlot24));
+  std::unique_ptr<TypedPlot<float>> vertPlot25(new TypedPlot<float>("sumMVA2","",&trk_MVA2,100,0.0,2.0));
+  vertCutFlows.push_back(std::move(vertPlot25));
+  std::unique_ptr<TypedPlot<float>> vertPlot26(new TypedPlot<float>("leadEta","",&trk_eta,50,-2.4,2.4));
+  vertCutFlows.push_back(std::move(vertPlot26));
+
+  std::vector<std::unique_ptr<Plot>> vertCutFlowsTP;
+  std::unique_ptr<TypedPlot<float>> vertPlotTP0(new TypedPlot<float>("x","cm",&tpVert_x,100,-5.0,5.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP0));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP1(new TypedPlot<float>("y","cm",&tpVert_y,100,-5.0,5.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP1));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP2(new TypedPlot<float>("z","cm",&tpVert_z,100,-50.0,50.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP2));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP4(new TypedPlot<float>("cos_T","",&tpVert_cos_T,40,-1.0,1.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP4));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP5(new TypedPlot<float>("openingAngle","",&tpVert_openingAngle,40,-3.14,3.14));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP5));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP6(new TypedPlot<float>("parentPt","GeV",&tpVert_parentPt,200,0.0,200.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP6));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP7(new TypedPlot<float>("d_T","cm",&tpVert_d_T,40,0.0,0.2));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP7));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP8(new TypedPlot<float>("R_T","cm",&tpVert_R_T,80,0.0,20.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP8));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP9(new TypedPlot<float>("highPt","GeV",&tp_pt,100,0.0,100.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP9));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP10(new TypedPlot<float>("lowPt","GeV",&tp_pt,100,0.0,100.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP10));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP11(new TypedPlot<float>("highD0","cm",&tp_d0,80,-2.0,2.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP11));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP12(new TypedPlot<float>("lowD0","cm",&tp_d0,80,-2.0,2.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP12));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP13(new TypedPlot<float>("deltaZ0","cm",&tp_z0,100,0.0,10.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP13));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP14(new TypedPlot<float>("deltaEta","",&tp_eta,100,0.0,2.4));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP14));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP15(new TypedPlot<float>("deltaD0","cm",&tp_d0,100,0.0,10.0));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP15));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP16(new TypedPlot<float>("deltaPhi","",&tp_phi,100,0.0,6.3));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP16));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP17(new TypedPlot<float>("leadEta","",&tp_eta,50,-2.4,2.4));
+  vertCutFlowsTP.push_back(std::move(vertPlotTP17));
+
+  std::vector<TString> vertType = {"matched","unmatched"};
+  std::vector<TString> vertTypeTP = {"matched","all"};
+  std::vector<TString> vertPlotTPModifiers = {"","_oneMatch"};
+
+  TH1F* vertexCutFlows[vertCutFlows.size()][vertType.size()][vertCuts.size()];
+  TH1F* vertexCutFlowsMatchTP[vertCutFlowsTP.size()][vertCuts.size()][vertPlotTPModifiers.size()];
+  TH1F* vertexCutFlowsTP[vertCutFlowsTP.size()][vertPlotTPModifiers.size()];
+
+  for(uint i=0; i<vertCutFlows.size(); ++i){
+    for(uint j=0; j<vertType.size(); ++j){
+      for(uint k=0; k<vertCuts.size(); ++k){
+	TString name = "h_trackVertex_"+vertCutFlows[i]->getVarName()+"_"+vertType[j]+"_"+vertCuts[k]->getCutName()+"Cut";
+	float binWidth = (vertCutFlows[i]->getMaxBin() - vertCutFlows[i]->getMinBin()) / vertCutFlows[i]->getNumBins();
+	TString binLabel = std::to_string(binWidth);
+	TString labels = name+"; Track Vertex "+vertCutFlows[i]->getVarName()+" ("+vertCutFlows[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlows[i]->getUnit();
+	TH1F* hist = new TH1F(name,labels,vertCutFlows[i]->getNumBins(),vertCutFlows[i]->getMinBin(),vertCutFlows[i]->getMaxBin());
+	vertexCutFlows[i][j][k] = hist;
+      }
+    }
+  }
+
+  for(uint i=0; i<vertCutFlowsTP.size(); ++i){
+    for(uint k=0; k<vertCuts.size(); ++k){
+      for(uint m=0; m<vertPlotTPModifiers.size(); ++m){
+	TString name = "h_trueVertex_"+vertCutFlowsTP[i]->getVarName()+"_"+vertTypeTP[0]+"_"+vertCuts[k]->getCutName()+"Cut"+vertPlotTPModifiers[m];
+	float binWidth = (vertCutFlowsTP[i]->getMaxBin() - vertCutFlowsTP[i]->getMinBin()) / vertCutFlowsTP[i]->getNumBins();
+	TString binLabel = std::to_string(binWidth);
+	TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlowsTP[i]->getUnit();
+	TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
+	vertexCutFlowsMatchTP[i][k][m] = hist;
+      }
+    } 
+  }
+
+  for(uint i=0; i<vertCutFlowsTP.size(); ++i){
+    for(uint k=0; k<vertPlotTPModifiers.size(); ++k){
+      TString name = "h_trueVertex_"+vertCutFlowsTP[i]->getVarName()+"_"+vertTypeTP[1]+vertPlotTPModifiers[k];
+      float binWidth = (vertCutFlowsTP[i]->getMaxBin() - vertCutFlowsTP[i]->getMinBin()) / vertCutFlowsTP[i]->getNumBins();
+      TString binLabel = std::to_string(binWidth);
+      TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlowsTP[i]->getUnit();
+      TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
+      vertexCutFlowsTP[i][k] = hist;
+    }
+  }
+  
+
   TH1F *h_numSelectedTrks = new TH1F("h_numSelectedTrks","h_numSelectedTrks; Number of Selected Tracks; Events / 1.0",100,0,100);
   TH1F *h_numSelectedTrks_zoomOut = new TH1F("h_numSelectedTrks_zoomOut","h_numSelectedTrks_zoomOut; Number of Selected Tracks; Events / 10.0",100,0,1000);
   TH1F *h_trk_H_T = new TH1F("h_trk_H_T","h_trk_H_T; Event Track Scalar p_{T} Sum [GeV]; Events / 10.0",100,0,1000);
@@ -1152,6 +1310,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_trueVertexCuts_sumPt = new TH1F("h_trueVertexCuts_sumPt","h_trueVertexCuts_sumPt; TP Vertex Momentum (GeV); Events / 1.0 GeV",200,0,200.0);
   TH1F *h_trueVertexCuts_indexPt = new TH1F("h_trueVertexCuts_indexPt","h_trueVertexCuts_indexPt; Pt Ranking of TP; Events / 1.0",100,0,100.0);
   TH1F *h_trackVertex_numAllCuts = new TH1F("h_trackVertex_numAllCuts","h_trackVertex_numAllCuts; Track Vertices; Events / 1.0",40,0,40);
+  TH1F *h_trackVertexBranch_numAllCuts = new TH1F("h_trackVertexBranch_numAllCuts","h_trackVertexBranch_numAllCuts; Track Vertices; Events / 1.0",40,0,40);
   TH1F *h_trackVertex_numNoCuts = new TH1F("h_trackVertex_numNoCuts","h_trackVertex_numNoCuts; Track Vertices; Events / 1.0",40,0,40);
   TH1F *h_trackVertex_numTracks = new TH1F("h_trackVertex_numTracks","h_trackVertex_numTracks; Tracks Associated with Vertex; Events / 1.0",20,0,20);
   TH1F *h_trackVertex_numVertPerTrack = new TH1F("h_trackVertex_numVertPerTrack","h_trackVertex_numVertPerTrack; Vertices Associated with Track; Events / 1.0",20,0,20);
@@ -1480,7 +1639,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   
   if (tree == 0) return;
   Long64_t nevt = tree->GetEntries();
-  //nevt = 1;
+  //nevt = 83;
   Vertex_Parameters geomTrackVertex;
   Vertex_Parameters geomTrueVertex;
 
@@ -1508,6 +1667,32 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     std::vector<float> tp_pt_noCuts_primary_vec;
     std::vector<float> tp_pt_oldCuts_vec;
     std::vector<float> tp_pt_allCuts_vec;
+
+    vector<vector<int>> tpVert_indexTPs;
+    vector<int> trkVert_indexMatch;
+    tpVert_d_T = new vector<float> ();
+    tpVert_R_T = new vector<float> ();
+    tpVert_cos_T = new vector<float> ();
+    tpVert_x = new vector<float> ();
+    tpVert_y = new vector<float> ();
+    tpVert_z = new vector<float> ();
+    tpVert_openingAngle = new vector<float> ();
+    tpVert_parentPt = new vector<float> ();
+    trkVert_firstIndexTrk = new vector<int> ();
+    trkVert_secondIndexTrk = new vector<int> ();
+    trkVert_firstIndexPt = new vector<int> ();
+    trkVert_secondIndexPt = new vector<int> ();
+    trkVert_inTraj = new vector<int> ();
+    trkVert_d_T = new vector<float> ();
+    trkVert_R_T = new vector<float> ();
+    trkVert_cos_T = new vector<float> ();
+    trkVert_del_Z = new vector<float> ();
+    trkVert_x = new vector<float> ();
+    trkVert_y = new vector<float> ();
+    trkVert_z = new vector<float> ();
+    trkVert_openingAngle = new vector<float> ();
+    trkVert_parentPt = new vector<float> ();
+    trkVert_delIndexPt = new vector<int> ();
     // ----------------------------------------------------------------------------------------------------------------
     // track loop
     for (int it = 0; it < (int)trk_pt->size(); it++){
@@ -1763,28 +1948,16 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     // --------------------------------------------------------------------------------------------
     if (!(selectedTracks.size() >= 2)) continue;
     bool true_DV = false;
-    if(VERBOSE[0])
-      std::cout<<"End of z-vertex Finding"<<endl;
-      
     double_t x_dv = -9999.0;// (tp_x->at((*selectedTPs)[0]->index));//+tp_x->at((*selectedTPs)[1]->index))/2.0;
     double_t y_dv = -9999.0;// (tp_y->at((*selectedTPs)[0]->index));//+tp_y->at((*selectedTPs)[1]->index))/2.0;
     double_t z_dv = -9999.0;// (tp_z->at((*selectedTPs)[0]->index));//+tp_z->at((*selectedTPs)[1]->index))/2.0;
-
-    double_t x_tmp = x_dv;
-    double_t y_tmp = y_dv;
-    double_t z_tmp = z_dv;
-    Int_t Vertex_check_tmp = -1;
     int noCuts_trueVertices = 0;
-    
+    uint oldNumAll = 0;
+    uint numAll = 0;
     if(selectedTPs.size()>=2){
       //std::cout<<"selectedTPs size: "<<selectedTPs.size()<<std::endl;
       sort(selectedTPs.begin(), selectedTPs.end(), ComparePtTrack);
-      std::vector<Track_Parameters> copyTPs;
-      if(detailedPlots){
-	for (uint i=0; i<selectedTPs.size(); i++){
-	  copyTPs.push_back(selectedTPs[i]);
-	}
-      }
+    
       /*std::cout<<"Selected TPs"<<std::endl;
       for( uint i=0; i<selectedTPs.size(); i++ ){
 	std::cout<<"tp pos: "<<tp_x->at(selectedTPs[i].index)<<" "<<tp_y->at(selectedTPs[i].index)<<" "<<tp_z->at(selectedTPs[i].index)<<" pdgid: "<<tp_pdgid->at(selectedTPs[i].index)<<" pt: "<<tp_pt->at(selectedTPs[i].index)<<std::endl;
@@ -1800,21 +1973,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    x_dv = tp_x->at(index0);
 	    y_dv = tp_y->at(index0);
 	    z_dv = tp_z->at(index0);
-	    noCuts_trueVertices++;
 	    if(dist(x_dv,y_dv)>d0_res && dist(x_dv,y_dv)<20){
 	      //std::cout<<"true vertex: "<<x_dv<<" "<<y_dv<<" "<<z_dv<<" tp_pt: "<<selectedTPs[0].pt<<" "<<selectedTPs[i].pt<<" eventid's: "<<tp_eventid->at(selectedTPs[0].index)<<" "<<tp_eventid->at(selectedTPs[i].index)<<std::endl;
 	      if(!foundTrueVertex){
-		h_trueVertex_x->Fill(x_dv);
-		h_trueVertex_y->Fill(y_dv);
-		h_trueVertex_z->Fill(z_dv);
-		h_trueVertex_sumPt->Fill(selectedTPs[0].pt+selectedTPs[i].pt);
-		h_trueVertex_lowPt->Fill(selectedTPs[i].pt);
-		h_trueVertex_highPt->Fill(selectedTPs[0].pt);
 		trueVertices.push_back(Vertex_Parameters(x_dv, y_dv, z_dv, selectedTPs[0], selectedTPs[i]) );
 		foundTrueVertex = true;
 	      }
 	      else{
-		trueVertices.back().tracks.push_back(selectedTPs[i]);
+		trueVertices.back().addTrack(selectedTPs[i]);
 	      }
 	      selectedTPs.erase(selectedTPs.begin()+i);
 	    }
@@ -1829,9 +1995,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	selectedTPs.pop_front();
       }
       
-      h_trueVertex_numNoCuts->Fill(noCuts_trueVertices);
       h_trueVertex_numAllCuts->Fill(trueVertices.size());
-      true_vertices += trueVertices.size();
       float maxPT = 0.0;
       for(uint i=0; i<trueVertices.size(); i++){
 	if(trueVertices[i].a.pt>maxPT){
@@ -1842,30 +2006,26 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	/*for(uint j=0; j<trueVertices[i].tracks.size(); j++){
 	  std::cout<<"vertex "<<i<<" tp pos: "<<tp_x->at(trueVertices[i].tracks[j].index)<<" "<<tp_y->at(trueVertices[i].tracks[j].index)<<" "<<tp_z->at(trueVertices[i].tracks[j].index)<<" pdgid: "<<tp_pdgid->at(trueVertices[i].tracks[j].index)<<" pt: "<<tp_pt->at(trueVertices[i].tracks[j].index)<<std::endl;
 	  }*/
-	
+	std::vector<int> itps;
+	for(uint itrack=0; itrack<trueVertices[i].tracks.size(); itrack++){
+	  itps.push_back(trueVertices[i].tracks[itrack].index);
+	}
+	tpVert_indexTPs.push_back(itps);
+	tpVert_d_T->push_back(trueVertices[i].d_T);
+	tpVert_cos_T->push_back(trueVertices[i].cos_T);
+	tpVert_R_T->push_back(trueVertices[i].R_T);
+	tpVert_x->push_back(trueVertices[i].x_dv);
+	tpVert_y->push_back(trueVertices[i].y_dv);
+	tpVert_z->push_back(trueVertices[i].z_dv);
+	tpVert_openingAngle->push_back(trueVertices[i].openingAngle);
+	tpVert_parentPt->push_back(trueVertices[i].p_mag);
+
 	h_trueVertex_d_T->Fill(trueVertices[i].d_T);
 	h_trueVertex_cos_T->Fill(trueVertices[i].cos_T);
 	h_trueVertex_alpha_T->Fill(trueVertices[i].alpha_T);
 	h_trueVertex_R_T->Fill(trueVertices[i].R_T);
 	h_trueVertex_openingAngle->Fill(trueVertices[i].openingAngle);
 	h_trueVertex_parentPt->Fill(trueVertices[i].p_mag);
-
-	int i_pt = 9999;
-	int j_pt = 9999;
-	if(detailedPlots){
-	  for( uint j=0; j<copyTPs.size();j++ ){
-	    if(trueVertices[i].a.index == copyTPs[j].index){
-	      i_pt = j;
-	    }
-	    if(trueVertices[i].b.index == copyTPs[j].index){
-	      j_pt = j;
-	    }
-	  }	
-	  
-	  h_trueVertexCuts_indexPt->Fill(i_pt);
-	  h_trueVertexCuts_indexPt->Fill(j_pt);
-	  h_trueVertex_delta_dist_indexPt->Fill(abs(i_pt-j_pt));
-	}
 	h_delta_dist_xy->Fill(dist_TPs(trueVertices[i].a,trueVertices[i].b));
 	Double_t x_dv_tp = -9999.0;
 	Double_t y_dv_tp = -9999.0;
@@ -1934,11 +2094,56 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_trueVertex_charge_vs_numTPs->Fill(trueVertices[i].tracks.size(),netCharge);
       }
       if(trueVertices.size()>0){
+	oldNumAll++;
 	h_all_oneMatch_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
 	h_all_oneMatch_trueVertex_lowPt->Fill(trueVertices[maxPT_i].b.pt);
 	h_all_oneMatch_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
 	h_all_oneMatch_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
       }
+
+      for (int it = 0; it < (int)tpVert_d_T->size(); it++){
+	for(uint i=0; i<vertCutFlowsTP.size(); ++i){
+	  float param;
+	  for(uint k=0; k<vertPlotTPModifiers.size(); ++k){
+	    if(vertPlotTPModifiers[k].Contains("oneMatch") && it!=maxPT_i) continue;
+	    if(vertPlotTPModifiers[k].Contains("oneMatch") && i==0) numAll++;
+	    TString varName = vertCutFlowsTP[i]->getVarName();
+	    if(varName.Contains("delta")){
+	      float param1 = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][0]);
+	      for(uint iTP=1; iTP<tpVert_indexTPs[it].size(); ++iTP){
+		float param2 = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][iTP]);
+		param = fabs(param1 - param2);
+		vertexCutFlowsTP[i][k]->Fill(param);
+	      }
+	      continue;
+	    }
+	    else if(varName.Contains("high")){
+	      param = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][0]);
+	      for(uint iTP=1; iTP<tpVert_indexTPs[it].size(); ++iTP){
+		float param2 = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][iTP]);
+		if(fabs(param2)>fabs(param)) param = param2;
+	      }
+	    }
+	    else if(varName.Contains("low")){
+	      param = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][0]);
+	      for(uint iTP=1; iTP<tpVert_indexTPs[it].size(); ++iTP){
+		float param2 = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][iTP]);
+		if(fabs(param2)<fabs(param)) param = param2;
+	      }
+	    }
+	    else if(varName.Contains("lead")){
+	      param = vertCutFlowsTP[i]->getParam(tpVert_indexTPs[it][0]);
+	    }
+	    else{
+	      param = vertCutFlowsTP[i]->getParam(it);
+	    }
+	    //std::cout<<"trueVertex fill param"<<std::endl;
+	    vertexCutFlowsTP[i][k]->Fill(param);
+	  }
+	}
+      }
+
+
     }
     
     // --------------------------------------------------------------------------------------------
@@ -1952,9 +2157,242 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	//std::cout<<"selected tracks tp pt: "<<selectedTracks[i].tp->pt<<std::endl;
       }
     }
+    
+    std::vector<Vertex_Parameters> lastBinVertices;
     for(auto trackBin : binnedSelectedTracks){
+      std::vector<Vertex_Parameters> binVertices;
+      if(trackBin.size()<2) continue;
       sort(trackBin.begin(), trackBin.end(), ComparePtTrack);
+      for(uint i=0; i<trackBin.size()-1; i++){
+	for(uint j=i+1; j<trackBin.size(); j++){
+	  if(dist_TPs(trackBin[i],trackBin[j])!=0) continue;
+	  Double_t x_dv_trk = -9999.0;
+	  Double_t y_dv_trk = -9999.0;
+	  Double_t z_dv_trk = -9999.0;
+	  int inTraj = calcVertex(trackBin[i],trackBin[j],x_dv_trk,y_dv_trk,z_dv_trk);
+	  Vertex_Parameters vertex(x_dv_trk,y_dv_trk,z_dv_trk,trackBin[i],trackBin[j]);
+	  bool isDupe = false;
+	  for(auto oldVertex : lastBinVertices){
+	    if(oldVertex==vertex) isDupe = true; 
+	  }
+	  if(!isDupe){
+	    binVertices.push_back(vertex);
+	    trkVert_firstIndexTrk->push_back(trackBin[i].index);
+	    trkVert_secondIndexTrk->push_back(trackBin[j].index);
+	    trkVert_firstIndexPt->push_back(i);
+	    trkVert_secondIndexPt->push_back(j);
+	    trkVert_inTraj->push_back(inTraj);
+	    trkVert_d_T->push_back(vertex.d_T);
+	    trkVert_R_T->push_back(vertex.R_T);
+	    trkVert_cos_T->push_back(vertex.cos_T);
+	    trkVert_del_Z->push_back(vertex.delta_z);
+	    trkVert_x->push_back(vertex.x_dv);
+	    trkVert_y->push_back(vertex.y_dv);
+	    trkVert_z->push_back(vertex.z_dv);
+	    trkVert_openingAngle->push_back(vertex.openingAngle);
+	    trkVert_parentPt->push_back(vertex.p_mag);
+	    trkVert_delIndexPt->push_back(fabs(i-j));	    
+	  }
+	}
+      }
+      lastBinVertices = binVertices;
     }
+  
+    
+    for(int it = 0; it < (int)trkVert_x->size(); it++){
+      int itp = trkVert_firstIndexTrk->at(it);
+      Track_Parameters tp_params1(trk_matchtp_pt->at(itp), -1*trk_matchtp_d0->at(itp), trk_matchtp_z0->at(itp), trk_matchtp_eta->at(itp), trk_matchtp_phi->at(itp), trk_matchtp_pdgid->at(itp), trk_matchtp_x->at(itp), trk_matchtp_y->at(itp), trk_matchtp_z->at(itp));
+      itp = trkVert_secondIndexTrk->at(it);
+      Track_Parameters tp_params2(trk_matchtp_pt->at(itp), -1*trk_matchtp_d0->at(itp), trk_matchtp_z0->at(itp), trk_matchtp_eta->at(itp), trk_matchtp_phi->at(itp), trk_matchtp_pdgid->at(itp), trk_matchtp_x->at(itp), trk_matchtp_y->at(itp), trk_matchtp_z->at(itp));
+      bool foundMatch = false;
+      for(uint i=0; i<trueVertices.size(); i++){
+	int numMatched = 0;
+	for(uint j=0; j<trueVertices[i].tracks.size(); j++){
+	  if(tp_params1==trueVertices[i].tracks[j] || tp_params2==trueVertices[i].tracks[j]) numMatched++;
+	}
+	if(numMatched>=2){
+	  trkVert_indexMatch.push_back(i);
+	  foundMatch = true;
+	  break;
+	}
+      }
+      if(!foundMatch) trkVert_indexMatch.push_back(-1);
+    }
+  
+    bool filledOneMatch[vertCuts.size()];
+    bool isMatchedVec[trueVertices.size()][vertCuts.size()];
+    for(uint i = 0; i<vertCuts.size(); i++){
+      filledOneMatch[i] = false;
+      for(uint j = 0; j<trueVertices.size(); j++){
+	isMatchedVec[j][i] = false;
+      }
+    }
+    uint numVertices = 0;
+    uint numMatches = 0;
+    uint numFills = 0;
+    uint numFalse = 0;
+    for(int it = 0; it < (int)trkVert_x->size(); it++){
+      for(uint i=0; i<vertCuts.size(); i++){
+	TString cutName = vertCuts[i]->getCutName();
+	float cutValue = vertCuts[i]->getCutValue();
+	float param;
+	if(cutName.Contains("delta")){
+	  float param1 = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
+	  float param2 = vertCuts[i]->getParam(trkVert_secondIndexTrk->at(it));
+	  param = fabs(param1 - param2);
+	}
+	else if(cutName.Contains("sum")){
+	  float param1 = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
+	  float param2 = vertCuts[i]->getParam(trkVert_secondIndexTrk->at(it));
+	  if(cutName.Contains("Charge")){
+	    if(param1>0.0) param1 = 1.0;
+	    if(param1<0.0) param1 = -1.0;
+	    if(param2>0.0) param2 = 1.0;
+	    if(param2<0.0) param2 = -1.0;
+	  }
+	  if(cutName.Contains("dof")){
+	    param1 /= 2*trk_nstub->at(trkVert_firstIndexTrk->at(it)) - 5;
+	    param2 /= 2*trk_nstub->at(trkVert_secondIndexTrk->at(it)) - 5;
+	  }
+	  param = param1 + param2;
+	}
+	else if(cutName.Contains("high")){
+	  param = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
+	  float param2 = vertCuts[i]->getParam(trkVert_secondIndexTrk->at(it));
+	  //std::cout<<"param1: "<<param<<" param2: "<<param2<<std::endl;
+	  if(fabs(param2)>fabs(param)) param = param2;
+	  if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
+	  //std::cout<<"high param: "<<param<<std::endl;
+	}
+	else if(cutName.Contains("low")){
+	  param = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
+	  float param2 = vertCuts[i]->getParam(trkVert_secondIndexTrk->at(it));
+	  if(fabs(param2)<fabs(param)) param = param2;
+	  if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
+	}
+	else if(cutName.Contains("lead")){
+	  param = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
+	  if(cutName.Contains("D0") || cutName.Contains("Eta")) param = fabs(param);
+	}
+	else{
+	  param = vertCuts[i]->getParam(it);
+	}
+	//if(trkVert_x->at(it)>0.73 && trkVert_x->at(it)<0.76) std::cout<<"trackvertex cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
+	if(cutName.Contains("max") && param>cutValue) break;
+	if(cutName.Contains("min") && param<cutValue) break;
+	//std::cout<<"passed cut"<<std::endl;
+	if(i==(vertCuts.size()-1)){
+	  //std::cout<<"trackvertex: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<" track indices: "<<trkVert_firstIndexTrk->at(it)<<" "<<trkVert_secondIndexTrk->at(it)<<" "<<"track pt: "<<trk_pt->at(trkVert_firstIndexTrk->at(it))<<" "<<trk_pt->at(trkVert_secondIndexTrk->at(it))<<" matchedIndex: "<<trkVert_indexMatch[it]<<std::endl;
+	  numVertices++;
+	  if(trkVert_indexMatch[it]!=-1) numMatches++;
+	}
+	for(uint j=0; j<vertType.size(); j++){
+	  if(vertType[j]=="matched" && (trkVert_indexMatch[it]==-1 || isMatchedVec[trkVert_indexMatch[it]][i])) continue;
+	  if(vertType[j]=="unmatched" && (trkVert_indexMatch[it]!=-1 && !isMatchedVec[trkVert_indexMatch[it]][i])) continue;
+	  if(vertType[j] == "unmatched" && i==(vertCuts.size()-1)){
+	    numFalse++;
+	    //std::cout<<"matchIndex: "<<trkVert_indexMatch[it]<<" trackVertex xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<std::endl;
+	  }
+	  for(uint k=0; k<vertCutFlows.size(); k++){
+	    TString varName = vertCutFlows[k]->getVarName();
+	    if(varName.Contains("delta")){
+	      float param1 = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
+	      float param2 = vertCutFlows[k]->getParam(trkVert_secondIndexTrk->at(it));
+	      param = fabs(param1 - param2);
+	    }
+	    else if(varName.Contains("sum")){
+	      float param1 = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
+	      float param2 = vertCutFlows[k]->getParam(trkVert_secondIndexTrk->at(it));
+	      if(varName.Contains("charge")){
+		if(param1>0.0) param1 = 1.0;
+		if(param1<0.0) param1 = -1.0;
+		if(param2>0.0) param2 = 1.0;
+		if(param2<0.0) param2 = -1.0;
+	      }
+	      if(cutName.Contains("dof")){
+		param1 /= 2*trk_nstub->at(trkVert_firstIndexTrk->at(it)) - 5;
+		param2 /= 2*trk_nstub->at(trkVert_secondIndexTrk->at(it)) - 5;
+	      }
+	      param = param1 + param2;
+	    }
+	    else if(varName.Contains("high")){
+	      param = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
+	      float param2 = vertCutFlows[k]->getParam(trkVert_secondIndexTrk->at(it));
+	      if(fabs(param2)>fabs(param)) param = param2;
+	    }
+	    else if(varName.Contains("low")){
+	      param = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
+	      float param2 = vertCutFlows[k]->getParam(trkVert_secondIndexTrk->at(it));
+	      if(fabs(param2)<fabs(param)) param = param2;
+	    }
+	    else if(varName.Contains("lead")){
+	      param = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
+	    }
+	    else{
+	      param = vertCutFlows[k]->getParam(it);
+	    }
+	    vertexCutFlows[k][j][i]->Fill(param);
+	  }
+	  if(vertType[j]=="matched"){
+	    for(uint k=0; k<vertPlotTPModifiers.size(); k++){
+	      int jt = trkVert_indexMatch[it];
+	      if(vertPlotTPModifiers[k].Contains("oneMatch") && filledOneMatch[i]) continue;
+	      if(vertPlotTPModifiers[k].Contains("oneMatch")){
+		jt = maxPT_i;
+		filledOneMatch[i] = true;
+		if(i==(vertCuts.size()-1)){
+		  numFills++;
+		  //std::cout<<"plot modifier: "<<vertPlotTPModifiers[k]<<std::endl;
+		  //std::cout<<"matched trueVertex xyz: "<<tpVert_x->at(jt)<<" "<<tpVert_y->at(jt)<<" "<<tpVert_z->at(jt)<<std::endl;
+		  //std::cout<<"matching trackVertex xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<std::endl;
+		}
+	      }
+	      else{
+		if(isMatchedVec[jt][i]) continue;
+		//if(i==(vertCuts.size()-1)) std::cout<<"found match for index: "<<jt<<std::endl;
+		isMatchedVec[jt][i] = true;
+	      }
+	      
+	      for(uint m=0; m<vertCutFlowsTP.size(); m++){
+		TString varName = vertCutFlowsTP[m]->getVarName();
+		if(varName.Contains("delta")){
+		  float param1 = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][0]);
+		  for(uint iTP=1; iTP<tpVert_indexTPs[jt].size(); ++iTP){
+		    float param2 = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][iTP]);
+		    param = fabs(param1 - param2);
+		    vertexCutFlowsMatchTP[m][i][k]->Fill(param);
+		  }
+		  continue;
+		}
+		else if(varName.Contains("high")){
+		  param = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][0]);
+		  for(uint iTP=1; iTP<tpVert_indexTPs[jt].size(); ++iTP){
+		    float param2 = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][iTP]);
+		    if(fabs(param2)>fabs(param)) param = param2;
+		  }
+		}
+		else if(varName.Contains("low")){
+		  param = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][0]);
+		  for(uint iTP=1; iTP<tpVert_indexTPs[jt].size(); ++iTP){
+		    float param2 = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][iTP]);
+		    if(fabs(param2)<fabs(param)) param = param2;
+		  }
+		}
+		else if(varName.Contains("lead")){
+		  param = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][0]);
+		}
+		else{
+		  param = vertCutFlowsTP[m]->getParam(jt);
+		}
+		vertexCutFlowsMatchTP[m][i][k]->Fill(param);
+	      }
+	    }
+	    break;
+	  }
+	}	
+      }
+    }
+    
     if(detailedPlots){
       for( uint i=0; i<trueVertices.size(); i++ ){
 	int numMatched = 0;
@@ -2131,11 +2569,11 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       Double_t x_dv_trk = -9999.0;
       Double_t y_dv_trk = -9999.0;
       Double_t z_dv_trk = -9999.0;
-      
+      sort(trackBin.begin(), trackBin.end(), ComparePtTrack);
       if(trackBin.size()>100){
-	trackBin.erase(trackBin.begin()+100,trackBin.end());
+	//trackBin.erase(trackBin.begin()+100,trackBin.end());
       }
-    
+      
       while (trackBin.size()>1){
 	std::vector<Vertex_Parameters> vertexCandidates;
 	for( uint j=1; j<trackBin.size(); j++){
@@ -2173,6 +2611,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackVert.bendchi2Sum<bendChi2Max && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.cos_T>cosTMin && trackVert.delta_z<deltaZMax && trackVert.R_T>2 && trackBin[0].charge+trackBin[j].charge==0 ){ //vertex cuts go here
 	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.chi2rzdofSum<chi2RZMax && trackVert.cos_T>cosTMin && trackVert.delta_z<deltaZMax && trackVert.delta_eta<deltaEtaMax && trackVert.delta_eta>deltaEtaMin && trackVert.d_T<dTMax){ //vertex cuts go here
 	    //if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 ){ //vertex cuts go here
+	    if(x_dv_trk<0.76 && x_dv_trk>0.73){
+	      //std::cout<<"track vertex candidate: "<<x_dv_trk<<" "<<y_dv_trk<<" "<<z_dv_trk<<" R_T: "<<dist(x_dv_trk,y_dv_trk)<<" chargesum: "<<trackBin[0].charge+trackBin[j].charge<<" bendchi2sum: "<<trackVert.bendchi2Sum<<" cos_T: "<<trackVert.cos_T<<" deltaEta: "<<trackVert.delta_eta<<" deltaz: "<<trackVert.delta_z<<" lead pt: "<<trackVert.a.pt<<" chi2rphidofsum: "<<trackVert.chi2rphidofSum<<" numstubssum: "<<trackVert.numStubsSum<<" mind0 bool: "<<(fabs(trackBin[0].d0)>0.3 || fabs(trackBin[j].d0)>0.3)<<" track indices: "<<trackBin[0].index<<" "<<trackBin[j].index<<" track pt: "<<trackVert.a.pt<<" "<<trackVert.b.pt<<std::endl;
+	    }
 	    if( dist(x_dv_trk,y_dv_trk)>d0_res && dist(x_dv_trk,y_dv_trk)<20 && trackBin[0].charge+trackBin[j].charge==0 && trackVert.bendchi2Sum<bendChi2Max && trackVert.cos_T>cosTMin && trackVert.delta_eta<deltaEtaMax && trackVert.delta_z<deltaZMax && trackVert.R_T>0.25 && trackVert.a.pt>13.0 && trackVert.chi2rphidofSum<chi2RPhiMax && trackVert.numStubsSum>10 && (fabs(trackBin[0].d0)>0.3 || fabs(trackBin[j].d0)>0.3) ){ //vertex cuts go here
 	      for(uint k=1; k<selectedTracks.size(); k++){
 		if(selectedTracks[k]==trackBin[0] || selectedTracks[k]==trackBin[j]) continue;
@@ -2182,11 +2623,11 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 		  trackVert.tracks.push_back(selectedTracks[k]);
 		}
 	      }
-
+	      
 	      h_trackVertex_inTraj->Fill(inTraj);
 	      trackVertices.push_back(trackVert);
-	      vertexCandidates.push_back(trackVert);
-	      //std::cout<<"track vertex candidate: "<<x_dv_trk<<" "<<y_dv_trk<<" "<<z_dv_trk<<" tp_pt: "<<trackBin[0].tp->pt<<" "<<trackBin[j].tp->pt<<std::endl;
+	      //vertexCandidates.push_back(trackVert);
+	      //std::cout<<"passed cuts track vertex candidate: "<<x_dv_trk<<" "<<y_dv_trk<<" "<<z_dv_trk<<" tp_pt: "<<trackBin[0].tp->pt<<" "<<trackBin[j].tp->pt<<std::endl;
 	    }
 	  }
 	}
@@ -2285,8 +2726,16 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
       }
     }
+    
     h_trackVertex_numNoCuts->Fill(noCuts_trackVertices);
     h_trackVertex_numAllCuts->Fill(trackVertices.size());
+    h_trackVertexBranch_numAllCuts->Fill(numVertices);
+    
+    
+    //std::cout<<"event number: "<<i_evnt<<std::endl;
+    //std::cout<<"new vertex size: "<<numVertices<<std::endl;
+    //std::cout<<"old vertex size: "<<trackVertices.size()<<std::endl;
+    
     std::vector<bool> check_dz(dz_cuts.size(),true);
     std::vector<bool> check_cos_T(cos_T_cuts.size(),true);
     std::vector<bool> check_d_T(d_T_cuts.size(),true);
@@ -2312,8 +2761,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
       }
     }
-
+  
     int geomCounter = 0;
+    uint oldNumMatches = 0;
+    uint oldNumFalse = 0;
     for( uint i=0; i<trackVertices.size(); i++ ){
       //std::cout<<"trackVertex pos: "<<trackVertices[i].x_dv<<" "<<trackVertices[i].y_dv<<" "<<trackVertices[i].z_dv<<std::endl;
       int i_pt = 9999;
@@ -2444,8 +2895,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  }
 	}
 	if(numMatched>=2){
-	  //trueVertices[j].matched = true;
-	  trueVertices[j].matched = false;
+	  trueVertices[j].matched = true;
+	  //trueVertices[j].matched = false;
 	  matched_j = j;
 	  foundMatch = true;
 	  if(oneMatch==false){
@@ -2456,7 +2907,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
       }
     
-      if(true_DV && foundMatch){
+      if(foundMatch){
 	geomCounter++;
 	if(geomCounter==1&&i_evnt==276){
 	  Double_t dummyVert_x;
@@ -2511,7 +2962,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	/*for(uint itrack=0; itrack<trackVertices[i].tracks.size(); itrack++){
 	  std::cout<<"trackVertex track tp_pt: "<<trackVertices[i].tracks[itrack].tp->pt<<std::endl;
 	  }*/
-      
+	
+	//std::cout<<"old matched trueVertex: "<<trueVertices[matched_j].x_dv<<" "<<trueVertices[matched_j].y_dv<<" "<<trueVertices[matched_j].z_dv<<std::endl;
 	h_correct_trueVertex_pt->Fill(trueVertices[matched_j].a.pt);
 	h_correct_trueVertex_lowPt->Fill(trueVertices[matched_j].b.pt);
 	h_correct_trueVertex_eta->Fill(trueVertices[matched_j].a.eta);
@@ -2653,6 +3105,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
       else{
 	if(trackVertices[i].x_dv!=-9999.0){
+	  oldNumFalse++;
 	  h_false_trackVertex_pt->Fill(trackVertices[i].a.pt);
 	  h_false_trackVertex_eta->Fill(trackVertices[i].a.eta);
 	  h_false_trackVertex_dxy->Fill(dist(trackVertices[i].x_dv,trackVertices[i].y_dv));
@@ -2828,6 +3281,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
       }
     } // End of Loop of TrackVertices
+    //if(numFalse!=oldNumFalse) std::cout<<"event: "<<i_evnt<<" numFalse: "<<numFalse<<" oldNumFalse: "<<oldNumFalse<<std::endl;
     if(detailedPlots){
       prev_dz_cut = all_vert_dz_cut;
       prev_cos_T_cut = all_vert_cos_T_cut;
@@ -2859,8 +3313,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       h_trk_oneVert_MET->Fill(TMath::Sqrt(pow(trkMET[0],2)+pow(trkMET[1],2)));
       h_trk_oneVert_H_T->Fill(trkH_T);
     }
-      
+  
     if(oneMatch){
+      oldNumMatches++;
       h_correct_oneMatch_trueVertex_pt->Fill(trueVertices[maxPT_i].a.pt);
       h_correct_oneMatch_trueVertex_lowPt->Fill(trueVertices[maxPT_i].b.pt);
       h_correct_oneMatch_trueVertex_eta->Fill(trueVertices[maxPT_i].a.eta);
@@ -2881,6 +3336,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_all_oneMatchAlt_trueVertex_dxy->Fill(dist(trueVertices[maxPT_i].x_dv,trueVertices[maxPT_i].y_dv));
       }
     }
+    //if(numFills!=oldNumMatches) std::cout<<"oldNumMatches: "<<oldNumMatches<<" numFills: "<<numFills<<" event: "<<i_evnt<<std::endl;
+    //if(numAll!=oldNumAll) std::cout<<"oldNumAll: "<<oldNumAll<<" numAll: "<<numAll<<" event: "<<i_evnt<<std::endl;
   } // End of Event Loop
 
   // ---------------------------------------------------------------------------------------------------------
@@ -2951,6 +3408,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TString makedirPreSel = "mkdir -p " + PRESELDIR;
   const char *mkDIRPRESEL = makedirPreSel.Data();
   gSystem->Exec(mkDIRPRESEL);
+  TString VERTDIR = DIR + "VertexPlots/";
+  TString makedirVert = "mkdir -p " + VERTDIR;
+  const char *mkDIRVERT = makedirVert.Data();
+  gSystem->Exec(mkDIRVERT);
 
   TFile *fout;
   fout = new TFile(outputDir + "output_" + inputFile + ".root", "recreate");
@@ -2960,8 +3421,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   l->SetLineColor(0);
   l->SetTextSize(0.04);
   l->SetTextFont(42);
-  //std::cout<<"plots"<<std::endl;
-
+  
   for(uint ivar=0; ivar<varCutFlows.size(); ++ivar){
     for(uint j=0; j<trackType.size(); ++j){
       for(uint k=0; k<plotModifiers.size(); ++k){
@@ -3127,6 +3587,97 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  }
 	}
       }
+    }
+  }
+
+  for(uint i=0; i<vertPlotTPModifiers.size(); i++){
+    for(uint j=0; j<vertCutFlowsTP.size(); j++){
+      //if(vertPlotTPModifiers[i].Contains("oneMatch") && vertCutFlowsTP[j]->getVarName().Contains("highPt")) std::cout<<"onematch entries: "<<vertexCutFlowsTP[j][i]->GetEntries()<<" "<<vertexCutFlowsMatchTP[j][vertCuts.size()-1][i]->GetEntries()<<std::endl;
+      removeFlows(vertexCutFlowsTP[j][i]);
+      removeFlows(vertexCutFlowsMatchTP[j][vertCuts.size()-1][i]);
+      TH1F* h_eff = (TH1F*)vertexCutFlowsMatchTP[j][vertCuts.size()-1][i]->Clone();
+      h_eff->Divide(vertexCutFlowsMatchTP[j][vertCuts.size()-1][i],vertexCutFlowsTP[j][i],1.0,1.0,"B");
+      raiseMax(h_eff);
+      h_eff->SetStats(0);
+      h_eff->SetAxisRange(0, 1.1, "Y");
+      h_eff->Draw();
+      mySmallText(0.3, 0.9, 1, ctxt);
+      c.SaveAs(VERTDIR + "/h_eff_trueVertex_" + vertCutFlowsTP[j]->getVarName() + "_" + vertPlotTPModifiers[i] + ".pdf");
+    }
+  }
+
+  for(uint i=0; i<vertCutFlowsTP.size(); i++){
+    removeFlows(vertexCutFlowsTP[i][0]);
+    l->Clear();
+    for(uint j=0; j<vertCuts.size(); j++){
+      removeFlows(vertexCutFlowsMatchTP[i][j][0]);
+      TH1F* h_findEff = (TH1F*)vertexCutFlowsMatchTP[i][j][0]->Clone();
+      h_findEff->Divide(vertexCutFlowsMatchTP[i][j][0],vertexCutFlowsTP[i][0],1.0,1.0,"B");
+      h_findEff->SetStats(0);
+      h_findEff->SetLineColor(j+1);
+      h_findEff->SetMarkerColor(j+1);
+      l->AddEntry(h_findEff,vertCuts[j]->getCutName(),"lp");
+      if(j==0){
+	raiseMax(h_findEff);
+	h_findEff->SetAxisRange(0, 1.1, "Y");
+	h_findEff->Draw();
+      }
+      else{
+	h_findEff->Draw("SAME");
+      }
+    }
+    mySmallText(0.3, 0.9, 1, ctxt);
+    l->Draw();
+    c.SaveAs(VERTDIR + "/h_findEff_trueVertex_" + vertCutFlowsTP[i]->getVarName() + ".pdf");
+  }
+
+  for(uint i=0; i<vertCutFlows.size(); i++){
+    removeFlows(vertexCutFlows[i][0][0]);
+    l->Clear();
+    for(uint j=1; j<vertCuts.size(); j++){
+      removeFlows(vertexCutFlows[i][0][j]);
+      TH1F* h_fakeEff = (TH1F*)vertexCutFlows[i][0][j]->Clone();
+      h_fakeEff->Divide(vertexCutFlows[i][0][j],vertexCutFlows[i][0][0],1.0,1.0,"B");
+      h_fakeEff->SetStats(0);
+      h_fakeEff->SetLineColor(j);
+      h_fakeEff->SetMarkerColor(j);
+      l->AddEntry(h_fakeEff,vertCuts[j]->getCutName(),"lp");
+      if(j==1){
+	raiseMax(h_fakeEff);
+	h_fakeEff->Draw();
+      }
+      else{
+	h_fakeEff->Draw("SAME");
+      }
+    }
+    mySmallText(0.3, 0.9, 1, ctxt);
+    l->Draw();
+    c.SaveAs(VERTDIR + "/h_fakeEff_trackVertex_" + vertCutFlows[i]->getVarName() + ".pdf");
+  }
+
+  for(uint i=0; i<vertCutFlows.size(); i++){
+    for(uint j=0; j<vertCuts.size(); j++){
+      l->Clear();
+      for(uint k=0; k<vertType.size(); k++){
+	removeFlows(vertexCutFlows[i][k][j]);
+	vertexCutFlows[i][k][j]->SetStats(0);
+	vertexCutFlows[i][k][j]->Scale(1./vertexCutFlows[i][k][j]->Integral());
+	vertexCutFlows[i][k][j]->SetLineColor(k+1);
+	vertexCutFlows[i][k][j]->SetMarkerColor(k+1);
+	l->AddEntry(vertexCutFlows[i][k][j],vertType[k],"l");
+	if(k==0){
+	  removeFlows(vertexCutFlows[i][k+1][j]);
+	  vertexCutFlows[i][k+1][j]->Scale(1./vertexCutFlows[i][k+1][j]->Integral());
+	  raiseMax(vertexCutFlows[i][k][j],vertexCutFlows[i][k+1][j]);
+	  vertexCutFlows[i][k][j]->Draw("HIST");
+	}
+	else{
+	  vertexCutFlows[i][k][j]->Draw("HIST,SAME");
+	}
+      }
+      mySmallText(0.3, 0.9, 1, ctxt);
+      l->Draw();
+      c.SaveAs(VERTDIR + "/h_correctVsFalse_" + vertCutFlows[i]->getVarName() + "_" + vertCuts[j]->getCutName() + "Cut.pdf");
     }
   }
 
@@ -3738,6 +4289,17 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   h_trackVertex_numAllCuts->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_trackVertex_numAllCuts->GetName() + ".pdf");
   delete h_trackVertex_numAllCuts;
+  c.SetLogy(0);
+
+  h_trackVertexBranch_numAllCuts->GetYaxis()->SetNoExponent(kTRUE);
+  removeFlows(h_trackVertexBranch_numAllCuts);
+  c.SetLogy();
+  h_trackVertexBranch_numAllCuts->SetStats(0);
+  h_trackVertexBranch_numAllCuts->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  h_trackVertexBranch_numAllCuts->Write("", TObject::kOverwrite);
+  c.SaveAs(DIR + "/"+ h_trackVertexBranch_numAllCuts->GetName() + ".pdf");
+  delete h_trackVertexBranch_numAllCuts;
   c.SetLogy(0);
 
   h_trackVertex_numNoCuts->GetYaxis()->SetNoExponent(kTRUE);
@@ -5116,7 +5678,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   mySmallText(0.4, 0.82, 1, ctxt);
   h_correct_trueVertex_pt->Write("", TObject::kOverwrite);
   c.SaveAs(DIR + "/"+ h_correct_trueVertex_pt->GetName() + ".pdf");
-   
+  
   h_all_trueVertex_pt->Sumw2();
   h_correct_trueVertex_pt->Sumw2();
   TH1F* h_eff_trueVertex_pt = (TH1F*)h_correct_trueVertex_pt->Clone();
@@ -5333,7 +5895,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   h_correct_oneMatch_trueVertex_pt->Sumw2();
   TH1F* h_eff_oneMatch_trueVertex_pt = (TH1F*)h_correct_oneMatch_trueVertex_pt->Clone();
   h_eff_oneMatch_trueVertex_pt->GetYaxis()->SetNoExponent(kTRUE);
-  removeFlows(h_eff_oneMatch_trueVertex_pt);
+  //std::cout<<"old one match entries: "<<h_eff_oneMatch_trueVertex_pt->GetEntries()<<" "<<h_all_oneMatch_trueVertex_pt->GetEntries()<<std::endl;
+  removeFlows(h_correct_oneMatch_trueVertex_pt);
+  removeFlows(h_all_oneMatch_trueVertex_pt);
   h_eff_oneMatch_trueVertex_pt->SetName("eff_oneMatch_trueVertex_pt");
   h_eff_oneMatch_trueVertex_pt->GetXaxis()->SetTitle("Tracking Particle p_{T} (GeV)");
   h_eff_oneMatch_trueVertex_pt->GetYaxis()->SetTitle("Efficiency");
