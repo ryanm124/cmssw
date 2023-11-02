@@ -2287,8 +2287,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  if(trkVert_indexMatch[it]!=-1) numMatches++;
 	}
 	for(uint j=0; j<vertType.size(); j++){
-	  if(vertType[j]=="matched" && (trkVert_indexMatch[it]==-1 || isMatchedVec[trkVert_indexMatch[it]][i])) continue;
-	  if(vertType[j]=="unmatched" && (trkVert_indexMatch[it]!=-1 && !isMatchedVec[trkVert_indexMatch[it]][i])) continue;
+	  //if(vertType[j]=="matched" && (trkVert_indexMatch[it]==-1 || isMatchedVec[trkVert_indexMatch[it]][i])) continue;
+	  if(vertType[j]=="matched" && trkVert_indexMatch[it]==-1) continue;
+	  //if(vertType[j]=="unmatched" && (trkVert_indexMatch[it]!=-1 && !isMatchedVec[trkVert_indexMatch[it]][i])) continue;
+	  if(vertType[j]=="unmatched" && trkVert_indexMatch[it]!=-1) continue;
 	  if(vertType[j] == "unmatched" && i==(vertCuts.size()-1)){
 	    numFalse++;
 	    //std::cout<<"matchIndex: "<<trkVert_indexMatch[it]<<" trackVertex xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<std::endl;
@@ -2353,6 +2355,13 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 		isMatchedVec[jt][i] = true;
 	      }
 	      
+	      //resolution plot
+	      if(!vertPlotTPModifiers[k].Contains("oneMatch") && i==(vertCuts.size()-1)){
+		h_res_tp_trk_x->Fill(tpVert_x->at(jt)-trkVert_x->at(it));
+		h_res_tp_trk_y->Fill(tpVert_y->at(jt)-trkVert_y->at(it));
+		h_res_tp_trk_z->Fill(tpVert_z->at(jt)-trkVert_z->at(it));
+	      }
+
 	      for(uint m=0; m<vertCutFlowsTP.size(); m++){
 		TString varName = vertCutFlowsTP[m]->getVarName();
 		if(varName.Contains("delta")){
@@ -3090,17 +3099,17 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  //std::cout<<"track vertex charges: "<<trackVertices[i].a.charge<<" "<<trackVertices[i].b.charge<<" trueVertex charges: "<<trueVertices[matched_j].a.charge<<" "<<trueVertices[matched_j].b.charge<<std::endl;
 	}
 
-	h_res_tp_trk_x->Fill(trueVertices[matched_j].x_dv-trackVertices[i].x_dv);
-	h_res_tp_trk_x_zoomOut->Fill(trueVertices[matched_j].x_dv-trackVertices[i].x_dv);
-	h_res_tp_trk_y->Fill(trueVertices[matched_j].y_dv-trackVertices[i].y_dv);
-	h_res_tp_trk_y_zoomOut->Fill(trueVertices[matched_j].y_dv-trackVertices[i].y_dv);
-	h_res_tp_trk_z->Fill(trueVertices[matched_j].z_dv-trackVertices[i].z_dv);
-	float r_j = dist(trueVertices[matched_j].x_dv,trueVertices[matched_j].y_dv);
-	float r_i = dist(trackVertices[i].x_dv,trackVertices[i].y_dv);
-	float phi_j = atan2(trueVertices[matched_j].y_dv,trueVertices[matched_j].x_dv);
-	float phi_i = atan2(trackVertices[i].y_dv,trackVertices[i].x_dv);
-	h_res_tp_trk_r->Fill(r_j-r_i);
-	h_res_tp_trk_phi->Fill(phi_j-phi_i);
+	//h_res_tp_trk_x->Fill(trueVertices[matched_j].x_dv-trackVertices[i].x_dv);
+	//h_res_tp_trk_x_zoomOut->Fill(trueVertices[matched_j].x_dv-trackVertices[i].x_dv);
+	//h_res_tp_trk_y->Fill(trueVertices[matched_j].y_dv-trackVertices[i].y_dv);
+	//h_res_tp_trk_y_zoomOut->Fill(trueVertices[matched_j].y_dv-trackVertices[i].y_dv);
+	//h_res_tp_trk_z->Fill(trueVertices[matched_j].z_dv-trackVertices[i].z_dv);
+	//float r_j = dist(trueVertices[matched_j].x_dv,trueVertices[matched_j].y_dv);
+	//float r_i = dist(trackVertices[i].x_dv,trackVertices[i].y_dv);
+	//float phi_j = atan2(trueVertices[matched_j].y_dv,trueVertices[matched_j].x_dv);
+	//float phi_i = atan2(trackVertices[i].y_dv,trackVertices[i].x_dv);
+	//h_res_tp_trk_r->Fill(r_j-r_i);
+	//h_res_tp_trk_phi->Fill(phi_j-phi_i);
        
       }
       else{
