@@ -41,7 +41,7 @@
 #include <boost/variant.hpp>
 using namespace std;
 
-bool detailedPlots = false;
+bool detailedPlots = true;
 float d0_res = 0.02152; //cm
 
 void SetPlotStyle();
@@ -393,18 +393,18 @@ void displayProgress(long current, long max)
 
 template <typename T, typename S = TH1F>
 void raiseMax(T *hist1, S *hist2=nullptr, T *hist3=nullptr, T *hist4=nullptr)
-{
-  Double_t max = hist1->GetMaximum();
+{ 
+  Double_t max = hist1->GetBinContent(hist1->GetMaximumBin());
   if(hist2!=nullptr){
-    Double_t max2 = hist2->GetMaximum();
+    Double_t max2 = hist2->GetBinContent(hist2->GetMaximumBin());
     if(max2>max) max = max2;
   }
   if(hist3!=nullptr){
-    Double_t max3 = hist3->GetMaximum();
+    Double_t max3 = hist3->GetBinContent(hist3->GetMaximumBin());
     if(max3>max) max = max3;
   }
   if(hist4!=nullptr){
-    Double_t max4 = hist4->GetMaximum();
+    Double_t max4 = hist4->GetBinContent(hist4->GetMaximumBin());
     if(max4>max) max = max4;
   }
   if(max>0.0){
@@ -412,36 +412,63 @@ void raiseMax(T *hist1, S *hist2=nullptr, T *hist3=nullptr, T *hist4=nullptr)
     if(hist2!=nullptr) hist2->GetYaxis()->SetRangeUser(0.,1.2*max);
     if(hist3!=nullptr) hist3->GetYaxis()->SetRangeUser(0.,1.2*max);
     if(hist4!=nullptr) hist4->GetYaxis()->SetRangeUser(0.,1.2*max);
+  } 
+}
+
+void raiseMaxStack(TH1F* hist, THStack* stack)
+{
+  Double_t max = hist->GetMaximum();
+  Double_t max2 = stack->GetMaximum();
+  if(max2>max) max = max2;
+ 
+  if(max>0.0){
+    hist->GetYaxis()->SetRangeUser(0.,1.2*max);
+    stack->GetYaxis()->SetRangeUser(0.,1.2*max);
   }
+  
 }
 
 template <typename T, typename S>
 void drawSame(T *hist1, S *hist2, T *hist3=nullptr, T *hist4=nullptr)
 {
-  if(hist1->GetMaximum()!=0.0){
+  if(hist1->GetBinContent(hist1->GetMaximumBin())!=0.0){
     hist1->Draw("HIST");
     hist2->Draw("HIST,SAME");
     if(hist3!=nullptr) hist3->Draw("HIST,SAME");
     if(hist4!=nullptr) hist4->Draw("HIST,SAME");
   }
-  else if(hist2->GetMaximum()!=0.0){
+  else if(hist2->GetBinContent(hist2->GetMaximumBin())!=0.0){
     hist2->Draw("HIST");
     if(hist3!=nullptr) hist3->Draw("HIST,SAME");
     if(hist4!=nullptr) hist4->Draw("HIST,SAME");
   }
   else if(hist3!=nullptr){
-    if(hist3->GetMaximum()!=0.0){
+    if(hist3->GetBinContent(hist3->GetMaximumBin())!=0.0){
       hist3->Draw("HIST");
       if(hist4!=nullptr) hist4->Draw("HIST,SAME");
     }
   }
   else if(hist4!=nullptr){
-    if(hist4->GetMaximum()!=0.0){
+    if(hist4->GetBinContent(hist4->GetMaximumBin())!=0.0){
       hist4->Draw("HIST");
     }
   }
   else{
     hist1->Draw("HIST");
+  }
+}
+
+void drawSameStack(TH1F* hist, THStack* stack)
+{
+  if(hist->GetMaximum()!=0.0){
+    hist->Draw("HIST");
+    stack->Draw("HIST,SAME");
+  }
+  else if(stack->GetMaximum()!=0.0){
+    stack->Draw("HIST");
+  }
+  else{
+    hist->Draw("HIST");
   }
 }
 
@@ -920,6 +947,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::vector<std::unique_ptr<Cut>> preselCuts;
   std::unique_ptr<TypedCut<float>> cut0(new TypedCut<float>("maxEta","max #eta",&trk_eta,2.4));
   preselCuts.push_back(std::move(cut0));
+#if 0
   std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof","max #chi^{2}_{rz}",&trk_chi2rz,3.0));
   preselCuts.push_back(std::move(cut1));
   std::unique_ptr<TypedCut<float>> cut2(new TypedCut<float>("maxChi2rphidof_barrel","max #chi^{2}_{r#phi}",&trk_chi2rphi,5.0));
@@ -938,17 +966,18 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   preselCuts.push_back(std::move(cut8));
   std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("minD0_disk","min d_{0} Disk",&trk_d0,0.08));
   preselCuts.push_back(std::move(cut9));
-				      
+#endif				      
   std::vector<std::unique_ptr<Cut>> preselCutsTP;
   std::unique_ptr<TypedCut<float>> tpCut0(new TypedCut<float>("maxEta","max #eta",&tp_eta,2.4));
   preselCutsTP.push_back(std::move(tpCut0));
+#if 0
   std::unique_ptr<TypedCut<float>> tpCut1(new TypedCut<float>("minPt","min p_{T}",&tp_pt,3.0));
   preselCutsTP.push_back(std::move(tpCut1));
   std::unique_ptr<TypedCut<float>> tpCut2(new TypedCut<float>("minD0_barrel","min d_{0} Barrel",&tp_d0,0.06));
   preselCutsTP.push_back(std::move(tpCut2));
   std::unique_ptr<TypedCut<float>> tpCut3(new TypedCut<float>("minD0_disk","min d_{0} Disk",&tp_d0,0.08));
   preselCutsTP.push_back(std::move(tpCut3));
-
+#endif
   std::vector<std::unique_ptr<Plot>> varCutFlows;
   std::unique_ptr<TypedPlot<float>> plot0(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
   varCutFlows.push_back(std::move(plot0));
@@ -1319,7 +1348,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   
   if (tree == 0) return;
   Long64_t nevt = tree->GetEntries();
-  nevt = 139;
+  //nevt = 139;
   Vertex_Parameters geomTrackVertex;
   Vertex_Parameters geomTrueVertex;
   auto trackLoopTime = 0.;
@@ -1330,7 +1359,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   auto matchLoopTime = 0.;
   auto trackVertPlotLoopTime = 0.;
 
-  for (Long64_t i_evnt=138; i_evnt<nevt; i_evnt++) {
+  for (Long64_t i_evnt=0; i_evnt<nevt; i_evnt++) {
     //std::cout<<"event number: "<<i_evnt<<std::endl;
     tree->GetEntry(i_evnt);
     displayProgress(i_evnt, nevt);
@@ -1400,7 +1429,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  if(cutName.Contains("max") && param>cutValue) break;
 	  if(cutName.Contains("min") && param<cutValue) break;
 	}
-#if 0
 	//std::cout<<"passed cut"<<std::endl;
 	for(uint i=0; i<trackType.size(); ++i){
 	  bool primary = trk_fake->at(it)==1 && isPrimary;
@@ -1450,7 +1478,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    }
 	  }
 	}
-#endif
       }
       if(icut==preselCuts.size()){
 	Track_Parameters* tp_params = new Track_Parameters(trk_matchtp_pt->at(it), -1*trk_matchtp_d0->at(it), trk_matchtp_z0->at(it), trk_matchtp_eta->at(it), trk_matchtp_phi->at(it), trk_matchtp_pdgid->at(it), trk_matchtp_x->at(it), trk_matchtp_y->at(it), trk_matchtp_z->at(it));
@@ -1573,6 +1600,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     h_tp_H_T->Fill(tpH_T);
     h_tp_MET->Fill(TMath::Sqrt(pow(tpMET[0],2)+pow(tpMET[1],2)));
     
+    //test
+    //continue;
     // --------------------------------------------------------------------------------------------
     //         Vertex finding in Tracking Particles
     // --------------------------------------------------------------------------------------------
@@ -2124,21 +2153,21 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   }
   TCanvas c;
 
-  TString DIR = outputDir + "AnalyzerTrkPlots/";
+  TString DIR = outputDir + "AnalyzerTrkPlots";
   TString makedir = "mkdir -p " + DIR;
   const char *mkDIR = makedir.Data();
   gSystem->Exec(mkDIR);
-  TString PRESELDIR = DIR + "PreselectionPlots/";
+  TString PRESELDIR = DIR + "/PreselectionPlots";
   TString makedirPreSel = "mkdir -p " + PRESELDIR;
   const char *mkDIRPRESEL = makedirPreSel.Data();
   gSystem->Exec(mkDIRPRESEL);
-  TString VERTDIR = DIR + "VertexPlots/";
+  TString VERTDIR = DIR + "/VertexPlots";
   TString makedirVert = "mkdir -p " + VERTDIR;
   const char *mkDIRVERT = makedirVert.Data();
   gSystem->Exec(mkDIRVERT);
 
   TFile *fout;
-  fout = new TFile(outputDir + "output_" + inputFile + ".root", "recreate");
+  fout = new TFile(outputDir + "output_" + inputFile, "recreate");
   
   TLegend* l = new TLegend(0.82,0.3,0.98,0.7);
   l->SetFillColor(0);
@@ -2208,7 +2237,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    raiseMax(preselCutFlows[kvar][m][icut][j]);
 	    preselCutFlows[kvar][m][icut][j]->Draw();
 	    mySmallText(0.3, 0.9, 1, ctxt);
-	    preselCutFlows[kvar][m][icut][j]->Write("", TObject::kOverwrite);
+	    //preselCutFlows[kvar][m][icut][j]->Write("", TObject::kOverwrite);
 	    c.SaveAs(PRESELDIR + "/"+ preselCutFlows[kvar][m][icut][j]->GetName() + ".pdf");
 	  }
 	  if(m!=9){
@@ -2234,8 +2263,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
 	h_stack->Draw("HIST");
 	preselCutFlows[kvar][m_primary][icut][j]->Scale(1./preselCutFlows[kvar][m_primary][icut][j]->Integral());
-	raiseMax(preselCutFlows[kvar][m_primary][icut][j],h_stack);
-	drawSame(preselCutFlows[kvar][m_primary][icut][j],h_stack);
+	raiseMaxStack(preselCutFlows[kvar][m_primary][icut][j],h_stack);
+	drawSameStack(preselCutFlows[kvar][m_primary][icut][j],h_stack);
 	mySmallText(0.3, 0.9, 1, ctxt);
 	l->Clear();
 	l->AddEntry(preselCutFlows[kvar][m_primary][icut][j],"Primary","l");
@@ -2265,6 +2294,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	l->AddEntry(preselCutFlows[kvar][m_primary][icut][j],"Primary","l");
 	l->AddEntry(preselCutFlows[kvar][m_np][icut][j],"NP","l");
 	l->Draw();
+	preselCutFlows[kvar][m_primary][icut][j]->Write("", TObject::kOverwrite);
+	preselCutFlows[kvar][m_np][icut][j]->Write("", TObject::kOverwrite);
 	c.SaveAs(PRESELDIR + "/h_signalVsBG_"+varCutFlows[kvar]->getVarName()+"_"+preselCuts[icut]->getCutName()+"Cut"+plotModifiers[j]+".pdf");
       }
     }
@@ -2283,7 +2314,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    raiseMax(preselCutFlowsTP[kvar][m][icut][j]);
 	    preselCutFlowsTP[kvar][m][icut][j]->Draw();
 	    mySmallText(0.3, 0.9, 1, ctxt);
-	    preselCutFlowsTP[kvar][m][icut][j]->Write("", TObject::kOverwrite);
+	    //preselCutFlowsTP[kvar][m][icut][j]->Write("", TObject::kOverwrite);
 	    c.SaveAs(PRESELDIR + "/"+ preselCutFlowsTP[kvar][m][icut][j]->GetName() + ".pdf");
 	  }
 	}
