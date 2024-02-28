@@ -2537,12 +2537,12 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   }
 
   for(uint i=0; i<vertCutFlows.size(); i++){
-    removeFlows(vertexCutFlows[i][0][0]);
+    removeFlows(vertexCutFlows[i][1][0]);
     l->Clear();
     for(uint j=1; j<vertCuts.size(); j++){
-      removeFlows(vertexCutFlows[i][0][j]);
-      TH1F* h_fakeEff = (TH1F*)vertexCutFlows[i][0][j]->Clone();
-      h_fakeEff->Divide(vertexCutFlows[i][0][j],vertexCutFlows[i][0][0],1.0,1.0,"B");
+      removeFlows(vertexCutFlows[i][1][j]);
+      TH1F* h_fakeEff = (TH1F*)vertexCutFlows[i][1][j]->Clone();
+      h_fakeEff->Divide(vertexCutFlows[i][1][j],vertexCutFlows[i][1][0],1.0,1.0,"B");
       h_fakeEff->SetStats(0);
       if(j!=10){
 	h_fakeEff->SetLineColor(j);
