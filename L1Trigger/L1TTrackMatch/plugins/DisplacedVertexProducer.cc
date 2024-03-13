@@ -151,9 +151,8 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
     float chi2rphi_dof = (float)chi2rphi / ndofrphi;
     float chi2rz_dof = (float)chi2rz / ndofrz;
     
-    //if( chi2rz<3.0 && MVA2>0.2 && MVA1>0.2 && pt>3.0 ){
-    if(true){
-#if 0
+    if( chi2rz<3.0 && MVA2>0.2 && MVA1>0.2 && pt>3.0 && fabs(eta)<2.4){
+
       if(fabs(d0)>1.0){
 	if(MVA1<=0.5) continue;
       }
@@ -166,7 +165,7 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
       if(fabs(eta)<=0.95){
 	if(fabs(d0)<=0.06) continue;
       }
-#endif
+
       Track_Parameters track = Track_Parameters(pt, d0, z0, eta, phi, -99999, -999, -999, -999, rinv, this_l1track);
       selectedTracks.push_back(track);
       edm::Ptr<TrackingParticle> my_tp = MCTruthTTTrackHandle->findTrackingParticlePtr(l1track_ptr);
@@ -174,31 +173,9 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
     }
     this_l1track++;
   }
-
-  for(uint i=0; i<selectedTPs.size(); i++){
-    if(selectedTPs[i].isNull()){
-      continue;
-    }
-    else {
-      TrackingVertexRef parentVert = selectedTPs[i]->parentVertex();
-      TrackingParticle currentParticle = *selectedTPs[i];
-      std::cout<<"TP pdgid: "<<currentParticle.pdgId()<<" islonglived: "<<currentParticle.longLived()<<" vertex: "<<currentParticle.vx()<<" "<<currentParticle.vy()<<" "<<currentParticle.vz()<<std::endl;
-      while(currentParticle.genParticles().size()==0 && parentVert->nSourceTracks()>0){
-	TrackingParticleRefVector sourceTPs = parentVert->sourceTracks();
-	currentParticle = *sourceTPs[0];
-	std::cout<<"Parent pdgid: "<<currentParticle.pdgId()<<std::endl;
-	parentVert = currentParticle.parentVertex();
-      }
-      reco::GenParticleRefVector genParticles = currentParticle.genParticles();
-      while(genParticles.size()>0){
-	std::cout<<"gen pdgId: "<<genParticles[0]->pdgId()<<" status: "<<genParticles[0]->status()<<" isHardProcess: "<<genParticles[0]->isHardProcess()<<" fromHardProcessFinalState: "<<genParticles[0]->fromHardProcessFinalState()<<" fromHardProcessDecayed: "<<genParticles[0]->fromHardProcessDecayed()<<std::endl;
-	genParticles = genParticles[0]->motherRefVector();
-      }
-    }
-  }
+  
   sort(selectedTracks.begin(), selectedTracks.end(), ComparePtTrack); 
   std::unique_ptr<l1t::DisplacedTrackVertexCollection> product(new std::vector<l1t::DisplacedTrackVertex>());
-#if 0
   for(int i=0; i<int(selectedTracks.size()-1); i++){
     for(int j=i+1; j<int(selectedTracks.size()); j++){
       if(dist_TPs(selectedTracks[i],selectedTracks[j])!=0) continue;
@@ -212,8 +189,8 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
 	bool isHard_i = false;
 	bool isHard_j = false;
 	if(tp_i->genParticles().size() && tp_j->genParticles().size()){
-	  isHard_i = tp_i->genParticles()[0]->isHardProcess();
-	  isHard_j = tp_j->genParticles()[0]->isHardProcess();
+	  isHard_i = tp_i->genParticles()[0]->isHardProcess() || tp_i->genParticles()[0]->fromHardProcessFinalState();
+	  isHard_j = tp_j->genParticles()[0]->isHardProcess() || tp_j->genParticles()[0]->fromHardProcessFinalState();
 	}
 	
 	if(tp_i->eventId().event()==0 && tp_j->eventId().event()==0 && fabs(tp_i->vx()-tp_j->vx())<0.0001 && fabs(tp_i->vy()-tp_j->vy())<0.0001 && fabs(tp_i->vz()-tp_j->vz())<0.0001 && isHard_i && isHard_j){
@@ -242,7 +219,7 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
     }
   }
   // //=== Store output
-#endif  
+  
   iEvent.put(std::move(product), outputTrackCollectionName_);
 }
 

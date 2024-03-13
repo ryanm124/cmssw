@@ -954,70 +954,24 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::vector<std::unique_ptr<Cut>> preselCuts;
   std::unique_ptr<TypedCut<float>> cut0(new TypedCut<float>("maxEta","max #eta",&trk_eta,2.4,true));
   preselCuts.push_back(std::move(cut0));
-#if 0
-  std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof","max #chi^{2}_{rz}",&trk_chi2rz,3.0));
+  std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof","max #chi^{2}_{rz}",&trk_chi2rz,3.0,false));
   preselCuts.push_back(std::move(cut1));
-  std::unique_ptr<TypedCut<float>> cut2(new TypedCut<float>("maxChi2rphidof_barrel","max #chi^{2}_{r#phi}",&trk_chi2rphi,5.0));
+  std::unique_ptr<TypedCut<float>> cut2(new TypedCut<float>("maxChi2rphidof_barrel","max #chi^{2}_{r#phi}",&trk_chi2rphi,5.0,true));
   preselCuts.push_back(std::move(cut2));
-  std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("minMVA2","min MVA2",&trk_MVA2,0.2));
+  std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("minMVA2","min MVA2",&trk_MVA2,0.2,true));
   preselCuts.push_back(std::move(cut3));
-  std::unique_ptr<TypedCut<float>> cut4(new TypedCut<float>("minMVA1","min MVA1",&trk_MVA1,0.2));
+  std::unique_ptr<TypedCut<float>> cut4(new TypedCut<float>("minMVA1","min MVA1",&trk_MVA1,0.2,false));
   preselCuts.push_back(std::move(cut4));
-  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.8));
+  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.8,true));
   preselCuts.push_back(std::move(cut5));
-  std::unique_ptr<TypedCut<int>> cut6(new TypedCut<int>("minNumStub_overlap","min n_{stub}",&trk_nstub,5));
+  std::unique_ptr<TypedCut<int>> cut6(new TypedCut<int>("minNumStub_overlap","min n_{stub}",&trk_nstub,5,true));
   preselCuts.push_back(std::move(cut6));
-  std::unique_ptr<TypedCut<float>> cut7(new TypedCut<float>("minPt","min p_{T}",&trk_pt,3.0));
+  std::unique_ptr<TypedCut<float>> cut7(new TypedCut<float>("minPt","min p_{T}",&trk_pt,3.0,false));
   preselCuts.push_back(std::move(cut7));
-  std::unique_ptr<TypedCut<float>> cut8(new TypedCut<float>("minD0_barrel","min d_{0} Bar",&trk_d0,0.06));
+  std::unique_ptr<TypedCut<float>> cut8(new TypedCut<float>("minD0_barrel","min d_{0} Bar",&trk_d0,0.06,false));
   preselCuts.push_back(std::move(cut8));
-  std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("minD0_disk","min d_{0} Disk",&trk_d0,0.08));
+  std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("minD0_disk","min d_{0} Disk",&trk_d0,0.08,true));
   preselCuts.push_back(std::move(cut9));
-#endif
-  std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("minMVA2_H","min MVA2 H",&trk_MVA2,0.96,false));
-  preselCuts.push_back(std::move(cut1));
-  std::unique_ptr<TypedCut<float>> cut10(new TypedCut<float>("minMVA2_barrel","min MVA2 Bar",&trk_MVA2,0.15,false));
-  preselCuts.push_back(std::move(cut10));
-  std::unique_ptr<TypedCut<float>> cut4(new TypedCut<float>("minMVA2_D","min MVA2 D",&trk_MVA2,0.99,false));
-  preselCuts.push_back(std::move(cut4));
-  std::unique_ptr<TypedCut<float>> cut12(new TypedCut<float>("minMVA2","min MVA2",&trk_MVA2,0.51,true));
-  preselCuts.push_back(std::move(cut12));
-  std::unique_ptr<TypedCut<float>> cut2(new TypedCut<float>("minMVA1_H","min MVA1 H",&trk_MVA1,0.59,false));
-  preselCuts.push_back(std::move(cut2));
-  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.79,false));
-  preselCuts.push_back(std::move(cut5));
-  std::unique_ptr<TypedCut<float>> cut11(new TypedCut<float>("minMVA1_barrel","min MVA1 Bar",&trk_MVA1,0.18,false));
-  preselCuts.push_back(std::move(cut11));
-  std::unique_ptr<TypedCut<float>> cut16(new TypedCut<float>("minMVA1","min MVA1",&trk_MVA1,0.17,true));
-  preselCuts.push_back(std::move(cut16));
-  std::unique_ptr<TypedCut<float>> cut7(new TypedCut<float>("maxChi2rphidof_H","max #chi^{2}_{r#phi} H",&trk_chi2rphi,5.46,false));
-  preselCuts.push_back(std::move(cut7));
-  std::unique_ptr<TypedCut<float>> cut18(new TypedCut<float>("maxChi2rphidof","max #chi^{2}_{r#phi}",&trk_chi2rphi,6.0,true));
-  preselCuts.push_back(std::move(cut18));
-  std::unique_ptr<TypedCut<float>> cut8(new TypedCut<float>("maxChi2rzdof_H","max #chi^{2}_{rz} H",&trk_chi2rz,1.38,false));
-  preselCuts.push_back(std::move(cut8));
-  std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("maxChi2rzdof_D","max #chi^{2}_{rz} D",&trk_chi2rz,1.86,false));
-  preselCuts.push_back(std::move(cut9));
-  std::unique_ptr<TypedCut<float>> cut15(new TypedCut<float>("maxChi2rzdof_barrel","max #chi^{2}_{rz} Bar",&trk_chi2rz,2.22,false));
-  preselCuts.push_back(std::move(cut15));
-  std::unique_ptr<TypedCut<float>> cut17(new TypedCut<float>("maxChi2rzdof","max #chi^{2}_{rz}",&trk_chi2rz,3.0,true));
-  preselCuts.push_back(std::move(cut17));
-  std::unique_ptr<TypedCut<float>> cut13(new TypedCut<float>("maxBendChi2_barrel","max #chi^{2}_{bend} Bar",&trk_bendchi2,9.9,false));
-  preselCuts.push_back(std::move(cut13));
-  std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("maxBendChi2_H","max #chi^{2}_{bend} H",&trk_bendchi2,3.5,false));
-  preselCuts.push_back(std::move(cut3));
-  std::unique_ptr<TypedCut<float>> cut6(new TypedCut<float>("maxBendChi2_D","max #chi^{2}_{bend} D",&trk_bendchi2,8.2,false));
-  preselCuts.push_back(std::move(cut6));
-  std::unique_ptr<TypedCut<float>> cut14(new TypedCut<float>("maxBendChi2","max #chi^{2}_{bend}",&trk_bendchi2,9.9,true));
-  preselCuts.push_back(std::move(cut14));
-  std::unique_ptr<TypedCut<int>> cut19(new TypedCut<int>("minNumStub_overlap","min n_{stub}",&trk_nstub,5,true));
-  preselCuts.push_back(std::move(cut19));
-  std::unique_ptr<TypedCut<float>> cut20(new TypedCut<float>("minPt","min p_{T}",&trk_pt,3.0,true));
-  preselCuts.push_back(std::move(cut20));
-  std::unique_ptr<TypedCut<float>> cut21(new TypedCut<float>("minD0_barrel","min d_{0} Bar",&trk_d0,0.06,false));
-  preselCuts.push_back(std::move(cut21));
-  std::unique_ptr<TypedCut<float>> cut22(new TypedCut<float>("minD0_disk","min d_{0} Disk",&trk_d0,0.08,true));
-  preselCuts.push_back(std::move(cut22));
 
   std::vector<std::unique_ptr<Cut>> preselCutsTP;
   std::unique_ptr<TypedCut<float>> tpCut0(new TypedCut<float>("maxEta","max #eta",&tp_eta,2.4,true));
@@ -1308,6 +1262,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F* vertexCutFlows[vertCutFlows.size()][vertType.size()][vertCuts.size()];
   TH1F* vertexCutFlowsMatchTP[vertCutFlowsTP.size()][vertCuts.size()][vertPlotTPModifiers.size()];
   TH1F* vertexCutFlowsTP[vertCutFlowsTP.size()][vertPlotTPModifiers.size()];
+  TH1F* vertexNumVertices[vertCuts.size()];
 
   for(uint i=0; i<vertCutFlows.size(); ++i){
     for(uint j=0; j<vertType.size(); ++j){
@@ -1344,6 +1299,13 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
       vertexCutFlowsTP[i][k] = hist;
     }
+  }
+
+  for(uint k=0; k<vertCuts.size(); ++k){
+    TString name = "h_trackVertexNumVertices_"+vertCuts[k]->getCutName()+"Cut";
+    TString labels = name+"; Number of Track Vertices"+" ; Events / 1.0";
+    TH1F* hist = new TH1F(name,labels,40,0,40);
+    vertexNumVertices[k] = hist;
   }
   
 
@@ -1979,13 +1941,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     begin = std::chrono::steady_clock::now();
     bool filledOneMatch[vertCuts.size()];
     bool isMatchedVec[trueVertices.size()][vertCuts.size()];
+    uint numVertices[vertCuts.size()];
     for(uint i = 0; i<vertCuts.size(); i++){
       filledOneMatch[i] = false;
+      numVertices[i] = 0;
       for(uint j = 0; j<trueVertices.size(); j++){
 	isMatchedVec[j][i] = false;
       }
     }
-    uint numVertices = 0;
     // fill vertex plots
     for(int it = 0; it < (int)trkVert_x->size(); it++){
       for(uint i=0; i<vertCuts.size(); i++){
@@ -2034,9 +1997,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	if(cutName.Contains("max") && param>cutValue) break;
 	if(cutName.Contains("min") && param<cutValue) break;
 	//std::cout<<"passed cut"<<std::endl;
-	if(i==(vertCuts.size()-1)){
-	  numVertices++;
-	}
+	numVertices[i]++;
 	for(uint j=0; j<vertType.size(); j++){
 	  //if(vertType[j]=="matched" && (trkVert_indexMatch[it]==-1 || isMatchedVec[trkVert_indexMatch[it]][i])) continue;
 	  if(vertType[j]=="matched" && trkVert_indexMatch[it]==-1) continue;
@@ -2159,7 +2120,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     end = std::chrono::steady_clock::now();
     trackVertPlotLoopTime += std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
 
-    h_trackVertexBranch_numAllCuts->Fill(numVertices);
+    h_trackVertexBranch_numAllCuts->Fill(numVertices[vertCuts.size()-1]);
   
     delete tpVert_d_T;
     delete tpVert_R_T;
@@ -2968,6 +2929,25 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   delete h_trackVertexBranch_numAllCuts;
   c.SetLogy(0);
 
+  TH1F *h_triggerEff = new TH1F("h_triggerEff","h_triggerEff; Cut Name; Percentage of Events Triggered",vertCuts.size(),0,vertCuts.size());
+  for(uint i=1; i<vertCuts.size()+1; i++){
+    int numTriggers = 0;
+    removeFlows(vertexNumVertices[i]);
+    for(int j=2; j<(vertexNumVertices[i]->GetNbinsX()+1); j++){
+      numTriggers += vertexNumVertices[i]->GetBinContent(j);
+    }
+    h_triggerEff->SetBinContent(i,numTriggers/nevt);
+    h_triggerEff->GetXaxis()->SetBinLabel(i,vertCuts[i]->getCutName());
+  }
+  h_triggerEff->SetStats(0);
+  h_triggerEff->Draw();
+  mySmallText(0.4, 0.82, 1, ctxt);
+  c.SaveAs(DIR + "/"+ h_triggerEff->GetName() + ".pdf");
+  delete h_triggerEff;
+  for(uint i=0; i<vertCuts.size(); i++){
+    delete vertexNumVertices[i];
+  }
+  
   char res[1000];
   float rms = 0;
   TF1* fit;

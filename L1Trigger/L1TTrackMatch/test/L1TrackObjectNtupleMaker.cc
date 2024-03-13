@@ -311,6 +311,7 @@ private:
   std::vector<float>* m_trk_phi;
   std::vector<float>* m_trk_phi_local;
   std::vector<float>* m_trk_d0;  // (filled if nFitPar==5, else 999)
+  std::vector<float>* m_trk_rinv;
   std::vector<float>* m_trk_z0;
   std::vector<float>* m_trk_chi2;
   std::vector<float>* m_trk_chi2dof;
@@ -360,6 +361,7 @@ private:
   std::vector<float>* m_trkExt_phi;
   std::vector<float>* m_trkExt_phi_local;
   std::vector<float>* m_trkExt_d0;  // (filled if nFitPar==5, else 999)
+  std::vector<float>* m_trkExt_rinv;
   std::vector<float>* m_trkExt_z0;
   std::vector<float>* m_trkExt_chi2;
   std::vector<float>* m_trkExt_chi2dof;
@@ -384,6 +386,10 @@ private:
   std::vector<float>* m_trkExt_matchtp_phi;
   std::vector<float>* m_trkExt_matchtp_z0;
   std::vector<float>* m_trkExt_matchtp_dxy;
+  std::vector<float>* m_trkExt_matchtp_d0;
+  std::vector<float>* m_trkExt_matchtp_x;
+  std::vector<float>* m_trkExt_matchtp_y;
+  std::vector<float>* m_trkExt_matchtp_z;
   std::vector<float>* m_trkExt_gtt_pt;
   std::vector<float>* m_trkExt_gtt_eta;
   std::vector<float>* m_trkExt_gtt_phi;
@@ -407,6 +413,9 @@ private:
   std::vector<float>* m_tp_dxy;
   std::vector<float>* m_tp_d0;
   std::vector<float>* m_tp_z0;
+  std::vector<float>* m_tp_x;
+  std::vector<float>* m_tp_y;
+  std::vector<float>* m_tp_z;
   std::vector<float>* m_tp_d0_prod;
   std::vector<float>* m_tp_z0_prod;
   std::vector<int>* m_tp_pdgid;
@@ -422,6 +431,7 @@ private:
   std::vector<float>* m_matchtrk_eta;
   std::vector<float>* m_matchtrk_phi;
   std::vector<float>* m_matchtrk_d0;  //this variable is only filled if nFitPar==5
+  std::vector<float>* m_matchtrk_rinv;
   std::vector<float>* m_matchtrk_z0;
   std::vector<float>* m_matchtrk_chi2;
   std::vector<float>* m_matchtrk_chi2dof;
@@ -441,6 +451,7 @@ private:
   std::vector<float>* m_matchtrkExt_eta;
   std::vector<float>* m_matchtrkExt_phi;
   std::vector<float>* m_matchtrkExt_d0;  //this variable is only filled if nFitPar==5
+  std::vector<float>* m_matchtrkExt_rinv;
   std::vector<float>* m_matchtrkExt_z0;
   std::vector<float>* m_matchtrkExt_chi2;
   std::vector<float>* m_matchtrkExt_chi2dof;
@@ -744,6 +755,7 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_trk_phi_local;
   delete m_trk_z0;
   delete m_trk_d0;
+  delete m_trk_rinv;
   delete m_trk_chi2;
   delete m_trk_chi2dof;
   delete m_trk_chi2rphi;
@@ -792,6 +804,7 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_trkExt_phi_local;
   delete m_trkExt_z0;
   delete m_trkExt_d0;
+  delete m_trkExt_rinv;
   delete m_trkExt_chi2;
   delete m_trkExt_chi2dof;
   delete m_trkExt_chi2rphi;
@@ -815,6 +828,10 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_trkExt_matchtp_phi;
   delete m_trkExt_matchtp_z0;
   delete m_trkExt_matchtp_dxy;
+  delete m_trkExt_matchtp_d0;
+  delete m_trkExt_matchtp_x;
+  delete m_trkExt_matchtp_y;
+  delete m_trkExt_matchtp_z;
   delete m_trkExt_gtt_pt;
   delete m_trkExt_gtt_eta;
   delete m_trkExt_gtt_phi;
@@ -837,6 +854,9 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_tp_dxy;
   delete m_tp_d0;
   delete m_tp_z0;
+  delete m_tp_x;
+  delete m_tp_y;
+  delete m_tp_z;
   delete m_tp_d0_prod;
   delete m_tp_z0_prod;
   delete m_tp_pdgid;
@@ -875,6 +895,7 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_matchtrk_phi;
   delete m_matchtrk_z0;
   delete m_matchtrk_d0;
+  delete m_matchtrk_rinv;
   delete m_matchtrk_chi2;
   delete m_matchtrk_chi2dof;
   delete m_matchtrk_chi2rphi;
@@ -893,6 +914,7 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_matchtrkExt_phi;
   delete m_matchtrkExt_z0;
   delete m_matchtrkExt_d0;
+  delete m_matchtrkExt_rinv;
   delete m_matchtrkExt_chi2;
   delete m_matchtrkExt_chi2dof;
   delete m_matchtrkExt_chi2rphi;
@@ -1053,6 +1075,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_trk_phi_local = new std::vector<float>;
   m_trk_z0 = new std::vector<float>;
   m_trk_d0 = new std::vector<float>;
+  m_trk_rinv = new std::vector<float>;
   m_trk_chi2 = new std::vector<float>;
   m_trk_chi2dof = new std::vector<float>;
   m_trk_chi2rphi = new std::vector<float>;
@@ -1101,6 +1124,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_trkExt_phi_local = new std::vector<float>;
   m_trkExt_z0 = new std::vector<float>;
   m_trkExt_d0 = new std::vector<float>;
+  m_trkExt_rinv = new std::vector<float>;
   m_trkExt_chi2 = new std::vector<float>;
   m_trkExt_chi2dof = new std::vector<float>;
   m_trkExt_chi2rphi = new std::vector<float>;
@@ -1124,6 +1148,10 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_trkExt_matchtp_phi = new std::vector<float>;
   m_trkExt_matchtp_z0 = new std::vector<float>;
   m_trkExt_matchtp_dxy = new std::vector<float>;
+  m_trkExt_matchtp_d0 = new std::vector<float>;
+  m_trkExt_matchtp_x = new std::vector<float>;
+  m_trkExt_matchtp_y = new std::vector<float>;
+  m_trkExt_matchtp_z = new std::vector<float>;
   m_trkExt_gtt_pt = new std::vector<float>;
   m_trkExt_gtt_eta = new std::vector<float>;
   m_trkExt_gtt_phi = new std::vector<float>;
@@ -1146,6 +1174,9 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_tp_dxy = new std::vector<float>;
   m_tp_d0 = new std::vector<float>;
   m_tp_z0 = new std::vector<float>;
+  m_tp_x = new std::vector<float>;
+  m_tp_y = new std::vector<float>;
+  m_tp_z = new std::vector<float>;
   m_tp_d0_prod = new std::vector<float>;
   m_tp_z0_prod = new std::vector<float>;
   m_tp_pdgid = new std::vector<int>;
@@ -1184,6 +1215,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_matchtrk_phi = new std::vector<float>;
   m_matchtrk_z0 = new std::vector<float>;
   m_matchtrk_d0 = new std::vector<float>;
+  m_matchtrk_rinv = new std::vector<float>;
   m_matchtrk_chi2 = new std::vector<float>;
   m_matchtrk_chi2dof = new std::vector<float>;
   m_matchtrk_chi2rphi = new std::vector<float>;
@@ -1202,6 +1234,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_matchtrkExt_phi = new std::vector<float>;
   m_matchtrkExt_z0 = new std::vector<float>;
   m_matchtrkExt_d0 = new std::vector<float>;
+  m_matchtrkExt_rinv = new std::vector<float>;
   m_matchtrkExt_chi2 = new std::vector<float>;
   m_matchtrkExt_chi2dof = new std::vector<float>;
   m_matchtrkExt_chi2rphi = new std::vector<float>;
@@ -1299,6 +1332,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
     eventTree->Branch("trk_phi", &m_trk_phi);
     eventTree->Branch("trk_phi_local", &m_trk_phi_local);
     eventTree->Branch("trk_d0", &m_trk_d0);
+    eventTree->Branch("trk_rinv", &m_trk_rinv);
     eventTree->Branch("trk_z0", &m_trk_z0);
     eventTree->Branch("trk_chi2", &m_trk_chi2);
     eventTree->Branch("trk_chi2dof", &m_trk_chi2dof);
@@ -1351,6 +1385,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
     eventTree->Branch("trkExt_phi", &m_trkExt_phi);
     eventTree->Branch("trkExt_phi_local", &m_trkExt_phi_local);
     eventTree->Branch("trkExt_d0", &m_trkExt_d0);
+    eventTree->Branch("trkExt_rinv", &m_trkExt_rinv);
     eventTree->Branch("trkExt_z0", &m_trkExt_z0);
     eventTree->Branch("trkExt_chi2", &m_trkExt_chi2);
     eventTree->Branch("trkExt_chi2dof", &m_trkExt_chi2dof);
@@ -1375,6 +1410,10 @@ void L1TrackObjectNtupleMaker::beginJob() {
     eventTree->Branch("trkExt_matchtp_phi", &m_trkExt_matchtp_phi);
     eventTree->Branch("trkExt_matchtp_z0", &m_trkExt_matchtp_z0);
     eventTree->Branch("trkExt_matchtp_dxy", &m_trkExt_matchtp_dxy);
+    eventTree->Branch("trkExt_matchtp_d0", &m_trkExt_matchtp_d0);
+    eventTree->Branch("trkExt_matchtp_x", &m_trkExt_matchtp_x);
+    eventTree->Branch("trkExt_matchtp_y", &m_trkExt_matchtp_y);
+    eventTree->Branch("trkExt_matchtp_z", &m_trkExt_matchtp_z);
     eventTree->Branch("trkExt_gtt_pt", &m_trkExt_gtt_pt);
     eventTree->Branch("trkExt_gtt_eta", &m_trkExt_gtt_eta);
     eventTree->Branch("trkExt_gtt_phi", &m_trkExt_gtt_phi);
@@ -1399,6 +1438,9 @@ void L1TrackObjectNtupleMaker::beginJob() {
   eventTree->Branch("tp_dxy", &m_tp_dxy);
   eventTree->Branch("tp_d0", &m_tp_d0);
   eventTree->Branch("tp_z0", &m_tp_z0);
+  eventTree->Branch("tp_x", &m_tp_x);
+  eventTree->Branch("tp_y", &m_tp_y);
+  eventTree->Branch("tp_z", &m_tp_z);
   eventTree->Branch("tp_d0_prod", &m_tp_d0_prod);
   eventTree->Branch("tp_z0_prod", &m_tp_z0_prod);
   eventTree->Branch("tp_pdgid", &m_tp_pdgid);
@@ -1415,6 +1457,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
     eventTree->Branch("matchtrk_phi", &m_matchtrk_phi);
     eventTree->Branch("matchtrk_z0", &m_matchtrk_z0);
     eventTree->Branch("matchtrk_d0", &m_matchtrk_d0);
+    eventTree->Branch("matchtrk_rinv", &m_matchtrk_rinv);
     eventTree->Branch("matchtrk_chi2", &m_matchtrk_chi2);
     eventTree->Branch("matchtrk_chi2dof", &m_matchtrk_chi2dof);
     eventTree->Branch("matchtrk_chi2rphi", &m_matchtrk_chi2rphi);
@@ -1435,6 +1478,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
     eventTree->Branch("matchtrkExt_phi", &m_matchtrkExt_phi);
     eventTree->Branch("matchtrkExt_z0", &m_matchtrkExt_z0);
     eventTree->Branch("matchtrkExt_d0", &m_matchtrkExt_d0);
+    eventTree->Branch("matchtrkExt_rinv", &m_matchtrkExt_rinv);
     eventTree->Branch("matchtrkExt_chi2", &m_matchtrkExt_chi2);
     eventTree->Branch("matchtrkExt_chi2dof", &m_matchtrkExt_chi2dof);
     eventTree->Branch("matchtrkExt_chi2rphi", &m_matchtrkExt_chi2rphi);
@@ -1596,6 +1640,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
     m_trk_phi->clear();
     m_trk_phi_local->clear();
     m_trk_d0->clear();
+    m_trk_rinv->clear();
     m_trk_z0->clear();
     m_trk_chi2->clear();
     m_trk_chi2dof->clear();
@@ -1645,6 +1690,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
     m_trkExt_phi->clear();
     m_trkExt_phi_local->clear();
     m_trkExt_d0->clear();
+    m_trkExt_rinv->clear();
     m_trkExt_z0->clear();
     m_trkExt_chi2->clear();
     m_trkExt_chi2dof->clear();
@@ -1669,6 +1715,10 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
     m_trkExt_matchtp_phi->clear();
     m_trkExt_matchtp_z0->clear();
     m_trkExt_matchtp_dxy->clear();
+    m_trkExt_matchtp_d0->clear();
+    m_trkExt_matchtp_x->clear();
+    m_trkExt_matchtp_y->clear();
+    m_trkExt_matchtp_z->clear();
     m_trkExt_gtt_pt->clear();
     m_trkExt_gtt_eta->clear();
     m_trkExt_gtt_phi->clear();
@@ -1691,6 +1741,9 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
   m_tp_dxy->clear();
   m_tp_d0->clear();
   m_tp_z0->clear();
+  m_tp_x->clear();
+  m_tp_y->clear();
+  m_tp_z->clear();
   m_tp_d0_prod->clear();
   m_tp_z0_prod->clear();
   m_tp_pdgid->clear();
@@ -1730,6 +1783,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
     m_matchtrk_phi->clear();
     m_matchtrk_z0->clear();
     m_matchtrk_d0->clear();
+    m_matchtrk_rinv->clear();
     m_matchtrk_chi2->clear();
     m_matchtrk_chi2dof->clear();
     m_matchtrk_chi2rphi->clear();
@@ -1750,6 +1804,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
     m_matchtrkExt_phi->clear();
     m_matchtrkExt_z0->clear();
     m_matchtrkExt_d0->clear();
+    m_matchtrkExt_rinv->clear();
     m_matchtrkExt_chi2->clear();
     m_matchtrkExt_chi2dof->clear();
     m_matchtrkExt_chi2rphi->clear();
@@ -2174,6 +2229,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       int tmp_trk_nFitPars = iterL1Track->nFitPars();  //4 or 5
 
       float tmp_trk_d0 = -999;
+      float tmp_trk_rinv = iterL1Track->rInv();
       if (tmp_trk_nFitPars == 5) {
         float tmp_trk_x0 = iterL1Track->POCA().x();
         float tmp_trk_y0 = iterL1Track->POCA().y();
@@ -2269,6 +2325,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
         m_trk_d0->push_back(tmp_trk_d0);
       else
         m_trk_d0->push_back(999.);
+      m_trk_rinv->push_back(tmp_trk_rinv);
       m_trk_chi2->push_back(tmp_trk_chi2);
       m_trk_chi2dof->push_back(tmp_trk_chi2dof);
       m_trk_chi2rphi->push_back(tmp_trk_chi2rphi);
@@ -2340,6 +2397,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_trk_matchtp_phi->push_back(myTP_phi);
       m_trk_matchtp_z0->push_back(myTP_z0);
       m_trk_matchtp_dxy->push_back(myTP_dxy);
+    
 
       // ----------------------------------------------------------------------------------------------
       // store the index to the selected track or -1 if not selected
@@ -2392,6 +2450,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       int tmp_trk_nFitPars = iterL1Track->nFitPars();  //4 or 5
 
       float tmp_trk_d0 = -999;
+      float tmp_trk_rinv = iterL1Track->rInv();
       if (tmp_trk_nFitPars == 5) {
         float tmp_trk_x0 = iterL1Track->POCA().x();
         float tmp_trk_y0 = iterL1Track->POCA().y();
@@ -2487,6 +2546,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
         m_trkExt_d0->push_back(tmp_trk_d0);
       else
         m_trkExt_d0->push_back(999.);
+      m_trkExt_rinv->push_back(tmp_trk_rinv);
       m_trkExt_chi2->push_back(tmp_trk_chi2);
       m_trkExt_chi2dof->push_back(tmp_trk_chi2dof);
       m_trkExt_chi2rphi->push_back(tmp_trk_chi2rphi);
@@ -2516,7 +2576,10 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       float myTP_phi = -999;
       float myTP_z0 = -999;
       float myTP_dxy = -999;
-
+      float myTP_d0 = -999;
+      float myTP_x0 = -999;
+      float myTP_y0 = -999;
+      
       if (my_tp.isNull())
         myFake = 0;
       else {
@@ -2532,10 +2595,26 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
         myTP_phi = my_tp->p4().phi();
         myTP_z0 = my_tp->vertex().z();
 
-        float myTP_x0 = my_tp->vertex().x();
-        float myTP_y0 = my_tp->vertex().y();
+        myTP_x0 = my_tp->vertex().x();
+        myTP_y0 = my_tp->vertex().y();
+	myTP_z0 = my_tp->vertex().z();
         myTP_dxy = sqrt(myTP_x0 * myTP_x0 + myTP_y0 * myTP_y0);
 
+	// get d0/z0 propagated back to the IP
+	float tmp_tp_t = tan(2.0 * atan(1.0) - 2.0 * atan(exp(-myTP_eta)));
+	float delx = -myTP_x0;
+	float dely = -myTP_y0;
+	float A = 0.01 * 0.5696;
+	float Kmagnitude = A / myTP_pt;
+	float tmp_tp_charge = my_tp->charge();
+	float K = Kmagnitude * tmp_tp_charge;
+	float d = 0;
+	float tmp_tp_x0p = delx - (d + 1. / (2. * K) * sin(myTP_phi));
+	float tmp_tp_y0p = dely + (d + 1. / (2. * K) * cos(myTP_phi));
+	float tmp_tp_rp = sqrt(tmp_tp_x0p * tmp_tp_x0p + tmp_tp_y0p * tmp_tp_y0p);
+	float tmp_tp_d0 = tmp_tp_charge * tmp_tp_rp - (1. / (2. * K));
+	myTP_d0 = tmp_tp_d0 * (-1);  //fix d0 sign
+	
         if (DebugMode) {
           edm::LogVerbatim("Tracklet") << "TP matched to track has pt = " << my_tp->p4().pt()
                                        << " eta = " << my_tp->momentum().eta() << " phi = " << my_tp->momentum().phi()
@@ -2551,7 +2630,12 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_trkExt_matchtp_phi->push_back(myTP_phi);
       m_trkExt_matchtp_z0->push_back(myTP_z0);
       m_trkExt_matchtp_dxy->push_back(myTP_dxy);
-
+      m_trkExt_matchtp_d0->push_back(myTP_d0);
+      m_trkExt_matchtp_x->push_back(myTP_x0);
+      m_trkExt_matchtp_y->push_back(myTP_y0);
+      m_trkExt_matchtp_z->push_back(myTP_z0);
+      
+      
       // ----------------------------------------------------------------------------------------------
       // store the index to the selected track or -1 if not selected
       // ----------------------------------------------------------------------------------------------
@@ -2747,6 +2831,9 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
     m_tp_dxy->push_back(tmp_tp_dxy);
     m_tp_z0->push_back(tmp_tp_z0);
     m_tp_d0->push_back(tmp_tp_d0);
+    m_tp_x->push_back(tmp_tp_vx);
+    m_tp_y->push_back(tmp_tp_vy);
+    m_tp_z->push_back(tmp_tp_vz);
     m_tp_z0_prod->push_back(tmp_tp_z0_prod);
     m_tp_d0_prod->push_back(tmp_tp_d0_prod);
     m_tp_pdgid->push_back(tmp_tp_pdgid);
@@ -2845,6 +2932,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       float tmp_matchtrk_phi = -999;
       float tmp_matchtrk_z0 = -999;
       float tmp_matchtrk_d0 = -999;
+      float tmp_matchtrk_rinv = -999;
       float tmp_matchtrk_chi2 = -999;
       float tmp_matchtrk_chi2dof = -999;
       float tmp_matchtrk_chi2rphi = -999;
@@ -2875,7 +2963,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
           tmp_matchtrk_d0 = -tmp_matchtrk_x0 * sin(tmp_matchtrk_phi) + tmp_matchtrk_y0 * cos(tmp_matchtrk_phi);
           // tmp_matchtrk_d0 = matchedTracks.at(i_track)->d0();
         }
-
+	tmp_matchtrk_rinv = matchedTracks.at(i_track)->rInv();
         tmp_matchtrk_chi2 = matchedTracks.at(i_track)->chi2();
         tmp_matchtrk_chi2dof = matchedTracks.at(i_track)->chi2Red();
         tmp_matchtrk_chi2rphi = matchedTracks.at(i_track)->chi2XYRed();
@@ -2915,6 +3003,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_matchtrk_phi->push_back(tmp_matchtrk_phi);
       m_matchtrk_z0->push_back(tmp_matchtrk_z0);
       m_matchtrk_d0->push_back(tmp_matchtrk_d0);
+      m_matchtrk_rinv->push_back(tmp_matchtrk_rinv);
       m_matchtrk_chi2->push_back(tmp_matchtrk_chi2);
       m_matchtrk_chi2dof->push_back(tmp_matchtrk_chi2dof);
       m_matchtrk_chi2rphi->push_back(tmp_matchtrk_chi2rphi);
@@ -3019,6 +3108,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       float tmp_matchtrkExt_phi = -999;
       float tmp_matchtrkExt_z0 = -999;
       float tmp_matchtrkExt_d0 = -999;
+      float tmp_matchtrkExt_rinv = -999;
       float tmp_matchtrkExt_chi2 = -999;
       float tmp_matchtrkExt_chi2dof = -999;
       float tmp_matchtrkExt_chi2rphi = -999;
@@ -3050,6 +3140,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
           // tmp_matchtrkExt_d0 = matchedTracks.at(i_track)->d0();
         }
 
+	tmp_matchtrkExt_rinv = matchedTracks.at(i_track)->rInv();
         tmp_matchtrkExt_chi2 = matchedTracks.at(i_track)->chi2();
         tmp_matchtrkExt_chi2dof = matchedTracks.at(i_track)->chi2Red();
         tmp_matchtrkExt_chi2rphi = matchedTracks.at(i_track)->chi2XYRed();
@@ -3087,6 +3178,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_matchtrkExt_phi->push_back(tmp_matchtrkExt_phi);
       m_matchtrkExt_z0->push_back(tmp_matchtrkExt_z0);
       m_matchtrkExt_d0->push_back(tmp_matchtrkExt_d0);
+      m_matchtrkExt_rinv->push_back(tmp_matchtrkExt_rinv);
       m_matchtrkExt_chi2->push_back(tmp_matchtrkExt_chi2);
       m_matchtrkExt_chi2dof->push_back(tmp_matchtrkExt_chi2dof);
       m_matchtrkExt_chi2rphi->push_back(tmp_matchtrkExt_chi2rphi);
