@@ -40,10 +40,11 @@ process.MessageLogger.cerr.INFO.limit = cms.untracked.int32(0) # default: 0
 # input and output
 ############################################################
 
-process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(10))
+process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(1))
+
 
 readFiles = cms.untracked.vstring(
-                                  '/store/relval/CMSSW_13_0_0/RelValTTbar_14TeV/GEN-SIM-DIGI-RAW/130X_mcRun4_realistic_v2_2026D95noPU-v1/00000/16f6615d-f98c-475f-ad33-0e89934b6c7f.root'
+                                  '/store/mc/Phase2Fall22DRMiniAOD/DarkSUSY_mH-125_mGammaD-20_cT-100_TuneCP5_14TeV-pythia8/GEN-SIM-DIGI-RAW-MINIAOD/PU200_PUTP_125X_mcRun4_realistic_v2-v1/30000/00597964-f3aa-40e1-ae82-9a98eea747ee.root'
 )
 secFiles = cms.untracked.vstring()
 
@@ -51,15 +52,16 @@ process.source = cms.Source ("PoolSource",
                             fileNames = readFiles,
                             secondaryFileNames = secFiles,
                             duplicateCheckMode = cms.untracked.string('noDuplicateCheck'),
+                            skipEvents=cms.untracked.uint32(1)
                             )
 
 process.source.inputCommands = cms.untracked.vstring("keep *","drop l1tTkPrimaryVertexs_L1TkPrimaryVertex__*")
 process.Timing = cms.Service("Timing",
-  summaryOnly = cms.untracked.bool(False),
+  summaryOnly = cms.untracked.bool(True),
   useJobReport = cms.untracked.bool(True)
 )
 
-process.TFileService = cms.Service("TFileService", fileName = cms.string('GTTObjects_ttbar200PU_v2p2.root'), closeFileFast = cms.untracked.bool(True))
+process.TFileService = cms.Service("TFileService", fileName = cms.string('GTTObjects_DarkSUSY.root'), closeFileFast = cms.untracked.bool(True))
 
 
 ############################################################
@@ -93,7 +95,8 @@ process.load("L1Trigger.L1TTrackMatch.l1tTrackerEmuEtMiss_cfi")
 process.load("L1Trigger.L1TTrackMatch.l1tTrackerHTMiss_cfi")
 process.load("L1Trigger.L1TTrackMatch.l1tTrackerEmuHTMiss_cfi")
 process.load('L1Trigger.VertexFinder.l1tVertexProducer_cfi')
-
+process.load('L1Trigger.L1TTrackMatch.DisplacedVertexProducer_cfi')
+process.load("SimGeneral.HepPDTESSource.pythiapdt_cfi")
 
 ############################################################
 # Primary vertex
@@ -139,6 +142,7 @@ elif (L1TRKALGO == 'HYBRID_DISPLACED'):
     process.pTkMET = cms.Path(process.l1tTrackerEtMissExtended)
     process.pTkMHT = cms.Path(process.l1tTrackerHTMissExtended)
     process.pTkMHTEmulator = cms.Path(process.l1tTrackerEmuHTMissExtended)
+    process.DispVert = cms.Path(process.DisplacedVertexProducer)
     DISPLACED = 'Displaced'#
 
 # HYBRID: extended tracking
@@ -159,6 +163,16 @@ elif (L1TRKALGO == 'HYBRID_PROMPTANDDISP'):
     process.pTkMETEmu = cms.Path(process.l1tTrackerEmuEtMiss)
     process.pTkMHT = cms.Path(process.l1tTrackerHTMiss*process.l1tTrackerHTMissExtended)
     process.pTkMHTEmulator = cms.Path(process.l1tTrackerEmuHTMiss*process.l1tTrackerEmuHTMissExtended)
+    process.DispVert = cms.Path(process.DisplacedVertexProducer)
+    process.printTree = cms.EDAnalyzer("ParticleTreeDrawer",
+                                                                          src = cms.InputTag("genParticles"),
+                                                                          printP4 = cms.untracked.bool(False),
+                                                                          printPtEtaPhi = cms.untracked.bool(False),
+                                                                          printVertex = cms.untracked.bool(False),
+                                                                          printStatus = cms.untracked.bool(False),
+                                                                          printIndex = cms.untracked.bool(False)
+                                                                          )
+    process.Decay = cms.Path(process.printTree)
     DISPLACED = 'Both'
 
 
@@ -247,6 +261,7 @@ process.L1TrackNtuple = cms.EDAnalyzer('L1TrackObjectNtupleMaker',
         GenParticleInputTag = cms.InputTag("genParticles",""),
         RecoVertexInputTag=cms.InputTag("l1tVertexFinder", "L1Vertices"),
         RecoVertexEmuInputTag=cms.InputTag("l1tVertexFinderEmulator", "L1VerticesEmulation"),
+        DisplacedVertexInputTag = cms.InputTag("DisplacedVertexProducer","dispVertices"),
 )
 
 process.ntuple = cms.Path(process.L1TrackNtuple)
@@ -265,4 +280,4 @@ process.pOut = cms.EndPath(process.out)
 # use this if cluster/stub associators not available
 # process.schedule = cms.Schedule(process.TTClusterStubTruth,process.TTTracksEmuWithTruth,process.ntuple)
 
-process.schedule = cms.Schedule(process.TTClusterStub, process.TTClusterStubTruth, process.dtc, process.TTTracksEmuWithTruth, process.pL1GTTInput, process.pL1TrackSelection, process.pPV, process.pPVemu,process.pL1TrackVertexAssociation, process.pL1TrackJets, process.pL1TrackJetsEmu,process.pL1TrackFastJets, process.pTkMET, process.pTkMETEmu, process.pTkMHT, process.pTkMHTEmulator, process.ntuple)
+process.schedule = cms.Schedule(process.TTClusterStub, process.TTClusterStubTruth, process.dtc, process.TTTracksEmuWithTruth, process.pL1GTTInput, process.pL1TrackSelection, process.pPV, process.pPVemu,process.pL1TrackVertexAssociation, process.pL1TrackJets, process.pL1TrackJetsEmu,process.pL1TrackFastJets, process.pTkMET, process.pTkMETEmu, process.pTkMHT, process.pTkMHTEmulator, process.DispVert, process.ntuple)
