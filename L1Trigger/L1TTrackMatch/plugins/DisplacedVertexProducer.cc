@@ -127,30 +127,23 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
   
   for (iterL1Track = TTTrackHandle->begin(); iterL1Track != TTTrackHandle->end(); iterL1Track++) {
     edm::Ptr<TTTrack<Ref_Phase2TrackerDigi_> > l1track_ptr(TTTrackHandle, this_l1track);
-    
+    this_l1track++;
     float pt = iterL1Track->momentum().perp();
     float eta = iterL1Track->momentum().eta();
     float phi = iterL1Track->momentum().phi();
     float z0 = iterL1Track->z0();  //cm
     float x0 = iterL1Track->POCA().x();
     float y0 = iterL1Track->POCA().y();
-    float d0 = x0 * sin(phi) - y0 * cos(phi);
+    float d0 = -x0 * sin(phi) + y0 * cos(phi);
     float rinv = iterL1Track->rInv();
-    float chi2 = iterL1Track->chi2();
-    float chi2rphi = iterL1Track->chi2XY();
-    float chi2rz = iterL1Track->chi2Z();
+    float chi2 = iterL1Track->chi2Red();
+    float chi2rphi = iterL1Track->chi2XYRed();
+    float chi2rz = iterL1Track->chi2ZRed();
     float bendchi2 = iterL1Track->stubPtConsistency();
     float MVA1 = iterL1Track->trkMVA1();
     float MVA2 = iterL1Track->trkMVA2();
     std::vector<edm::Ref<edmNew::DetSetVector<TTStub<Ref_Phase2TrackerDigi_> >, TTStub<Ref_Phase2TrackerDigi_> > > stubRefs = iterL1Track->getStubRefs();
     int nstub = (int)stubRefs.size();
-    int ndof = 2 * nstub - 5;
-    int ndofrphi = nstub - 5 + 2;
-    int ndofrz = nstub - 2;
-    float chi2_dof = (float)chi2 / ndof;
-    float chi2rphi_dof = (float)chi2rphi / ndofrphi;
-    float chi2rz_dof = (float)chi2rz / ndofrz;
-    
     if( chi2rz<3.0 && MVA2>0.2 && MVA1>0.2 && pt>3.0 && fabs(eta)<2.4){
 
       if(fabs(d0)>1.0){
@@ -166,14 +159,14 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
 	if(fabs(d0)<=0.06) continue;
       }
 
-      Track_Parameters track = Track_Parameters(pt, d0, z0, eta, phi, -99999, -999, -999, -999, rinv, this_l1track);
+      //std::cout<<"track params: "<<pt<<" "<<-d0<<" "<<z0<<" "<<eta<<" "<<phi<<" "<<rinv<<" "<<this_l1track<<" "<<nstub<<" "<<chi2rphi<<" "<<chi2rz<<" "<<bendchi2<<" "<<MVA1<<" "<<MVA2<<std::endl;
+      Track_Parameters track = Track_Parameters(pt, -d0, z0, eta, phi, -99999, -999, -999, -999, rinv, (this_l1track - 1), nullptr, nstub, chi2rphi, chi2rz, bendchi2, MVA1, MVA2);
       selectedTracks.push_back(track);
       edm::Ptr<TrackingParticle> my_tp = MCTruthTTTrackHandle->findTrackingParticlePtr(l1track_ptr);
       selectedTPs.push_back(my_tp);
     }
-    this_l1track++;
   }
-  
+  //std::cout<<"num selected tracks: "<<selectedTracks.size()<<std::endl;
   sort(selectedTracks.begin(), selectedTracks.end(), ComparePtTrack); 
   std::unique_ptr<l1t::DisplacedTrackVertexCollection> product(new std::vector<l1t::DisplacedTrackVertex>());
   for(int i=0; i<int(selectedTracks.size()-1); i++){

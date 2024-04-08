@@ -565,15 +565,13 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vector<float> *trkVert_cos_T;
   vector<float> *trkVert_del_Z;
   vector<float> *trkVert_x;
-  //vector<float> *trkVert_alt_x;
   vector<float> *trkVert_y;
-  //vector<float> *trkVert_alt_y;
   vector<float> *trkVert_z;
-  //vector<float> *trkVert_leadingCharge;
-  //vector<float> *trkVert_subleadingCharge;
   vector<float> *trkVert_openingAngle;
   vector<float> *trkVert_parentPt;
   vector<int> *trkVert_delIndexPt;
+  vector<bool> *trkVert_isReal;
+  vector<float> *trkVert_score;
 
   vector<float> *tpVert_d_T;
   vector<float> *tpVert_R_T;
@@ -654,26 +652,24 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vector<int>     *matchtrk_dhits;
   vector<int>     *matchtrk_seed;
   vector<int>     *matchtrk_hitpattern;
-#if 0
-  vector<float>* vert_pt;
-  vector<float>* vert_z0;
-  vector<float>* vert_d0;
-  vector<float>* vert_eta;
-  vector<float>* vert_phi;
-  vector<float>* vert_delta_z;
-  vector<float>* vert_R_T;
-  vector<float>* vert_cos_T;
-  vector<float>* vert_d_T;
-  vector<float>* vert_chi2rzdofSum;
-  vector<int>* vert_numStubsSum;
-  vector<float>* vert_chi2rphidofSum;
-  vector<float>* vert_minD0;
-  vector<float>* vert_sumPt;
-  vector<float>* vert_score;
-  vector<float>* vert_x;
-  vector<float>* vert_y;
-  vector<float>* vert_z;
-#endif
+
+  TBranch *b_trkVert_firstIndexTrk;
+  TBranch *b_trkVert_secondIndexTrk;
+  TBranch *b_trkVert_firstIndexPt;
+  TBranch *b_trkVert_secondIndexPt;
+  TBranch *b_trkVert_inTraj;
+  TBranch *b_trkVert_d_T;
+  TBranch *b_trkVert_R_T;
+  TBranch *b_trkVert_cos_T;
+  TBranch *b_trkVert_del_Z;
+  TBranch *b_trkVert_x;
+  TBranch *b_trkVert_y;
+  TBranch *b_trkVert_z;
+  TBranch *b_trkVert_openingAngle;
+  TBranch *b_trkVert_parentPt;
+  TBranch *b_trkVert_delIndexPt;
+  TBranch *b_trkVert_isReal;
+  TBranch *b_trkVert_score;
   TBranch        *b_trk_pt;
   TBranch        *b_trk_eta;
   TBranch        *b_trk_phi;
@@ -744,26 +740,24 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TBranch        *b_matchtrk_dhits;
   TBranch        *b_matchtrk_seed;
   TBranch        *b_matchtrk_hitpattern;
-#if 0
-  TBranch *b_vert_pt;
-  TBranch *b_vert_z0;
-  TBranch *b_vert_d0;
-  TBranch *b_vert_eta;
-  TBranch *b_vert_phi;
-  TBranch *b_vert_delta_z;
-  TBranch *b_vert_R_T;
-  TBranch *b_vert_cos_T;
-  TBranch *b_vert_d_T;
-  TBranch *b_vert_chi2rzdofSum;
-  TBranch *b_vert_numStubsSum;
-  TBranch *b_vert_chi2rphidofSum;
-  TBranch *b_vert_minD0;
-  TBranch *b_vert_sumPt;
-  TBranch *b_vert_score;
-  TBranch *b_vert_x;
-  TBranch *b_vert_y;
-  TBranch *b_vert_z;
-#endif
+
+  trkVert_firstIndexTrk = 0;
+  trkVert_secondIndexTrk = 0;
+  trkVert_firstIndexPt = 0;
+  trkVert_secondIndexPt = 0;
+  trkVert_inTraj = 0;
+  trkVert_d_T = 0;
+  trkVert_R_T = 0;
+  trkVert_cos_T = 0;
+  trkVert_del_Z = 0;
+  trkVert_x = 0;
+  trkVert_y = 0;
+  trkVert_z = 0;
+  trkVert_openingAngle = 0;
+  trkVert_parentPt = 0;
+  trkVert_delIndexPt = 0;
+  trkVert_isReal = 0;
+  trkVert_score = 0;
   trk_pt = 0;
   trk_eta = 0;
   trk_phi = 0;
@@ -834,27 +828,25 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   matchtrk_dhits = 0;
   matchtrk_seed = 0;
   matchtrk_hitpattern = 0;
-#if 0
-  vert_pt = 0;
-  vert_z0 = 0;
-  vert_d0 = 0;
-  vert_eta = 0;
-  vert_phi = 0;
-  vert_delta_z = 0;
-  vert_R_T = 0;
-  vert_cos_T = 0;
-  vert_d_T = 0;
-  vert_chi2rzdofSum = 0;
-  vert_numStubsSum = 0;
-  vert_chi2rphidofSum = 0;
-  vert_minD0 = 0;
-  vert_sumPt = 0;
-  vert_score = 0;
-  vert_x = 0;
-  vert_y = 0;
-  vert_z = 0;
-#endif
-  tree->SetMakeClass(1);
+
+  //tree->SetMakeClass(1);
+  tree->SetBranchAddress("dv_firstIndexTrk", &trkVert_firstIndexTrk, &b_trkVert_firstIndexTrk);
+  tree->SetBranchAddress("dv_secondIndexTrk", &trkVert_secondIndexTrk, &b_trkVert_secondIndexTrk);
+  tree->SetBranchAddress("dv_firstIndexPt", &trkVert_firstIndexPt, &b_trkVert_firstIndexPt);
+  tree->SetBranchAddress("dv_secondIndexPt", &trkVert_secondIndexPt, &b_trkVert_secondIndexPt);
+  tree->SetBranchAddress("dv_inTraj", &trkVert_inTraj, &b_trkVert_inTraj);
+  tree->SetBranchAddress("dv_d_T", &trkVert_d_T, &b_trkVert_d_T);
+  tree->SetBranchAddress("dv_R_T", &trkVert_R_T, &b_trkVert_R_T);
+  tree->SetBranchAddress("dv_cos_T", &trkVert_cos_T, &b_trkVert_cos_T);
+  tree->SetBranchAddress("dv_del_Z", &trkVert_del_Z, &b_trkVert_del_Z);
+  tree->SetBranchAddress("dv_x", &trkVert_x, &b_trkVert_x);
+  tree->SetBranchAddress("dv_y", &trkVert_y, &b_trkVert_y);
+  tree->SetBranchAddress("dv_z", &trkVert_z, &b_trkVert_z);
+  tree->SetBranchAddress("dv_openingAngle", &trkVert_openingAngle, &b_trkVert_openingAngle);
+  tree->SetBranchAddress("dv_parentPt", &trkVert_parentPt, &b_trkVert_parentPt);
+  tree->SetBranchAddress("dv_delIndexPt", &trkVert_delIndexPt, &b_trkVert_delIndexPt);
+  tree->SetBranchAddress("dv_isReal", &trkVert_isReal, &b_trkVert_isReal);
+  tree->SetBranchAddress("dv_score", &trkVert_score, &b_trkVert_score);
   tree->SetBranchAddress("trkExt_pt", &trk_pt, &b_trk_pt);
   tree->SetBranchAddress("trkExt_eta", &trk_eta, &b_trk_eta);
   tree->SetBranchAddress("trkExt_phi", &trk_phi, &b_trk_phi);
@@ -925,27 +917,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   tree->SetBranchAddress("matchtrkExt_dhits", &matchtrk_dhits, &b_matchtrk_dhits);
   tree->SetBranchAddress("matchtrkExt_seed", &matchtrk_seed, &b_matchtrk_seed);
   tree->SetBranchAddress("matchtrkExt_hitpattern", &matchtrk_hitpattern, &b_matchtrk_hitpattern);
-#if 0
-  vertTree->SetBranchAddress("vert_pt", &vert_pt, &b_vert_pt);
-  vertTree->SetBranchAddress("vert_z0", &vert_z0, &b_vert_z0);
-  vertTree->SetBranchAddress("vert_d0", &vert_d0, &b_vert_d0);
-  vertTree->SetBranchAddress("vert_eta", &vert_eta, &b_vert_eta);
-  vertTree->SetBranchAddress("vert_phi", &vert_phi, &b_vert_phi);
-  vertTree->SetBranchAddress("vert_delta_z", &vert_delta_z, &b_vert_delta_z);
-  vertTree->SetBranchAddress("vert_R_T", &vert_R_T, &b_vert_R_T);
-  vertTree->SetBranchAddress("vert_cos_T", &vert_cos_T, &b_vert_cos_T);
-  vertTree->SetBranchAddress("vert_d_T", &vert_d_T, &b_vert_d_T);
-  vertTree->SetBranchAddress("vert_chi2rzdofSum", &vert_chi2rzdofSum, &b_vert_chi2rzdofSum);
-  vertTree->SetBranchAddress("vert_numStubsSum", &vert_numStubsSum, &b_vert_numStubsSum);
-  vertTree->SetBranchAddress("vert_chi2rphidofSum", &vert_chi2rphidofSum, &b_vert_chi2rphidofSum);
-  vertTree->SetBranchAddress("vert_minD0", &vert_minD0, &b_vert_minD0);
-  vertTree->SetBranchAddress("vert_sumPt", &vert_sumPt, &b_vert_sumPt);
-  vertTree->SetBranchAddress("vert_score", &vert_score, &b_vert_score);
-  vertTree->SetBranchAddress("vert_x", &vert_x, &b_vert_x);
-  vertTree->SetBranchAddress("vert_y", &vert_y, &b_vert_y);
-  vertTree->SetBranchAddress("vert_z", &vert_z, &b_vert_z);
-  tree->AddFriend(vertTree);
-#endif  
+
   //preselection cuts and plots definitions
   // Cut assumptions: first cut is maxEta
   std::vector<std::unique_ptr<Cut>> preselCuts;
@@ -953,13 +925,11 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   preselCuts.push_back(std::move(cut0));
   std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof","max #chi^{2}_{rz}",&trk_chi2rz,3.0,false));
   preselCuts.push_back(std::move(cut1));
-  std::unique_ptr<TypedCut<float>> cut2(new TypedCut<float>("maxChi2rphidof_barrel","max #chi^{2}_{r#phi}",&trk_chi2rphi,5.0,true));
-  preselCuts.push_back(std::move(cut2));
   std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("minMVA2","min MVA2",&trk_MVA2,0.2,true));
   preselCuts.push_back(std::move(cut3));
   std::unique_ptr<TypedCut<float>> cut4(new TypedCut<float>("minMVA1","min MVA1",&trk_MVA1,0.2,false));
   preselCuts.push_back(std::move(cut4));
-  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.8,true));
+  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.5,true));
   preselCuts.push_back(std::move(cut5));
   std::unique_ptr<TypedCut<int>> cut6(new TypedCut<int>("minNumStub_overlap","min n_{stub}",&trk_nstub,5,true));
   preselCuts.push_back(std::move(cut6));
@@ -1411,25 +1381,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     tpVert_z = new vector<float> ();
     tpVert_openingAngle = new vector<float> ();
     tpVert_parentPt = new vector<float> ();
-    trkVert_firstIndexTrk = new vector<int> ();
-    trkVert_secondIndexTrk = new vector<int> ();
-    trkVert_firstIndexPt = new vector<int> ();
-    trkVert_secondIndexPt = new vector<int> ();
-    trkVert_inTraj = new vector<int> ();
-    trkVert_d_T = new vector<float> ();
-    trkVert_R_T = new vector<float> ();
-    trkVert_cos_T = new vector<float> ();
-    trkVert_del_Z = new vector<float> ();
-    trkVert_x = new vector<float> ();
-    //trkVert_alt_x = new vector<float> ();
-    trkVert_y = new vector<float> ();
-    //trkVert_alt_y = new vector<float> ();
-    trkVert_z = new vector<float> ();
-    //trkVert_leadingCharge = new vector<float> ();
-    //trkVert_subleadingCharge = new vector<float> ();
-    trkVert_openingAngle = new vector<float> ();
-    trkVert_parentPt = new vector<float> ();
-    trkVert_delIndexPt = new vector<int> ();
+    
     // ----------------------------------------------------------------------------------------------------------------
     // track loop
     //std::cout<<"starting track loop"<<std::endl;
@@ -1539,6 +1491,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
 	
 	//std::cout<<"pushed track icut_counter: "<<icut_counter<<std::endl;
+	//std::cout<<"track params: "<<trk_pt->at(it)<<" "<<-trk_d0->at(it)<<" "<<trk_z0->at(it)<<" "<<trk_eta->at(it)<<" "<<trk_phi->at(it)<<" "<<trk_rinv->at(it)<<" "<<it<<" "<<trk_nstub->at(it)<<" "<<trk_chi2rphi->at(it)<<" "<<trk_chi2rz->at(it)<<" "<<trk_bendchi2->at(it)<<" "<<trk_MVA1->at(it)<<" "<<trk_MVA2->at(it)<<std::endl;
 	selectedTracks.push_back(Track_Parameters(trk_pt->at(it), -trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -99999, -999., -999., -999., trk_rinv->at(it), it, tp_params, trk_nstub->at(it), trk_chi2rphi->at(it), trk_chi2rz->at(it), trk_bendchi2->at(it), trk_MVA1->at(it), trk_MVA2->at(it) ));
 	trkH_T += trk_pt->at(it);
 	std::valarray<float> trackPtVec = {trk_pt->at(it)*cos(trk_phi->at(it)),trk_pt->at(it)*sin(trk_phi->at(it))};
@@ -1901,21 +1854,22 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    std::cout<<"recalc circle 2 x0 y0 rho: "<<x2<<" "<<y2<<" "<<R2<<std::endl;
 #endif
 	    binVertices.push_back(vertex);
-	    trkVert_firstIndexTrk->push_back(trackBin[i].index);
-	    trkVert_secondIndexTrk->push_back(trackBin[j].index);
-	    trkVert_firstIndexPt->push_back(i);
-	    trkVert_secondIndexPt->push_back(j);
-	    trkVert_inTraj->push_back(inTraj);
-	    trkVert_d_T->push_back(vertex.d_T);
-	    trkVert_R_T->push_back(vertex.R_T);
-	    trkVert_cos_T->push_back(vertex.cos_T);
-	    trkVert_del_Z->push_back(vertex.delta_z);
-	    trkVert_x->push_back(vertex.x_dv);
-	    trkVert_y->push_back(vertex.y_dv);
-	    trkVert_z->push_back(vertex.z_dv);
-	    trkVert_openingAngle->push_back(vertex.openingAngle);
-	    trkVert_parentPt->push_back(vertex.p_mag);
-	    trkVert_delIndexPt->push_back(fabs(i-j));
+	    //trkVert_firstIndexTrk->push_back(trackBin[i].index);
+	    //trkVert_secondIndexTrk->push_back(trackBin[j].index);
+	    //trkVert_firstIndexPt->push_back(i);
+	    //trkVert_secondIndexPt->push_back(j);
+	    //trkVert_inTraj->push_back(inTraj);
+	    //trkVert_d_T->push_back(vertex.d_T);
+	    //trkVert_R_T->push_back(vertex.R_T);
+	    //trkVert_cos_T->push_back(vertex.cos_T);
+	    //trkVert_del_Z->push_back(vertex.delta_z);
+	    //trkVert_x->push_back(vertex.x_dv);
+	    //trkVert_y->push_back(vertex.y_dv);
+	    //trkVert_z->push_back(vertex.z_dv);
+	    //trkVert_openingAngle->push_back(vertex.openingAngle);
+	    //trkVert_parentPt->push_back(vertex.p_mag);
+	    //trkVert_delIndexPt->push_back(fabs(i-j));
+	    //std::cout<<"found vertex"<<std::endl;
 	    //trkVert_alt_x->push_back(x_trk_alt);
 	    //trkVert_alt_y->push_back(y_trk_alt);
 	    //trkVert_leadingCharge->push_back(vertex.a.charge);
@@ -1928,12 +1882,15 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     end = std::chrono::steady_clock::now();
     trackVertLoopTime += std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
     begin = std::chrono::steady_clock::now();
+    //std::cout<<"match track and true vertices"<<std::endl;
     // match track vertices to true vertices
     for(int it = 0; it < (int)trkVert_x->size(); it++){
       int itp = trkVert_firstIndexTrk->at(it);
+      //std::cout<<"match vertices first track index: "<<itp<<std::endl;
       Track_Parameters tp_params1(trk_matchtp_pt->at(itp), trk_matchtp_d0->at(itp), trk_matchtp_z0->at(itp), trk_matchtp_eta->at(itp), trk_matchtp_phi->at(itp), trk_matchtp_pdgid->at(itp), trk_matchtp_x->at(itp), trk_matchtp_y->at(itp), trk_matchtp_z->at(itp));
       //std::cout<<"trkVert xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<" tp 1 params: "<<trk_matchtp_pt->at(itp)<<" "<<trk_matchtp_d0->at(itp)<<" "<<trk_matchtp_z0->at(itp)<<" "<<trk_matchtp_eta->at(itp)<<" "<<trk_matchtp_phi->at(itp)<<" "<<trk_matchtp_pdgid->at(itp)<<" "<<trk_matchtp_x->at(itp)<<" "<<trk_matchtp_y->at(itp)<<" "<<trk_matchtp_z->at(itp)<<std::endl;
       itp = trkVert_secondIndexTrk->at(it);
+      //std::cout<<"match vertices second track index: "<<itp<<std::endl;
       Track_Parameters tp_params2(trk_matchtp_pt->at(itp), trk_matchtp_d0->at(itp), trk_matchtp_z0->at(itp), trk_matchtp_eta->at(itp), trk_matchtp_phi->at(itp), trk_matchtp_pdgid->at(itp), trk_matchtp_x->at(itp), trk_matchtp_y->at(itp), trk_matchtp_z->at(itp));
       //std::cout<<"trkVert xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<" tp 2 params: "<<trk_matchtp_pt->at(itp)<<" "<<trk_matchtp_d0->at(itp)<<" "<<trk_matchtp_z0->at(itp)<<" "<<trk_matchtp_eta->at(itp)<<" "<<trk_matchtp_phi->at(itp)<<" "<<trk_matchtp_pdgid->at(itp)<<" "<<trk_matchtp_x->at(itp)<<" "<<trk_matchtp_y->at(itp)<<" "<<trk_matchtp_z->at(itp)<<std::endl;
       bool foundMatch = false;
@@ -1963,11 +1920,15 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	isMatchedVec[j][i] = false;
       }
     }
+    //std::cout<<"fill vertex plots"<<std::endl;
+    //std::cout<<"trkVert_x size: "<<trkVert_x->size()<<std::endl;
     // fill vertex plots
     for(int it = 0; it < (int)trkVert_x->size(); it++){
       for(uint i=0; i<vertCuts.size(); i++){
+	//std::cout<<"it i: "<<it<<" "<<i<<std::endl;
 	TString cutName = vertCuts[i]->getCutName();
 	float cutValue = vertCuts[i]->getCutValue();
+	//std::cout<<"cutName: "<<cutName<<" vertex track indices: "<<trkVert_firstIndexTrk->at(it)<<" "<<trkVert_secondIndexTrk->at(it)<<std::endl;
 	float param;
 	if(cutName.Contains("delta")){
 	  float param1 = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
@@ -1975,7 +1936,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  param = fabs(param1 - param2);
 	}
 	else if(cutName.Contains("sum")){
+	  //std::cout<<"before track param get"<<std::endl;
 	  float param1 = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
+	  //std::cout<<"got param 1"<<std::endl;
 	  float param2 = vertCuts[i]->getParam(trkVert_secondIndexTrk->at(it));
 	  if(cutName.Contains("Charge")){
 	    if(param1>0.0) param1 = 1.0;
@@ -2006,7 +1969,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
 	//std::cout<<"trackVert cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
 	if(cutName.Contains("max") && param>cutValue) break;
-	if(cutName.Contains("min") && param<cutValue) break;
+	//std::cout<<"between breaks"<<std::endl;
+	//std::cout<<"contains min: "<<cutName.Contains("min")<<std::endl;
+	//std::cout<<"param less than cut value: "<<(param<cutValue)<<std::endl;
+	if(cutName.Contains("min") && param<cutValue){
+	  //std::cout<<"about to break"<<std::endl;
+	  break;
+	}
+	//std::cout<<"passed cut"<<std::endl;
 	//std::cout<<"passed cut, vertex match index: "<<trkVert_indexMatch[it]<<" xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<std::endl;
 	numVertices[i]++;
 	for(uint j=0; j<vertType.size(); j++){
@@ -2014,9 +1984,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  if(vertType[j]=="matched" && trkVert_indexMatch[it]==-1) continue;
 	  //if(vertType[j]=="unmatched" && (trkVert_indexMatch[it]!=-1 && !isMatchedVec[trkVert_indexMatch[it]][i])) continue;
 	  if(vertType[j]=="unmatched" && trkVert_indexMatch[it]!=-1) continue;
-     
+	  //std::cout<<"filling plot"<<std::endl;
 	  for(uint k=0; k<vertCutFlows.size(); k++){
 	    TString varName = vertCutFlows[k]->getVarName();
+	    //std::cout<<"varName: "<<varName<<std::endl;
 	    if(varName.Contains("delta")){
 	      float param1 = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
 	      float param2 = vertCutFlows[k]->getParam(trkVert_secondIndexTrk->at(it));
@@ -2050,8 +2021,10 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	      param = vertCutFlows[k]->getParam(it);
 	    }
 	    vertexCutFlows[k][j][i]->Fill(param);
+	    //std::cout<<"filled plot"<<std::endl;
 	  }
 	  if(vertType[j]=="matched"){
+	    //std::cout<<"filling matched plot"<<std::endl;
 	    for(uint k=0; k<vertPlotTPModifiers.size(); k++){
 	      int jt = trkVert_indexMatch[it];
 	      if(vertPlotTPModifiers[k].Contains("oneMatch") && filledOneMatch[i]) continue;
@@ -2078,6 +2051,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 		  }
 		}
 #endif
+		//std::cout<<"filling resolution plot"<<std::endl;
 		h_res_tp_trk_x->Fill(tpVert_x->at(jt)-trkVert_x->at(it));
 		h_res_tp_trk_x_zoomOut->Fill(tpVert_x->at(jt)-trkVert_x->at(it));
 		h_res_tp_trk_y->Fill(tpVert_y->at(jt)-trkVert_y->at(it));
@@ -2087,6 +2061,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
 	      for(uint m=0; m<vertCutFlowsTP.size(); m++){
 		TString varName = vertCutFlowsTP[m]->getVarName();
+		//std::cout<<"matched varName: "<<varName<<std::endl;
 		if(varName.Contains("delta")){
 		  float param1 = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][0]);
 		  for(uint iTP=1; iTP<tpVert_indexTPs[jt].size(); ++iTP){
@@ -2141,6 +2116,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     delete tpVert_z;
     delete tpVert_openingAngle;
     delete tpVert_parentPt;
+#if 0
     delete trkVert_firstIndexTrk;
     delete trkVert_secondIndexTrk;
     delete trkVert_firstIndexPt;
@@ -2156,7 +2132,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     delete trkVert_openingAngle;
     delete trkVert_parentPt;
     delete trkVert_delIndexPt;
-    
+#endif
     
 
   } // End of Event Loop
