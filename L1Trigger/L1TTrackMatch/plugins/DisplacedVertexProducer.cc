@@ -113,6 +113,7 @@ DisplacedVertexProducer::DisplacedVertexProducer(const edm::ParameterSet& iConfi
 {
   //--- Define EDM output to be written to file (if required)
   produces<l1t::DisplacedTrackVertexCollection>(outputTrackCollectionName_);
+  runTime_ = std::make_unique<cms::Ort::ONNXRuntime>(this->ONNXmodel_);
 }
 
 void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const edm::EventSetup& iSetup) const {
@@ -200,14 +201,15 @@ void DisplacedVertexProducer::produce(edm::StreamID, edm::Event& iEvent, const e
       cms::Ort::FloatArrays ortoutputs;
       float minD0 = vertex.a.d0;
       if(fabs(vertex.b.d0)<fabs(minD0)) minD0 = vertex.b.d0;
-      std::vector<float> Transformed_features = {vertex.delta_z, vertex.R_T, vertex.cos_T, vertex.d_T, vertex.chi2rzdofSum, float(vertex.numStubsSum), vertex.chi2rphidofSum, minD0, vertex.a.pt+vertex.b.pt};
-      cms::Ort::ONNXRuntime Runtime(this->ONNXmodel_);  //Setup ONNX runtime
+      //std::vector<float> Transformed_features = {vertex.delta_z, vertex.R_T, vertex.cos_T, vertex.d_T, vertex.chi2rzdofSum, float(vertex.numStubsSum), vertex.chi2rphidofSum, minD0, vertex.a.pt+vertex.b.pt};
+      std::vector<float> Transformed_features = {selectedTracks[i].pt, selectedTracks[j].pt, selectedTracks[i].eta, selectedTracks[j].eta, selectedTracks[i].phi, selectedTracks[j].phi, selectedTracks[i].d0, selectedTracks[j].d0, selectedTracks[i].z0, selectedTracks[j].z0, selectedTracks[i].chi2rz, selectedTracks[j].chi2rz, selectedTracks[i].bendchi2, selectedTracks[j].bendchi2, selectedTracks[i].MVA1, selectedTracks[j].MVA1, selectedTracks[i].MVA2, selectedTracks[j].MVA2 };
+      //cms::Ort::ONNXRuntime Runtime(this->ONNXmodel_);  //Setup ONNX runtime
       ortinput_names.push_back(this->ONNXInputName_);
-      ortoutput_names = Runtime.getOutputNames();
+      ortoutput_names = runTime_->getOutputNames();
       ortinput.push_back(Transformed_features);
       int batch_size = 1;
-      ortoutputs = Runtime.run(ortinput_names, ortinput, {}, ortoutput_names, batch_size);
-      outputVertex.setScore(ortoutputs[0][0]);
+      ortoutputs = runTime_->run(ortinput_names, ortinput, {}, ortoutput_names, batch_size);
+      outputVertex.setScore(ortoutputs[1][1]);
       product->emplace_back(outputVertex);
     }
   }

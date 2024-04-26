@@ -258,6 +258,7 @@ class DisplacedVertexProducer : public edm::global::EDProducer<> {
   const std::string ONNXmodel_;
   const std::string ONNXInputName_;
   const std::vector<std::string> featureNames_;
+  std::unique_ptr<cms::Ort::ONNXRuntime> runTime_;
 };
 
 #endif

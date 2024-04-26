@@ -4,7 +4,7 @@ DisplacedVertexProducer = cms.EDProducer('DisplacedVertexProducer',
   l1TracksInputTag = cms.InputTag("l1tTTTracksFromExtendedTrackletEmulation", "Level1TTTracks"),
   l1TrackVertexCollectionName = cms.string("dispVertices"),
   mcTruthTrackInputTag = cms.InputTag("TTTrackAssociatorFromPixelDigisExtended", "Level1TTTracks"),
-  ONNXmodel = cms.string("/afs/cern.ch/user/r/rmccarth/private/dispVert/CMSSW_14_0_0_pre2/src/L1Trigger/L1TTrackMatch/test/model.onnx"),
-  ONNXInputName = cms.string("dense_input"),
-  featureNames = cms.vstring(["delta_z","R_T","cos_T","d_T","chi2rzdofSum","numStubsSum","chi2rphidofSum","minD0","sumPt"])
+  ONNXmodel = cms.string("/afs/cern.ch/user/r/rmccarth/private/dispVert/CMSSW_14_0_0_pre2/src/L1Trigger/L1TTrackMatch/test/trueSplit_lowfake.onnx"),
+  ONNXInputName = cms.string("feature_input"),
+  featureNames = cms.vstring(['trkExt_pt_firstTrk', 'trkExt_pt', 'trkExt_eta_firstTrk', 'trkExt_eta', 'trkExt_phi_firstTrk', 'trkExt_phi', 'trkExt_d0_firstTrk', 'trkExt_d0', 'trkExt_z0_firstTrk', 'trkExt_z0', 'trkExt_chi2rz_firstTrk', 'trkExt_chi2rz', 'trkExt_bendchi2_firstTrk', 'trkExt_bendchi2', 'trkExt_MVA_firstTrk', 'trkExt_MVA', 'trkExt_MVA2_firstTrk', 'trkExt_MVA2'])
 )

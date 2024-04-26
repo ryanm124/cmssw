@@ -1111,6 +1111,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCuts.push_back(std::move(vertCut2));
   std::unique_ptr<TypedCut<float>> vertCut3(new TypedCut<float>("min_trk_sumCharge","min #Sigma q",&trk_rinv,0,true));
   vertCuts.push_back(std::move(vertCut3));
+#if 0
   std::unique_ptr<TypedCut<float>> vertCut4(new TypedCut<float>("max_trk_sumBendChi2","max #Sigma #chi^{2}_{bend}",&trk_bendchi2,14.0,true));
   vertCuts.push_back(std::move(vertCut4));
   std::unique_ptr<TypedCut<float>> vertCut5(new TypedCut<float>("minCos_T","min cos_{T}",&trkVert_cos_T,0.96,true));
@@ -1129,7 +1130,24 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCuts.push_back(std::move(vertCut11));
   std::unique_ptr<TypedCut<float>> vertCut12(new TypedCut<float>("min_trk_highD0","min d_{0}",&trk_d0,0.3,true));
   vertCuts.push_back(std::move(vertCut12));
-
+#endif
+  std::unique_ptr<TypedCut<float>> vertCut4(new TypedCut<float>("min_score0p8","score>0.8",&trkVert_score,0.8,true));
+  vertCuts.push_back(std::move(vertCut4));
+  std::unique_ptr<TypedCut<float>> vertCut5(new TypedCut<float>("min_score0p9","score>0.9",&trkVert_score,0.9,true));
+  vertCuts.push_back(std::move(vertCut5));
+  std::unique_ptr<TypedCut<float>> vertCut6(new TypedCut<float>("min_score0p95","score>0.95",&trkVert_score,0.95,true));
+  vertCuts.push_back(std::move(vertCut6));
+  std::unique_ptr<TypedCut<float>> vertCut7(new TypedCut<float>("min_score0p96","score>0.96",&trkVert_score,0.96,true));
+  vertCuts.push_back(std::move(vertCut7));
+  std::unique_ptr<TypedCut<float>> vertCut8(new TypedCut<float>("min_score0p97","score>0.97",&trkVert_score,0.97,true));
+  vertCuts.push_back(std::move(vertCut8));
+  std::unique_ptr<TypedCut<float>> vertCut9(new TypedCut<float>("min_score0p98","score>0.98",&trkVert_score,0.98,true));
+  vertCuts.push_back(std::move(vertCut9));
+  std::unique_ptr<TypedCut<float>> vertCut10(new TypedCut<float>("min_score0p99","score>0.99",&trkVert_score,0.99,true));
+  vertCuts.push_back(std::move(vertCut10));
+  std::unique_ptr<TypedCut<float>> vertCut11(new TypedCut<float>("min_score0p999","score>0.999",&trkVert_score,0.999,true));
+  vertCuts.push_back(std::move(vertCut11));
+  
   std::vector<std::unique_ptr<Plot>> vertCutFlows;
   std::unique_ptr<TypedPlot<float>> vertPlot0(new TypedPlot<float>("x","cm",&trkVert_x,100,-5.0,5.0));
   vertCutFlows.push_back(std::move(vertPlot0));
@@ -1185,6 +1203,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCutFlows.push_back(std::move(vertPlot25));
   std::unique_ptr<TypedPlot<float>> vertPlot26(new TypedPlot<float>("leadEta","",&trk_eta,50,-2.4,2.4));
   vertCutFlows.push_back(std::move(vertPlot26));
+  std::unique_ptr<TypedPlot<float>> vertPlot27(new TypedPlot<float>("score","",&trkVert_score,50,0.0,1.0));
+  vertCutFlows.push_back(std::move(vertPlot27));
 
   std::vector<std::unique_ptr<Plot>> vertCutFlowsTP;
   std::unique_ptr<TypedPlot<float>> vertPlotTP0(new TypedPlot<float>("x","cm",&tpVert_x,100,-5.0,5.0));
@@ -1344,7 +1364,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   if (tree == 0) return;
   Long64_t nevt = tree->GetEntries();
   //nevt = 100;
-  int counter = 0;
   Vertex_Parameters geomTrackVertex;
   Vertex_Parameters geomTrueVertex;
   auto trackLoopTime = 0.;
@@ -1386,21 +1405,12 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     // track loop
     //std::cout<<"starting track loop"<<std::endl;
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    //std::cout<<"isHToMu size: "<<trk_matchtp_isHToMu->size()<<std::endl;
-    //std::cout<<"pt size: "<<trk_pt->size()<<std::endl;
-    //std::cout<<"match pt size: "<<trk_matchtp_pt->size()<<std::endl;
     for (uint it = 0; it < trk_matchtp_isHToMu->size(); ++it){
-      //std::cout<<"it: "<<it<<std::endl;
       bool isPrimary = true;
       if(inputFile.Contains("DarkPhoton")){
-	//std::cout<<"darkphoton isprimary"<<std::endl;
 	isPrimary = trk_matchtp_isHToMu->at(it);
-	if(isPrimary){
-	  counter+=1;
-	}
       }
       if(inputFile.Contains("DisplacedTrackJet")){
-	//std::cout<<"displacedtrackjet isprimary"<<std::endl;
 	isPrimary = trk_matchtp_isHToB->at(it);
       }
       //std::cout<<"track pt: "<<trk_pt->at(it)<<" eta: "<<trk_eta->at(it)<<" d0 : "<<trk_d0->at(it)<<" phi: "<<trk_phi->at(it)<<" z0: "<<trk_z0->at(it)<<" nstub: "<<trk_nstub<<std::endl;
@@ -1431,10 +1441,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	if(!preselCuts[icut]->getDoPlot()) continue;
 	for(uint i=0; i<trackType.size(); ++i){
 	  bool primary = trkExt_fake->at(it)==1 && isPrimary;
-	  if(i==0 && icut==0 && isPrimary==true){
-	    
-	    //std::cout<<"trk pt: "<<trk_pt->at(it)<<" tp pt: "<<trk_matchtp_pt->at(it)<<" fake: "<<trkExt_fake->at(it)<<" isPrimary: "<<isPrimary<<std::endl;
-	  }
 	  if(trackType[i]=="primary" && !primary) continue;
 	  if(trackType[i]=="np" && primary) continue;
 	  if(trackType[i]=="fake" && trkExt_fake->at(it)!=0) continue;
@@ -1490,7 +1496,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  }
 	}
 	
-	//std::cout<<"pushed track icut_counter: "<<icut_counter<<std::endl;
+	
 	//std::cout<<"track params: "<<trk_pt->at(it)<<" "<<-trk_d0->at(it)<<" "<<trk_z0->at(it)<<" "<<trk_eta->at(it)<<" "<<trk_phi->at(it)<<" "<<trk_rinv->at(it)<<" "<<it<<" "<<trk_nstub->at(it)<<" "<<trk_chi2rphi->at(it)<<" "<<trk_chi2rz->at(it)<<" "<<trk_bendchi2->at(it)<<" "<<trk_MVA1->at(it)<<" "<<trk_MVA2->at(it)<<std::endl;
 	selectedTracks.push_back(Track_Parameters(trk_pt->at(it), -trk_d0->at(it), trk_z0->at(it), trk_eta->at(it), trk_phi->at(it), -99999, -999., -999., -999., trk_rinv->at(it), it, tp_params, trk_nstub->at(it), trk_chi2rphi->at(it), trk_chi2rz->at(it), trk_bendchi2->at(it), trk_MVA1->at(it), trk_MVA2->at(it) ));
 	trkH_T += trk_pt->at(it);
@@ -1667,43 +1673,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	tpVert_z->push_back(trueVertices[i].z_dv);
 	tpVert_openingAngle->push_back(trueVertices[i].openingAngle);
 	tpVert_parentPt->push_back(trueVertices[i].p_mag);
-#if 0
-	float bfield = 3.8112; //T
-	float c = 0.299792458; // m/ns
-	float rinv = 0.01 * c * bfield / trueVertices[i].tracks[0].pt;
-	float R1 = fabs(1/rinv); //cm
-	float px = TMath::Cos(trueVertices[i].tracks[0].phi)*trueVertices[i].tracks[0].pt;
-	float py = TMath::Sin(trueVertices[i].tracks[0].phi)*trueVertices[i].tracks[0].pt;
-	std::valarray<float> vecToCenter = {-py,px};
-	if(trueVertices[i].tracks[0].charge>0) vecToCenter *= -1.0;
-	vecToCenter *= R1 / TMath::Sqrt(pow(px,2)+pow(py,2));
-	float x1 = trueVertices[i].x_dv + vecToCenter[0];
-	float y1 = trueVertices[i].y_dv + vecToCenter[1];
-	rinv = 0.01 * c * bfield / trueVertices[i].tracks[1].pt;
-	float R2 = fabs(1/rinv); //cm
-	px = TMath::Cos(trueVertices[i].tracks[1].phi)*trueVertices[i].tracks[1].pt;
-	py = TMath::Sin(trueVertices[i].tracks[1].phi)*trueVertices[i].tracks[1].pt;
-	vecToCenter = {-py,px};
-	if(trueVertices[i].tracks[1].charge>0) vecToCenter *= -1.0;
-	vecToCenter *= R2 / TMath::Sqrt(pow(px,2)+pow(py,2));
-	float x2 = trueVertices[i].x_dv + vecToCenter[0];
-	float y2 = trueVertices[i].y_dv + vecToCenter[1];
-	float R = dist(x1,y1,x2,y2);
-	float co1 = (pow(R1,2)-pow(R2,2))/(2*pow(R,2));
-	float radicand = (2/pow(R,2))*(pow(R1,2)+pow(R2,2))-(pow(pow(R1,2)-pow(R2,2),2)/pow(R,4))-1;
-	float co2 = 0;
-	if(radicand>0) co2 = 0.5*TMath::Sqrt(radicand);
-	float ix1_x = 0.5*(x1+x2)+co1*(x2-x1)+co2*(y2-y1);
-	float ix2_x = 0.5*(x1+x2)+co1*(x2-x1)-co2*(y2-y1);
-	float ix1_y = 0.5*(y1+y2)+co1*(y2-y1)+co2*(x1-x2);
-	float ix2_y = 0.5*(y1+y2)+co1*(y2-y1)-co2*(x1-x2);
-	//std::cout<<"tp vert x: "<<trueVertices[i].x_dv<<" calc x: "<<ix1_x<<" "<<ix2_x<<std::endl;
-	//std::cout<<"circle 1 x0 y0 rho: "<<x1<<" "<<y1<<" "<<R1<<std::endl;
-	//std::cout<<"circle 2 x0 y0 rho: "<<x2<<" "<<y2<<" "<<R2<<std::endl;
-#endif	
-	float minD0 = fabs(trueVertices[i].tracks[0].d0);
-	float lowPt = trueVertices[i].tracks[0].pt;
-	float maxD0 = minD0;
+
 	float netCharge = 0;
 	for(uint itrack=0; itrack<trueVertices[i].tracks.size(); itrack++){
 	  netCharge+=trueVertices[i].tracks[itrack].charge;
@@ -1777,9 +1747,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  Double_t x_dv_trk = -9999.0;
 	  Double_t y_dv_trk = -9999.0;
 	  Double_t z_dv_trk = -9999.0;
-	  //Double_t x_trk_alt = -9999.0;
-	  //Double_t y_trk_alt = -9999.0;
-	  //int inTraj = calcVertex(trackBin[i],trackBin[j],x_dv_trk,y_dv_trk,z_dv_trk,x_trk_alt,y_trk_alt);
 	  int inTraj = calcVertex(trackBin[i],trackBin[j],x_dv_trk,y_dv_trk,z_dv_trk);
 	  Vertex_Parameters vertex(x_dv_trk,y_dv_trk,z_dv_trk,trackBin[i],trackBin[j]);
 	  bool isDupe = false;
@@ -1787,72 +1754,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    if(oldVertex==vertex) isDupe = true; 
 	  }
 	  if(!isDupe){
-#if 0
-	    std::cout<<"vertex x: "<<x_dv_trk<<std::endl;
-	    float POCA_x = trackBin[i].d0*sin(trackBin[i].phi);
-	    float POCA_y = -1*trackBin[i].d0*cos(trackBin[i].phi);
-	    float pz = std::sinh(trackBin[i].eta)*trackBin[i].pt;
-	    float py = TMath::Sin(trackBin[i].phi)*trackBin[i].pt;
-	    float px = TMath::Cos(trackBin[i].phi)*trackBin[i].pt;
-	    float dx = trackBin[i].x0 - POCA_x;
-	    float dy = trackBin[i].y0 - POCA_y;
-	    float product = px * dx + py * dy;
-	    product /= TMath::Sqrt(pow(dx,2)+pow(dy,2));
-	    product /= TMath::Sqrt(pow(px,2)+pow(py,2));
-	    std::cout<<"how far from circle track 1: "<<fabs(dist(POCA_x,POCA_y,trackBin[i].x0,trackBin[i].y0)-trackBin[i].rho)<<std::endl;
-	    std::cout<<"this should be nearly zero: "<<product<<std::endl;
-	    std::cout<<"circle 1 x0 y0 rho: "<<trackBin[i].x0<<" "<<trackBin[i].y0<<" "<<trackBin[i].rho<<std::endl;
-	    POCA_x = trackBin[j].d0*sin(trackBin[j].phi);
-	    POCA_y = -1*trackBin[j].d0*cos(trackBin[j].phi);
-	    pz = std::sinh(trackBin[j].eta)*trackBin[j].pt;
-	    py = TMath::Sin(trackBin[j].phi)*trackBin[j].pt;
-	    px = TMath::Cos(trackBin[j].phi)*trackBin[j].pt;
-	    dx = trackBin[j].x0 - POCA_x;
-	    dy = trackBin[j].y0 - POCA_y;
-	    product = px * dx + py * dy;
-	    product /= TMath::Sqrt(pow(dx,2)+pow(dy,2));
-	    product /= TMath::Sqrt(pow(px,2)+pow(py,2));
-	    std::cout<<"how far from circle track 2: "<<fabs(dist(POCA_x,POCA_y,trackBin[j].x0,trackBin[j].y0)-trackBin[j].rho)<<std::endl;
-	    std::cout<<"this should be nearly zero: "<<product<<std::endl;
-	    std::cout<<"circle 2 x0 y0 rho: "<<trackBin[j].x0<<" "<<trackBin[j].y0<<" "<<trackBin[j].rho<<std::endl;
-
-	    float bfield = 3.8112; //T
-	    float c = 0.299792458; // m/ns
-	    POCA_x = trackBin[i].d0*sin(trackBin[i].phi);
-	    POCA_y = -1*trackBin[i].d0*cos(trackBin[i].phi);
-	    float rinv = 0.01 * c * bfield / trackBin[i].pt;
-	    float R1 = fabs(1/rinv); //cm
-	    px = TMath::Cos(trackBin[i].phi)*trackBin[i].pt;
-	    py = TMath::Sin(trackBin[i].phi)*trackBin[i].pt;
-	    std::valarray<float> vecToCenter = {-py,px};
-	    if(trackBin[i].charge>0) vecToCenter *= -1.0;
-	    vecToCenter *= R1 / TMath::Sqrt(pow(px,2)+pow(py,2));
-	    float x1 = POCA_x + vecToCenter[0];
-	    float y1 = POCA_y + vecToCenter[1];
-	    POCA_x = trackBin[j].d0*sin(trackBin[j].phi);
-	    POCA_y = -1*trackBin[j].d0*cos(trackBin[j].phi);
-	    rinv = 0.01 * c * bfield / trackBin[j].pt;
-	    float R2 = fabs(1/rinv); //cm
-	    px = TMath::Cos(trackBin[j].phi)*trackBin[j].pt;
-	    py = TMath::Sin(trackBin[j].phi)*trackBin[j].pt;
-	    vecToCenter = {-py,px};
-	    if(trackBin[j].charge>0) vecToCenter *= -1.0;
-	    vecToCenter *= R2 / TMath::Sqrt(pow(px,2)+pow(py,2));
-	    float x2 = POCA_x + vecToCenter[0];
-	    float y2 = POCA_y + vecToCenter[1];
-	    float R = dist(x1,y1,x2,y2);
-	    float co1 = (pow(R1,2)-pow(R2,2))/(2*pow(R,2));
-	    float radicand = (2/pow(R,2))*(pow(R1,2)+pow(R2,2))-(pow(pow(R1,2)-pow(R2,2),2)/pow(R,4))-1;
-	    float co2 = 0;
-	    if(radicand>0) co2 = 0.5*TMath::Sqrt(radicand);
-	    float ix1_x = 0.5*(x1+x2)+co1*(x2-x1)+co2*(y2-y1);
-	    float ix2_x = 0.5*(x1+x2)+co1*(x2-x1)-co2*(y2-y1);
-	    float ix1_y = 0.5*(y1+y2)+co1*(y2-y1)+co2*(x1-x2);
-	    float ix2_y = 0.5*(y1+y2)+co1*(y2-y1)-co2*(x1-x2);
-	    std::cout<<"recalc x: "<<ix1_x<<" "<<ix2_x<<std::endl;
-	    std::cout<<"recalc circle 1 x0 y0 rho: "<<x1<<" "<<y1<<" "<<R1<<std::endl;
-	    std::cout<<"recalc circle 2 x0 y0 rho: "<<x2<<" "<<y2<<" "<<R2<<std::endl;
-#endif
 	    binVertices.push_back(vertex);
 	    //trkVert_firstIndexTrk->push_back(trackBin[i].index);
 	    //trkVert_secondIndexTrk->push_back(trackBin[j].index);
@@ -1921,11 +1822,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       }
     }
     //std::cout<<"fill vertex plots"<<std::endl;
-    //std::cout<<"trkVert_x size: "<<trkVert_x->size()<<std::endl;
     // fill vertex plots
     for(int it = 0; it < (int)trkVert_x->size(); it++){
       for(uint i=0; i<vertCuts.size(); i++){
-	//std::cout<<"it i: "<<it<<" "<<i<<std::endl;
 	TString cutName = vertCuts[i]->getCutName();
 	float cutValue = vertCuts[i]->getCutValue();
 	//std::cout<<"cutName: "<<cutName<<" vertex track indices: "<<trkVert_firstIndexTrk->at(it)<<" "<<trkVert_secondIndexTrk->at(it)<<std::endl;
@@ -1936,9 +1835,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  param = fabs(param1 - param2);
 	}
 	else if(cutName.Contains("sum")){
-	  //std::cout<<"before track param get"<<std::endl;
 	  float param1 = vertCuts[i]->getParam(trkVert_firstIndexTrk->at(it));
-	  //std::cout<<"got param 1"<<std::endl;
 	  float param2 = vertCuts[i]->getParam(trkVert_secondIndexTrk->at(it));
 	  if(cutName.Contains("Charge")){
 	    if(param1>0.0) param1 = 1.0;
@@ -1969,25 +1866,15 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
 	//std::cout<<"trackVert cutName: "<<cutName<<" cutValue: "<<cutValue<<" param: "<<param<<std::endl;
 	if(cutName.Contains("max") && param>cutValue) break;
-	//std::cout<<"between breaks"<<std::endl;
-	//std::cout<<"contains min: "<<cutName.Contains("min")<<std::endl;
-	//std::cout<<"param less than cut value: "<<(param<cutValue)<<std::endl;
-	if(cutName.Contains("min") && param<cutValue){
-	  //std::cout<<"about to break"<<std::endl;
-	  break;
-	}
-	//std::cout<<"passed cut"<<std::endl;
-	//std::cout<<"passed cut, vertex match index: "<<trkVert_indexMatch[it]<<" xyz: "<<trkVert_x->at(it)<<" "<<trkVert_y->at(it)<<" "<<trkVert_z->at(it)<<std::endl;
+	if(cutName.Contains("min") && param<cutValue) break;
 	numVertices[i]++;
 	for(uint j=0; j<vertType.size(); j++){
 	  //if(vertType[j]=="matched" && (trkVert_indexMatch[it]==-1 || isMatchedVec[trkVert_indexMatch[it]][i])) continue;
 	  if(vertType[j]=="matched" && trkVert_indexMatch[it]==-1) continue;
 	  //if(vertType[j]=="unmatched" && (trkVert_indexMatch[it]!=-1 && !isMatchedVec[trkVert_indexMatch[it]][i])) continue;
 	  if(vertType[j]=="unmatched" && trkVert_indexMatch[it]!=-1) continue;
-	  //std::cout<<"filling plot"<<std::endl;
 	  for(uint k=0; k<vertCutFlows.size(); k++){
 	    TString varName = vertCutFlows[k]->getVarName();
-	    //std::cout<<"varName: "<<varName<<std::endl;
 	    if(varName.Contains("delta")){
 	      float param1 = vertCutFlows[k]->getParam(trkVert_firstIndexTrk->at(it));
 	      float param2 = vertCutFlows[k]->getParam(trkVert_secondIndexTrk->at(it));
@@ -2021,10 +1908,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	      param = vertCutFlows[k]->getParam(it);
 	    }
 	    vertexCutFlows[k][j][i]->Fill(param);
-	    //std::cout<<"filled plot"<<std::endl;
 	  }
 	  if(vertType[j]=="matched"){
-	    //std::cout<<"filling matched plot"<<std::endl;
 	    for(uint k=0; k<vertPlotTPModifiers.size(); k++){
 	      int jt = trkVert_indexMatch[it];
 	      if(vertPlotTPModifiers[k].Contains("oneMatch") && filledOneMatch[i]) continue;
@@ -2039,19 +1924,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	      
 	      //resolution plot
 	      if(!vertPlotTPModifiers[k].Contains("oneMatch") && i==(vertCuts.size()-1)){
-#if 0
-		if(fabs(tpVert_x->at(jt)-trkVert_x->at(it))>1.0){
-		  std::cout<<"tp x: "<<tpVert_x->at(jt)<<" trk x: "<<trkVert_x->at(it)<<" alt trk x: "<<trkVert_alt_x->at(it)<<" res_x: "<<tpVert_x->at(jt)-trkVert_x->at(it)<<std::endl;
-		  std::cout<<"trk charge: "<<trkVert_leadingCharge->at(it)<<" "<<trkVert_subleadingCharge->at(it)<<" trk pt: "<<trk_pt->at(trkVert_firstIndexTrk->at(it))<<" "<<trk_pt->at(trkVert_secondIndexTrk->at(it))<<" match pt: "<<trk_matchtp_pt->at(trkVert_firstIndexTrk->at(it))<<" "<<trk_matchtp_pt->at(trkVert_secondIndexTrk->at(it))<<std::endl;
-		  std::cout<<"trk bendchi2: "<<trk_bendchi2->at(trkVert_firstIndexTrk->at(it))<<" "<<trk_bendchi2->at(trkVert_secondIndexTrk->at(it))<<std::endl;
-		  for(uint iTP = 0; iTP<tpVert_indexTPs[jt].size(); iTP++){
-		    int index = tpVert_indexTPs[jt][iTP];
-		    std::cout<<"tp number: "<<index<<std::endl;
-		    std::cout<<"tp charge: "<<tp_charge->at(index)<<" tp pt: "<<tp_pt->at(index)<<std::endl;
-		  }
-		}
-#endif
-		//std::cout<<"filling resolution plot"<<std::endl;
 		h_res_tp_trk_x->Fill(tpVert_x->at(jt)-trkVert_x->at(it));
 		h_res_tp_trk_x_zoomOut->Fill(tpVert_x->at(jt)-trkVert_x->at(it));
 		h_res_tp_trk_y->Fill(tpVert_y->at(jt)-trkVert_y->at(it));
@@ -2061,7 +1933,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
 	      for(uint m=0; m<vertCutFlowsTP.size(); m++){
 		TString varName = vertCutFlowsTP[m]->getVarName();
-		//std::cout<<"matched varName: "<<varName<<std::endl;
 		if(varName.Contains("delta")){
 		  float param1 = vertCutFlowsTP[m]->getParam(tpVert_indexTPs[jt][0]);
 		  for(uint iTP=1; iTP<tpVert_indexTPs[jt].size(); ++iTP){
@@ -2137,7 +2008,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
   } // End of Event Loop
 
-  std::cout<<"count: "<<counter<<std::endl;
   std::cout<<"nevt: "<<float(nevt)<<std::endl;
   std::cout<<"Time Report:"<<std::endl;
   std::cout<<"Avg track loop time       : "<<trackLoopTime / float(nevt)<<std::endl;
@@ -2933,8 +2803,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     h_triggerEff->SetBinContent(i,numTriggers/nevt);
     h_triggerEff->GetXaxis()->SetBinLabel(i,vertCuts[i]->getCutName());
   }
+  raiseMax(h_triggerEff);
   h_triggerEff->SetStats(0);
-  h_triggerEff->Draw();
+  h_triggerEff->Draw("HIST, TEXT");
   mySmallText(0.4, 0.82, 1, ctxt);
   c.SaveAs(DIR + "/"+ h_triggerEff->GetName() + ".pdf");
   delete h_triggerEff;
