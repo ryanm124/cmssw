@@ -322,6 +322,7 @@ public:
   virtual int getNumBins() const = 0;
   virtual float getMinBin() const = 0;
   virtual float getMaxBin() const = 0;
+  virtual std::vector<float> getBins() const = 0;
 };
 
 template <typename T>
@@ -334,8 +335,10 @@ public:
   int numBins;
   float minBin;
   float maxBin;
+  std::vector<float> bins;
   
   TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, float minBin_in, float maxBin_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), minBin(minBin_in), maxBin(maxBin_in) {}
+  TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, std::vector<float> bins_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), bins(bins_in) {}
   TypedPlot(){};
   ~TypedPlot(){};
   TString getVarName() const
@@ -362,6 +365,10 @@ public:
   float getMaxBin() const
   {
     return maxBin;
+  }
+  std::vector<float> getBins() const
+  {
+    return bins;
   }
 };
 
@@ -493,6 +500,17 @@ std::vector<T> linspace(T start, T end, int num){
   }
   out.push_back(end);
   return out;
+}
+
+std::vector<float> logspace(const float &a, const float &b, const int &k)
+{
+  std::vector<float> bins;
+  float delta = (log10(b) - log10(a)) / k;
+  for (int i = 0; i < (k+1); i++)
+    {
+      bins.push_back(pow(10, log10(a) + (i * delta)));
+    }
+  return bins;
 }
 
 Double_t deltaPhi(Double_t phi1, Double_t phi2)
@@ -1145,8 +1163,6 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCuts.push_back(std::move(vertCut9));
   std::unique_ptr<TypedCut<float>> vertCut10(new TypedCut<float>("min_score0p99","score>0.99",&trkVert_score,0.99,true));
   vertCuts.push_back(std::move(vertCut10));
-  std::unique_ptr<TypedCut<float>> vertCut11(new TypedCut<float>("min_score0p999","score>0.999",&trkVert_score,0.999,true));
-  vertCuts.push_back(std::move(vertCut11));
   
   std::vector<std::unique_ptr<Plot>> vertCutFlows;
   std::unique_ptr<TypedPlot<float>> vertPlot0(new TypedPlot<float>("x","cm",&trkVert_x,100,-5.0,5.0));
@@ -1169,7 +1185,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCutFlows.push_back(std::move(vertPlot8));
   std::unique_ptr<TypedPlot<float>> vertPlot9(new TypedPlot<float>("R_T","cm",&trkVert_R_T,80,0.0,20.0));
   vertCutFlows.push_back(std::move(vertPlot9));
-  std::unique_ptr<TypedPlot<float>> vertPlot10(new TypedPlot<float>("highPt","GeV",&trk_pt,100,0.0,100.0));
+  std::unique_ptr<TypedPlot<float>> vertPlot10(new TypedPlot<float>("highPt","GeV",&trk_pt,20,logspace(2.0,100.0,20)));
   vertCutFlows.push_back(std::move(vertPlot10));
   std::unique_ptr<TypedPlot<float>> vertPlot11(new TypedPlot<float>("lowPt","GeV",&trk_pt,100,0.0,100.0));
   vertCutFlows.push_back(std::move(vertPlot11));
@@ -1223,7 +1239,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCutFlowsTP.push_back(std::move(vertPlotTP7));
   std::unique_ptr<TypedPlot<float>> vertPlotTP8(new TypedPlot<float>("R_T","cm",&tpVert_R_T,80,0.0,20.0));
   vertCutFlowsTP.push_back(std::move(vertPlotTP8));
-  std::unique_ptr<TypedPlot<float>> vertPlotTP9(new TypedPlot<float>("highPt","GeV",&tp_pt,100,0.0,100.0));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP9(new TypedPlot<float>("highPt","GeV",&tp_pt,20,logspace(2.0,100.0,20)));
   vertCutFlowsTP.push_back(std::move(vertPlotTP9));
   std::unique_ptr<TypedPlot<float>> vertPlotTP10(new TypedPlot<float>("lowPt","GeV",&tp_pt,100,0.0,100.0));
   vertCutFlowsTP.push_back(std::move(vertPlotTP10));
@@ -1255,11 +1271,19 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     for(uint j=0; j<vertType.size(); ++j){
       for(uint k=0; k<vertCuts.size(); ++k){
 	TString name = "h_trackVertex_"+vertCutFlows[i]->getVarName()+"_"+vertType[j]+"_"+vertCuts[k]->getCutName()+"Cut";
-	float binWidth = (vertCutFlows[i]->getMaxBin() - vertCutFlows[i]->getMinBin()) / vertCutFlows[i]->getNumBins();
-	TString binLabel = std::to_string(binWidth);
-	TString labels = name+"; Track Vertex "+vertCutFlows[i]->getVarName()+" ("+vertCutFlows[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlows[i]->getUnit();
-	TH1F* hist = new TH1F(name,labels,vertCutFlows[i]->getNumBins(),vertCutFlows[i]->getMinBin(),vertCutFlows[i]->getMaxBin());
-	vertexCutFlows[i][j][k] = hist;
+	if(vertCutFlows[i]->getMaxBin()==vertCutFlows[i]->getMinBin()){
+	  TString labels = name+"; Track Vertex "+vertCutFlows[i]->getVarName()+" ("+vertCutFlows[i]->getUnit()+") ; Events ";
+	  std::vector<float> bins = vertCutFlows[i]->getBins();
+	  TH1F* hist = new TH1F(name,labels,vertCutFlows[i]->getNumBins(),bins.data());
+	  vertexCutFlows[i][j][k] = hist;
+	}
+	else{
+	  float binWidth = (vertCutFlows[i]->getMaxBin() - vertCutFlows[i]->getMinBin()) / vertCutFlows[i]->getNumBins();
+	  TString binLabel = std::to_string(binWidth);
+	  TString labels = name+"; Track Vertex "+vertCutFlows[i]->getVarName()+" ("+vertCutFlows[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlows[i]->getUnit();
+	  TH1F* hist = new TH1F(name,labels,vertCutFlows[i]->getNumBins(),vertCutFlows[i]->getMinBin(),vertCutFlows[i]->getMaxBin());
+	  vertexCutFlows[i][j][k] = hist;
+	}
       }
     }
   }
@@ -1268,11 +1292,19 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
     for(uint k=0; k<vertCuts.size(); ++k){
       for(uint m=0; m<vertPlotTPModifiers.size(); ++m){
 	TString name = "h_trueVertex_"+vertCutFlowsTP[i]->getVarName()+"_"+vertTypeTP[0]+"_"+vertCuts[k]->getCutName()+"Cut"+vertPlotTPModifiers[m];
-	float binWidth = (vertCutFlowsTP[i]->getMaxBin() - vertCutFlowsTP[i]->getMinBin()) / vertCutFlowsTP[i]->getNumBins();
-	TString binLabel = std::to_string(binWidth);
-	TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlowsTP[i]->getUnit();
-	TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
-	vertexCutFlowsMatchTP[i][k][m] = hist;
+	if(vertCutFlowsTP[i]->getMaxBin()==vertCutFlowsTP[i]->getMinBin()){
+	  TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events ";
+	  std::vector<float> bins = vertCutFlowsTP[i]->getBins();
+	  TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),bins.data());
+	  vertexCutFlowsMatchTP[i][k][m] = hist;
+	}
+	else{
+	  float binWidth = (vertCutFlowsTP[i]->getMaxBin() - vertCutFlowsTP[i]->getMinBin()) / vertCutFlowsTP[i]->getNumBins();
+	  TString binLabel = std::to_string(binWidth);
+	  TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlowsTP[i]->getUnit();
+	  TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
+	  vertexCutFlowsMatchTP[i][k][m] = hist;
+	}
       }
     } 
   }
@@ -1280,11 +1312,19 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   for(uint i=0; i<vertCutFlowsTP.size(); ++i){
     for(uint k=0; k<vertPlotTPModifiers.size(); ++k){
       TString name = "h_trueVertex_"+vertCutFlowsTP[i]->getVarName()+"_"+vertTypeTP[1]+vertPlotTPModifiers[k];
-      float binWidth = (vertCutFlowsTP[i]->getMaxBin() - vertCutFlowsTP[i]->getMinBin()) / vertCutFlowsTP[i]->getNumBins();
-      TString binLabel = std::to_string(binWidth);
-      TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlowsTP[i]->getUnit();
-      TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
-      vertexCutFlowsTP[i][k] = hist;
+      if(vertCutFlowsTP[i]->getMaxBin()==vertCutFlowsTP[i]->getMinBin()){
+	TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events ";
+	std::vector<float> bins = vertCutFlowsTP[i]->getBins();
+	TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),bins.data());
+	vertexCutFlowsTP[i][k] = hist;
+      }
+      else{
+	float binWidth = (vertCutFlowsTP[i]->getMaxBin() - vertCutFlowsTP[i]->getMinBin()) / vertCutFlowsTP[i]->getNumBins();
+	TString binLabel = std::to_string(binWidth);
+	TString labels = name+"; True Vertex "+vertCutFlowsTP[i]->getVarName()+" ("+vertCutFlowsTP[i]->getUnit()+") ; Events / "+binLabel+" "+vertCutFlowsTP[i]->getUnit();
+	TH1F* hist = new TH1F(name,labels,vertCutFlowsTP[i]->getNumBins(),vertCutFlowsTP[i]->getMinBin(),vertCutFlowsTP[i]->getMaxBin());
+	vertexCutFlowsTP[i][k] = hist;
+      }
     }
   }
 
