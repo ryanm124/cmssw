@@ -323,6 +323,7 @@ public:
   virtual float getMinBin() const = 0;
   virtual float getMaxBin() const = 0;
   virtual std::vector<float> getBins() const = 0;
+  virtual bool getBool() const = 0;
 };
 
 template <typename T>
@@ -336,9 +337,14 @@ public:
   float minBin;
   float maxBin;
   std::vector<float> bins;
+  bool variableBins;
   
-  TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, float minBin_in, float maxBin_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), minBin(minBin_in), maxBin(maxBin_in) {}
-  TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, std::vector<float> bins_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), bins(bins_in) {}
+  TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, float minBin_in, float maxBin_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), minBin(minBin_in), maxBin(maxBin_in){
+    variableBins = false;
+  }
+  TypedPlot(TString varName_in, TString unit_in, std::vector<T>** params_in, int numBins_in, std::vector<float> bins_in): varName(varName_in), unit(unit_in), params(params_in), numBins(numBins_in), bins(bins_in) {
+    variableBins = true;
+  }
   TypedPlot(){};
   ~TypedPlot(){};
   TString getVarName() const
@@ -369,6 +375,10 @@ public:
   std::vector<float> getBins() const
   {
     return bins;
+  }
+  bool getBool() const
+  {
+    return variableBins;
   }
 };
 
@@ -510,6 +520,11 @@ std::vector<float> logspace(const float &a, const float &b, const int &k)
     {
       bins.push_back(pow(10, log10(a) + (i * delta)));
     }
+  std::cout<<"logspace bins: ";
+  for(uint j=0; j<bins.size(); j++){
+    std::cout<<bins[j]<<" ";
+  }
+  std::cout<<std::endl;
   return bins;
 }
 
@@ -943,19 +958,19 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   preselCuts.push_back(std::move(cut0));
   std::unique_ptr<TypedCut<float>> cut1(new TypedCut<float>("maxChi2rzdof","max #chi^{2}_{rz}",&trk_chi2rz,3.0,false));
   preselCuts.push_back(std::move(cut1));
-  std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("minMVA2","min MVA2",&trk_MVA2,0.2,true));
+  std::unique_ptr<TypedCut<float>> cut3(new TypedCut<float>("minMVA2","min MVA2",&trk_MVA2,0.2,false));
   preselCuts.push_back(std::move(cut3));
   std::unique_ptr<TypedCut<float>> cut4(new TypedCut<float>("minMVA1","min MVA1",&trk_MVA1,0.2,false));
   preselCuts.push_back(std::move(cut4));
-  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.5,true));
+  std::unique_ptr<TypedCut<float>> cut5(new TypedCut<float>("minMVA1_D","min MVA1 D",&trk_MVA1,0.5,false));
   preselCuts.push_back(std::move(cut5));
-  std::unique_ptr<TypedCut<int>> cut6(new TypedCut<int>("minNumStub_overlap","min n_{stub}",&trk_nstub,5,true));
+  std::unique_ptr<TypedCut<int>> cut6(new TypedCut<int>("minNumStub_overlap","Quality",&trk_nstub,5,true));
   preselCuts.push_back(std::move(cut6));
-  std::unique_ptr<TypedCut<float>> cut7(new TypedCut<float>("minPt","min p_{T}",&trk_pt,3.0,false));
+  std::unique_ptr<TypedCut<float>> cut7(new TypedCut<float>("minPt","min p_{T}",&trk_pt,3.0,true));
   preselCuts.push_back(std::move(cut7));
   std::unique_ptr<TypedCut<float>> cut8(new TypedCut<float>("minD0_barrel","min d_{0} Bar",&trk_d0,0.06,false));
   preselCuts.push_back(std::move(cut8));
-  std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("minD0_disk","min d_{0} Disk",&trk_d0,0.08,true));
+  std::unique_ptr<TypedCut<float>> cut9(new TypedCut<float>("minD0_disk","min d_{0}",&trk_d0,0.08,true));
   preselCuts.push_back(std::move(cut9));
 
   std::vector<std::unique_ptr<Cut>> preselCutsTP;
@@ -969,9 +984,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   preselCutsTP.push_back(std::move(tpCut3));
 
   std::vector<std::unique_ptr<Plot>> varCutFlows;
-  std::unique_ptr<TypedPlot<float>> plot0(new TypedPlot<float>("d0","cm",&trk_d0,200,-2.0,2.0));
+  std::unique_ptr<TypedPlot<float>> plot0(new TypedPlot<float>("d0","cm",&trk_d0,20,logspace(0.01,10.0,20)));
   varCutFlows.push_back(std::move(plot0));
-  std::unique_ptr<TypedPlot<float>> plot1(new TypedPlot<float>("pt","GeV",&trk_pt,200,0.0,100.0));
+  std::unique_ptr<TypedPlot<float>> plot1(new TypedPlot<float>("pt","GeV",&trk_pt,20,logspace(2.0,100.0,20)));
   varCutFlows.push_back(std::move(plot1));
   std::unique_ptr<TypedPlot<float>> plot2(new TypedPlot<float>("eta","",&trk_eta,50,-2.5,2.5));
   varCutFlows.push_back(std::move(plot2));
@@ -991,9 +1006,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   varCutFlows.push_back(std::move(plot10));
 
   std::vector<std::unique_ptr<Plot>> varCutFlowsTP;
-  std::unique_ptr<TypedPlot<float>> tpPlot0(new TypedPlot<float>("d0","cm",&tp_d0,200,-2.0,2.0));
+  std::unique_ptr<TypedPlot<float>> tpPlot0(new TypedPlot<float>("d0","cm",&tp_d0,20,logspace(0.01,10.0,20)));
   varCutFlowsTP.push_back(std::move(tpPlot0));
-  std::unique_ptr<TypedPlot<float>> tpPlot1(new TypedPlot<float>("pt","GeV",&tp_pt,200,0.0,100.0));
+  std::unique_ptr<TypedPlot<float>> tpPlot1(new TypedPlot<float>("pt","GeV",&tp_pt,20,logspace(2.0,100.0,20)));
   varCutFlowsTP.push_back(std::move(tpPlot1));
   std::unique_ptr<TypedPlot<float>> tpPlot2(new TypedPlot<float>("eta","",&tp_eta,50,-2.5,2.5));
   varCutFlowsTP.push_back(std::move(tpPlot2));
@@ -1038,7 +1053,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   std::vector<TString> tpType = {"primary","np","match",""};
   std::vector<TString> plotModifiers = {"","_H","_L","_P","_D","_barrel","_disk"};
   if(!detailedPlots) plotModifiers = {""};
-  int preselCutsSize = 0;
+  uint preselCutsSize = 0;
   for(uint i=0; i<preselCuts.size(); i++){
     if(preselCuts[i]->getDoPlot()) preselCutsSize++;
   }
@@ -1061,11 +1076,40 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
 	for(uint j=0; j<plotModifiers.size(); ++j){
 	  TString name = "h_trk_"+varCutFlows[it]->getVarName()+"_"+trackType[i]+"_"+preselCuts[jt]->getCutName()+"Cut"+plotModifiers[j];
-	  float binWidth = (varCutFlows[it]->getMaxBin() - varCutFlows[it]->getMinBin()) / varCutFlows[it]->getNumBins();
-	  TString binLabel = std::to_string(binWidth);
-	  TString labels = name+"; Track "+varCutFlows[it]->getVarName()+" ("+varCutFlows[it]->getUnit()+") ; Events / "+binLabel+" "+varCutFlows[it]->getUnit();
-	  TH1F* hist = new TH1F(name,labels,varCutFlows[it]->getNumBins(),varCutFlows[it]->getMinBin(),varCutFlows[it]->getMaxBin());
-	  preselCutFlows[it][i][i_plot][j] = hist;
+	  std::cout<<"name: "<<name<<std::endl;
+	  if(varCutFlows[it]->getBool()){
+	    std::cout<<"setting bins"<<std::endl;
+	    TString labels = name+"; Track "+varCutFlows[it]->getVarName()+" ("+varCutFlows[it]->getUnit()+") ; Events ";
+	    std::vector<float> bins = varCutFlows[it]->getBins();
+	    TH1F* hist = new TH1F(name,labels,varCutFlows[it]->getNumBins(),bins.data());
+	    preselCutFlows[it][i][i_plot][j] = hist;
+	    TString varString = varCutFlows[it]->getVarName();
+	    if(varString.Contains("d0") || varString.Contains("pt")){
+	      std::cout<<"labels: "<<labels<<std::endl;
+	      std::string binValues = "[";
+	      std::string binWidths = "[";
+
+	      for(int ibin=1; ibin<(preselCutFlows[it][i][i_plot][j]->GetNbinsX()+1); ibin++){
+		binValues+=to_string(preselCutFlows[it][i][i_plot][j]->GetBinContent(ibin)) + ", ";
+		binWidths+=to_string(preselCutFlows[it][i][i_plot][j]->GetBinWidth(ibin)) + ", ";
+
+	      }
+	      binValues+="]";
+	      binWidths+="]";
+
+	      std::cout<<"binValues: "<<binValues<<std::endl;
+	      std::cout<<"binWidths: "<<binWidths<<std::endl;
+
+	    }
+	  }
+	  else{
+	    std::cout<<"else"<<std::endl;
+	    float binWidth = (varCutFlows[it]->getMaxBin() - varCutFlows[it]->getMinBin()) / varCutFlows[it]->getNumBins();
+	    TString binLabel = std::to_string(binWidth);
+	    TString labels = name+"; Track "+varCutFlows[it]->getVarName()+" ("+varCutFlows[it]->getUnit()+") ; Events / "+binLabel+" "+varCutFlows[it]->getUnit();
+	    TH1F* hist = new TH1F(name,labels,varCutFlows[it]->getNumBins(),varCutFlows[it]->getMinBin(),varCutFlows[it]->getMaxBin());
+	    preselCutFlows[it][i][i_plot][j] = hist;
+	  }
 	}
       }
     }
@@ -1096,11 +1140,19 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
       for(uint jt=0; jt<preselCutsTP.size(); ++jt){
 	for(uint j=0; j<plotModifiers.size(); ++j){
 	  TString name = "h_tp_"+varCutFlowsTP[it]->getVarName()+"_"+tpType[i]+"_"+preselCutsTP[jt]->getCutName()+"Cut"+plotModifiers[j];
-	  float binWidth = (varCutFlowsTP[it]->getMaxBin() - varCutFlowsTP[it]->getMinBin()) / varCutFlowsTP[it]->getNumBins();
-	  TString binLabel = std::to_string(binWidth);
-	  TString labels = name+"; Tp "+varCutFlowsTP[it]->getVarName()+" ("+varCutFlowsTP[it]->getUnit()+") ; Events / "+binLabel+" "+varCutFlowsTP[it]->getUnit();
-	  TH1F* hist = new TH1F(name,labels,varCutFlowsTP[it]->getNumBins(),varCutFlowsTP[it]->getMinBin(),varCutFlowsTP[it]->getMaxBin());
-	  preselCutFlowsTP[it][i][jt][j] = hist;
+	  if(varCutFlowsTP[it]->getMaxBin()==varCutFlowsTP[it]->getMinBin()){
+	    TString labels = name+"; Tp "+varCutFlowsTP[it]->getVarName()+" ("+varCutFlowsTP[it]->getUnit()+") ; Events ";
+	    std::vector<float> bins = varCutFlowsTP[it]->getBins();
+	    TH1F* hist = new TH1F(name,labels,varCutFlowsTP[it]->getNumBins(),bins.data());
+	    preselCutFlowsTP[it][i][jt][j] = hist;
+	  }
+	  else{
+	    float binWidth = (varCutFlowsTP[it]->getMaxBin() - varCutFlowsTP[it]->getMinBin()) / varCutFlowsTP[it]->getNumBins();
+	    TString binLabel = std::to_string(binWidth);
+	    TString labels = name+"; Tp "+varCutFlowsTP[it]->getVarName()+" ("+varCutFlowsTP[it]->getUnit()+") ; Events / "+binLabel+" "+varCutFlowsTP[it]->getUnit();
+	    TH1F* hist = new TH1F(name,labels,varCutFlowsTP[it]->getNumBins(),varCutFlowsTP[it]->getMinBin(),varCutFlowsTP[it]->getMaxBin());
+	    preselCutFlowsTP[it][i][jt][j] = hist;
+	  }
 	}
       }
     }
@@ -1163,6 +1215,14 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCuts.push_back(std::move(vertCut9));
   std::unique_ptr<TypedCut<float>> vertCut10(new TypedCut<float>("min_score0p99","score>0.99",&trkVert_score,0.99,true));
   vertCuts.push_back(std::move(vertCut10));
+  std::unique_ptr<TypedCut<float>> vertCut11(new TypedCut<float>("min_score0p992","score>0.992",&trkVert_score,0.992,true));
+  vertCuts.push_back(std::move(vertCut11));
+  std::unique_ptr<TypedCut<float>> vertCut12(new TypedCut<float>("min_score0p994","score>0.994",&trkVert_score,0.994,true));
+  vertCuts.push_back(std::move(vertCut12));
+  std::unique_ptr<TypedCut<float>> vertCut13(new TypedCut<float>("min_score0p996","score>0.996",&trkVert_score,0.996,true));
+  vertCuts.push_back(std::move(vertCut13));
+  std::unique_ptr<TypedCut<float>> vertCut14(new TypedCut<float>("min_score0p998","score>0.998",&trkVert_score,0.998,true));
+  vertCuts.push_back(std::move(vertCut14));
   
   std::vector<std::unique_ptr<Plot>> vertCutFlows;
   std::unique_ptr<TypedPlot<float>> vertPlot0(new TypedPlot<float>("x","cm",&trkVert_x,100,-5.0,5.0));
@@ -1183,7 +1243,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCutFlows.push_back(std::move(vertPlot7));
   std::unique_ptr<TypedPlot<float>> vertPlot8(new TypedPlot<float>("d_T","cm",&trkVert_d_T,40,0.0,1.0));
   vertCutFlows.push_back(std::move(vertPlot8));
-  std::unique_ptr<TypedPlot<float>> vertPlot9(new TypedPlot<float>("R_T","cm",&trkVert_R_T,80,0.0,20.0));
+  std::unique_ptr<TypedPlot<float>> vertPlot9(new TypedPlot<float>("R_T","cm",&trkVert_R_T,20,logspace(0.1,20.0,20)));
   vertCutFlows.push_back(std::move(vertPlot9));
   std::unique_ptr<TypedPlot<float>> vertPlot10(new TypedPlot<float>("highPt","GeV",&trk_pt,20,logspace(2.0,100.0,20)));
   vertCutFlows.push_back(std::move(vertPlot10));
@@ -1237,7 +1297,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   vertCutFlowsTP.push_back(std::move(vertPlotTP6));
   std::unique_ptr<TypedPlot<float>> vertPlotTP7(new TypedPlot<float>("d_T","cm",&tpVert_d_T,40,0.0,0.2));
   vertCutFlowsTP.push_back(std::move(vertPlotTP7));
-  std::unique_ptr<TypedPlot<float>> vertPlotTP8(new TypedPlot<float>("R_T","cm",&tpVert_R_T,80,0.0,20.0));
+  std::unique_ptr<TypedPlot<float>> vertPlotTP8(new TypedPlot<float>("R_T","cm",&tpVert_R_T,20,logspace(0.1,20.0,20)));
   vertCutFlowsTP.push_back(std::move(vertPlotTP8));
   std::unique_ptr<TypedPlot<float>> vertPlotTP9(new TypedPlot<float>("highPt","GeV",&tp_pt,20,logspace(2.0,100.0,20)));
   vertCutFlowsTP.push_back(std::move(vertPlotTP9));
@@ -1353,7 +1413,7 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   TH1F *h_res_tp_trk_y = new TH1F("h_res_tp_trk_y","h_res_tp_trk_y; y residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
   TH1F *h_res_tp_trk_x_zoomOut = new TH1F("h_res_tp_trk_x_zoomOut","h_res_tp_trk_x_zoomOut; x residual of vertex (cm) ; Events / 0.04 cm",500,-10,10);
   TH1F *h_res_tp_trk_y_zoomOut = new TH1F("h_res_tp_trk_y_zoomOut","h_res_tp_trk_y_zoomOut; y residual of vertex (cm) ; Events / 0.04 cm",500,-10,10);
-  TH1F *h_res_tp_trk_z = new TH1F("h_res_tp_trk_z","h_res_tp_trk_z; z residual of vertex (cm) ; Events / 0.02 cm",1000,-10,10);
+  TH1F *h_res_tp_trk_z = new TH1F("h_res_tp_trk_z","h_res_tp_trk_z; z residual of vertex (cm) ; Events / 0.05 cm",400,-10,10);
   TH1F *h_res_tp_trk_r = new TH1F("h_res_tp_trk_r","h_res_tp_trk_r; r residual of vertex (cm) ; Events / 0.02 cm",100,-1,1);
   TH1F *h_res_tp_trk_phi = new TH1F("h_res_tp_trk_phi","h_res_tp_trk_phi; phi residual of vertex ; Events / 0.02",100,-1,1);
 
@@ -1503,6 +1563,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 		while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
 		while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
 	      }
+	      if(varName.Contains("d0")){
+		param = fabs(param);
+	      }
 	      preselCutFlows[ivar][i][i_plot][j]->Fill(param);
 	    }
 	    for(uint ivar2D=0; ivar2D<varCutFlows2D.size(); ++ivar2D){
@@ -1611,6 +1674,9 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 		while (param < -TMath::Pi()/9 ) param += 2*TMath::Pi();
 		while (param > TMath::Pi()*2 ) param -= 2*TMath::Pi();
 		while (param > TMath::Pi()/9) param -= 2*TMath::Pi()/9;
+	      }
+	      if(varName.Contains("d0")){
+		param = fabs(param);
 	      }
 	      preselCutFlowsTP[ivar][i][icut][j]->Fill(param);
 	    }
@@ -2133,12 +2199,12 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 
   TFile *fout;
   fout = new TFile(outputDir + "output_" + inputFile, "recreate");
-  
-  TLegend* l = new TLegend(0.82,0.3,0.98,0.7);
+  TLegend* l = new TLegend();
   l->SetFillColor(0);
   l->SetLineColor(0);
   l->SetTextSize(0.04);
   l->SetTextFont(42);
+  
   std::cout<<"trkEffOverlay"<<std::endl;
   for(uint ivar=0; ivar<varCutFlows.size(); ++ivar){
     for(uint j=0; j<trackType.size(); ++j){
@@ -2159,6 +2225,8 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	  removeFlows(h_trkEff[i_plot]);
 	  h_trkEff[i_plot]->SetStats(0);
 	  removeFlows(preselCutFlows[ivar][j][i_plot][k]);
+	  TString cutLabel = preselCuts[mcut]->getCutLabel();
+	  TString varString = varCutFlows[ivar]->getVarName();
 	  h_trkEff[i_plot]->Divide(preselCutFlows[ivar][j][i_plot][k],h_trkEff[i_plot],1.0,1.0,"B");
 	  if(i_plot!=10){
 	    h_trkEff[i_plot]->SetLineColor(i_plot);
@@ -2168,9 +2236,32 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	    h_trkEff[i_plot]->SetLineColor(40);
 	    h_trkEff[i_plot]->SetMarkerColor(40);
 	  }
-	  TString cutLabel = preselCuts[mcut]->getCutLabel();
+	  //TString cutLabel = preselCuts[mcut]->getCutLabel();
 	  //std::cout<<"cutName: "<<cutName<<std::endl;
 	  l->AddEntry(h_trkEff[i_plot],cutLabel,"lp");
+	  //TString varString = varCutFlows[ivar]->getVarName();
+	  if(varString.Contains("d0") || varString.Contains("pt")){
+	    std::cout<<"h_trkEffOverlay_"+varCutFlows[ivar]->getVarName()+"_"+trackType[j]+plotModifiers[k]+".pdf"<<std::endl;
+	    std::cout<<"cut: "<<cutLabel<<std::endl;
+	    std::string binValues = "[";
+	    std::string binWidths = "[";
+	    std::string binErrors = "[";
+	    std::string binCenters = "[";
+	    for(int ibin=1; ibin<(h_trkEff[i_plot]->GetNbinsX()+1); ibin++){
+	      binValues+=to_string(h_trkEff[i_plot]->GetBinContent(ibin)) + ", ";
+	      binWidths+=to_string(h_trkEff[i_plot]->GetBinWidth(ibin)) + ", ";
+	      binErrors+=to_string(h_trkEff[i_plot]->GetBinError(ibin)) + ", ";
+	      binCenters+=to_string(h_trkEff[i_plot]->GetBinCenter(ibin)) + ", ";
+	    }
+	    binValues+="]";
+	    binWidths+="]";
+	    binErrors+="]";
+	    binCenters+="]";
+	    std::cout<<"binValues: "<<binValues<<std::endl;
+	    std::cout<<"binWidths: "<<binWidths<<std::endl;
+	    std::cout<<"binErrors: "<<binErrors<<std::endl;
+	    std::cout<<"binCenters: "<<binCenters<<std::endl;
+	  }
 	  if(i_plot==1){
 	    raiseMax(h_trkEff[i_plot]);
 	    h_trkEff[i_plot]->Draw();
@@ -2181,6 +2272,19 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	}
 	mySmallText(0.3, 0.9, 1, ctxt);
 	l->Draw();
+	/*
+	TString label_cms="CMS";
+	TLatex* Label_cms = new TLatex(0.15,0.92,label_cms);
+	Label_cms->SetNDC();
+	Label_cms->SetTextFont(61);
+	Label_cms->SetTextSize(0.065);
+	Label_cms->Draw();
+	TString label_cms1="Simulation Phase-2 Preliminary";
+	TLatex* Label_cms1 = new TLatex(0.232,0.92,label_cms1);
+	Label_cms1->SetNDC();
+	Label_cms1->SetTextSize(0.051);
+	Label_cms1->SetTextFont(52);
+	Label_cms1->Draw();*/
 	c.SaveAs(PRESELDIR + "/h_trkEffOverlay_"+varCutFlows[ivar]->getVarName()+"_"+trackType[j]+plotModifiers[k]+".pdf");
 	/*std::cout << "trkEffOverlay took "
 		  << std::chrono::duration_cast<milli>(finish - start).count()
@@ -2382,6 +2486,29 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	h_findEff->SetMarkerColor(40);
       }
       l->AddEntry(h_findEff,vertCuts[j]->getCutLabel(),"lp");
+      TString varString = vertCutFlowsTP[i]->getVarName();
+      if(varString.Contains("R_T") || varString.Contains("highPt")){
+	std::cout<<"/h_findEff_trueVertex_" + vertCutFlowsTP[i]->getVarName() + ".pdf"<<std::endl;
+	std::cout<<"cut: "<<vertCuts[j]->getCutLabel()<<std::endl;
+	std::string binValues = "[";
+	std::string binWidths = "[";
+	std::string binErrors = "[";
+	std::string binCenters = "[";
+	for(int ibin=1; ibin<(h_findEff->GetNbinsX()+1); ibin++){
+	  binValues+=to_string(h_findEff->GetBinContent(ibin)) + ", ";
+	  binWidths+=to_string(h_findEff->GetBinWidth(ibin)) + ", ";
+	  binErrors+=to_string(h_findEff->GetBinError(ibin)) + ", ";
+	  binCenters+=to_string(h_findEff->GetBinCenter(ibin)) + ", ";
+	}
+	binValues+="]";
+	binWidths+="]";
+	binErrors+="]";
+	binCenters+="]";
+	std::cout<<"binValues: "<<binValues<<std::endl;
+	std::cout<<"binWidths: "<<binWidths<<std::endl;
+	std::cout<<"binErrors: "<<binErrors<<std::endl;
+	std::cout<<"binCenters: "<<binCenters<<std::endl;
+      }
       if(j==0){
 	raiseMax(h_findEff);
 	h_findEff->SetAxisRange(0, 1.1, "Y");
@@ -2433,6 +2560,17 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
 	removeFlows(vertexCutFlows[i][k][j]);
 	vertexCutFlows[i][k][j]->SetStats(0);
 	vertexCutFlows[i][k][j]->Scale(1./vertexCutFlows[i][k][j]->Integral());
+	TString varString = vertCutFlows[i]->getVarName();
+	if(varString.Contains("score")){
+	  std::cout<<"/h_correctVsFalse_" + vertCutFlows[i]->getVarName() + "_" + vertCuts[j]->getCutName() + "Cut.pdf"<<std::endl;
+	  std::cout<<"vertType: "<<vertType[k]<<std::endl;
+	  std::string binValues = "[";
+	  for(int ibin=1; ibin<(vertexCutFlows[i][k][j]->GetNbinsX()+1); ibin++){
+	    binValues+=to_string(vertexCutFlows[i][k][j]->GetBinContent(ibin)) + ", ";
+	  }
+	  binValues+="]";
+	  std::cout<<"binValues: "<<binValues<<std::endl;
+	}
 	if(k!=9){
 	  vertexCutFlows[i][k][j]->SetLineColor(k+1);
 	  vertexCutFlows[i][k][j]->SetMarkerColor(k+1);
@@ -2866,6 +3004,22 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   mySmallText(0.22, 0.82, 1, res);
   mySmallText(0.4, 0.42, 1, ctxt);
   h_res_tp_trk_x->Write("", TObject::kOverwrite);
+  
+  std::cout<<"h_res_tp_trk_x"<<std::endl;
+  std::string binValues = "[";
+  std::string binCenters = "[";
+  std::string fitValues = "[";
+  for(int ibin=1; ibin<(h_res_tp_trk_x->GetNbinsX()+1); ibin++){
+    binValues+=to_string(h_res_tp_trk_x->GetBinContent(ibin)) + ", ";
+    binCenters+=to_string(h_res_tp_trk_x->GetBinCenter(ibin)) + ", ";
+    fitValues+=to_string(fit->Eval(h_res_tp_trk_x->GetBinCenter(ibin))) + ", ";
+  }
+  binValues+="]";
+  binCenters+="]";
+  fitValues+="]";
+  std::cout<<"binValues: "<<binValues<<std::endl;
+  std::cout<<"binCenters: "<<binCenters<<std::endl;
+  std::cout<<"fitValues: "<<fitValues<<std::endl;
   c.SaveAs(DIR + "/"+ h_res_tp_trk_x->GetName() + ".pdf");
   delete h_res_tp_trk_x;
   delete fit;
@@ -2893,6 +3047,21 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   mySmallText(0.22, 0.82, 1, res);
   mySmallText(0.4, 0.42, 1, ctxt);
   h_res_tp_trk_y->Write("", TObject::kOverwrite);
+  std::cout<<"h_res_tp_trk_y"<<std::endl;
+  binValues = "[";
+  binCenters = "[";
+  fitValues = "[";
+  for(int ibin=1; ibin<(h_res_tp_trk_y->GetNbinsX()+1); ibin++){
+    binValues+=to_string(h_res_tp_trk_y->GetBinContent(ibin)) + ", ";
+    binCenters+=to_string(h_res_tp_trk_y->GetBinCenter(ibin)) + ", ";
+    fitValues+=to_string(fit->Eval(h_res_tp_trk_y->GetBinCenter(ibin))) + ", ";
+  }
+  binValues+="]";
+  binCenters+="]";
+  fitValues+="]";
+  std::cout<<"binValues: "<<binValues<<std::endl;
+  std::cout<<"binCenters: "<<binCenters<<std::endl;
+  std::cout<<"fitValues: "<<fitValues<<std::endl;
   c.SaveAs(DIR + "/"+ h_res_tp_trk_y->GetName() + ".pdf");
   delete h_res_tp_trk_y;
   delete fit;
@@ -2946,6 +3115,21 @@ void Analyzer_DisplacedMuon(TString inputFilePath,
   mySmallText(0.22, 0.82, 1, res);
   mySmallText(0.4, 0.42, 1, ctxt);
   h_res_tp_trk_z->Write("", TObject::kOverwrite);
+  std::cout<<"h_res_tp_trk_z"<<std::endl;
+  binValues = "[";
+  binCenters = "[";
+  fitValues = "[";
+  for(int ibin=1; ibin<(h_res_tp_trk_z->GetNbinsX()+1); ibin++){
+    binValues+=to_string(h_res_tp_trk_z->GetBinContent(ibin)) + ", ";
+    binCenters+=to_string(h_res_tp_trk_z->GetBinCenter(ibin)) + ", ";
+    fitValues+=to_string(fit->Eval(h_res_tp_trk_z->GetBinCenter(ibin))) + ", ";
+  }
+  binValues+="]";
+  binCenters+="]";
+  fitValues+="]";
+  std::cout<<"binValues: "<<binValues<<std::endl;
+  std::cout<<"binCenters: "<<binCenters<<std::endl;
+  std::cout<<"fitValues: "<<fitValues<<std::endl;
   c.SaveAs(DIR + "/"+ h_res_tp_trk_z->GetName() + ".pdf");
   delete h_res_tp_trk_z;
   delete fit;
