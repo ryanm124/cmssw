@@ -121,7 +121,7 @@ public:
   bool findHiggsToMuAncestor(T particle);
   template <typename T>
   bool findHiggsToBAncestor(T particle);
-  
+
   // Mandatory methods
   void beginJob() override;
   void endJob() override;
@@ -191,7 +191,7 @@ private:
   edm::InputTag RecoVertexEmuInputTag;
   edm::InputTag GenParticleInputTag;
   edm::InputTag DisplacedVertexInputTag;
-  
+
   edm::InputTag TrackFastJetsInputTag;
   edm::InputTag TrackJetsInputTag;
   edm::InputTag TrackJetsEmuInputTag;
@@ -311,7 +311,7 @@ private:
   std::vector<int>* m_dv_delIndexPt;
   std::vector<bool>* m_dv_isReal;
   std::vector<float>* m_dv_score;
-  
+
   // all L1 tracks (prompt)
   std::vector<float>* m_trk_pt;
   std::vector<float>* m_trk_eta;
@@ -626,7 +626,7 @@ L1TrackObjectNtupleMaker::L1TrackObjectNtupleMaker(edm::ParameterSet const& iCon
   SaveTrackJets = iConfig.getParameter<bool>("SaveTrackJets");
   SaveTrackSums = iConfig.getParameter<bool>("SaveTrackSums");
   runDispVert = iConfig.getParameter<bool>("runDispVert");
-  
+
   L1StubInputTag = iConfig.getParameter<edm::InputTag>("L1StubInputTag");
   MCTruthClusterInputTag = iConfig.getParameter<edm::InputTag>("MCTruthClusterInputTag");
   MCTruthStubInputTag = iConfig.getParameter<edm::InputTag>("MCTruthStubInputTag");
@@ -773,7 +773,8 @@ L1TrackObjectNtupleMaker::L1TrackObjectNtupleMaker(edm::ParameterSet const& iCon
   TrackingVertexToken_ = consumes<std::vector<TrackingVertex>>(TrackingVertexInputTag);
   GenJetToken_ = consumes<std::vector<reco::GenJet>>(GenJetInputTag);
   GenParticleToken_ = consumes<std::vector<reco::GenParticle>>(GenParticleInputTag);
-  if(runDispVert) DispVertToken_ = consumes<std::vector<l1t::DisplacedTrackVertex>>(DisplacedVertexInputTag);
+  if (runDispVert)
+    DispVertToken_ = consumes<std::vector<l1t::DisplacedTrackVertex>>(DisplacedVertexInputTag);
   L1VertexToken_ = consumes<l1t::VertexCollection>(RecoVertexInputTag);
   L1VertexEmuToken_ = consumes<l1t::VertexWordCollection>(RecoVertexEmuInputTag);
   tTopoToken_ = esConsumes<TrackerTopology, TrackerTopologyRcd>(edm::ESInputTag("", ""));
@@ -938,7 +939,7 @@ void L1TrackObjectNtupleMaker::endJob() {
   delete m_dv_delIndexPt;
   delete m_dv_isReal;
   delete m_dv_score;
-  
+
   delete m_matchtrk_pt;
   delete m_matchtrk_eta;
   delete m_matchtrk_phi;
@@ -1084,39 +1085,43 @@ void L1TrackObjectNtupleMaker::endJob() {
 }
 
 template <typename T>
-bool L1TrackObjectNtupleMaker::findHiggsToMuAncestor(T particle){
-  if((particle->pdgId()==13 || particle->pdgId()==-13) && particle->genParticles().size()>0){
+bool L1TrackObjectNtupleMaker::findHiggsToMuAncestor(T particle) {
+  if ((particle->pdgId() == 13 || particle->pdgId() == -13) && particle->genParticles().size() > 0) {
     reco::GenParticleRef genPart = particle->genParticles()[0];
     reco::GenParticleRefVector parentParts = genPart->motherRefVector();
-    if(parentParts.size()>0){
-      while(parentParts[0]->pdgId()==13 || parentParts[0]->pdgId()==-13) parentParts = parentParts[0]->motherRefVector();
+    if (parentParts.size() > 0) {
+      while (parentParts[0]->pdgId() == 13 || parentParts[0]->pdgId() == -13)
+        parentParts = parentParts[0]->motherRefVector();
       reco::GenParticleRefVector daughters = parentParts[0]->daughterRefVector();
       bool hasMuon = false;
       bool hasAntiMuon = false;
-      for(auto daughter : daughters){
-	if(daughter->pdgId()==13) hasMuon = true;
-	if(daughter->pdgId()==-13) hasAntiMuon = true;
+      for (auto daughter : daughters) {
+        if (daughter->pdgId() == 13)
+          hasMuon = true;
+        if (daughter->pdgId() == -13)
+          hasAntiMuon = true;
       }
-      if(hasMuon&&hasAntiMuon){
-	bool hAncestor = false;
-	while(parentParts.size()>0){
-	  if(parentParts[0]->pdgId()==25) hAncestor = true;
-	  parentParts = parentParts[0]->motherRefVector();
-	}
-	if(hAncestor){
-	  return true;
-	}
+      if (hasMuon && hasAntiMuon) {
+        bool hAncestor = false;
+        while (parentParts.size() > 0) {
+          if (parentParts[0]->pdgId() == 25)
+            hAncestor = true;
+          parentParts = parentParts[0]->motherRefVector();
+        }
+        if (hAncestor) {
+          return true;
+        }
       }
     }
-  } //mu or anti mu
+  }  //mu or anti mu
   return false;
 }
 
 template <typename T>
-bool L1TrackObjectNtupleMaker::findHiggsToBAncestor(T particle){
+bool L1TrackObjectNtupleMaker::findHiggsToBAncestor(T particle) {
   TrackingVertexRef parentVert = particle->parentVertex();
   TrackingParticle currentParticle = *particle;
-  while(currentParticle.genParticles().size()==0 && parentVert->nSourceTracks()>0){
+  while (currentParticle.genParticles().size() == 0 && parentVert->nSourceTracks() > 0) {
     TrackingParticleRefVector sourceTPs = parentVert->sourceTracks();
     currentParticle = *sourceTPs[0];
     parentVert = currentParticle.parentVertex();
@@ -1124,12 +1129,15 @@ bool L1TrackObjectNtupleMaker::findHiggsToBAncestor(T particle){
   bool bAncestor = false;
   bool hAncestor = false;
   reco::GenParticleRefVector genParticles = currentParticle.genParticles();
-  while(genParticles.size()>0){
-    if(hAncestor==false && abs(genParticles[0]->pdgId())==5) bAncestor = true;
-    if(genParticles[0]->pdgId()==25) hAncestor = true;
+  while (genParticles.size() > 0) {
+    if (hAncestor == false && abs(genParticles[0]->pdgId()) == 5)
+      bAncestor = true;
+    if (genParticles[0]->pdgId() == 25)
+      hAncestor = true;
     genParticles = genParticles[0]->motherRefVector();
   }
-  if(bAncestor && hAncestor) return true;
+  if (bAncestor && hAncestor)
+    return true;
   return false;
 }
 
@@ -1293,7 +1301,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
   m_dv_delIndexPt = new std::vector<int>;
   m_dv_isReal = new std::vector<bool>;
   m_dv_score = new std::vector<float>;
-  
+
   m_matchtrk_pt = new std::vector<float>;
   m_matchtrk_eta = new std::vector<float>;
   m_matchtrk_phi = new std::vector<float>;
@@ -1640,7 +1648,7 @@ void L1TrackObjectNtupleMaker::beginJob() {
   eventTree->Branch("gen_mother_pdgid", &m_gen_mother_pdgid);
 
   eventTree->Branch("gen_z0", &m_gen_z0);
-  if(runDispVert){
+  if (runDispVert) {
     eventTree->Branch("dv_d_T", &m_dv_d_T);
     eventTree->Branch("dv_R_T", &m_dv_R_T);
     eventTree->Branch("dv_cos_T", &m_dv_cos_T);
@@ -1912,7 +1920,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
   m_gen_mother_pdgid->clear();
 
   m_gen_z0->clear();
-  if(runDispVert){
+  if (runDispVert) {
     m_dv_d_T->clear();
     m_dv_R_T->clear();
     m_dv_cos_T->clear();
@@ -2113,8 +2121,9 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
 
   //Displaced vertices
   edm::Handle<std::vector<l1t::DisplacedTrackVertex>> DispVertHandle;
-  if(runDispVert) iEvent.getByToken(DispVertToken_, DispVertHandle);
-  
+  if (runDispVert)
+    iEvent.getByToken(DispVertToken_, DispVertHandle);
+
   //Vertex
   edm::Handle<l1t::VertexCollection> L1PrimaryVertexHandle;
   iEvent.getByToken(L1VertexToken_, L1PrimaryVertexHandle);
@@ -2271,7 +2280,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
   } else {
     edm::LogWarning("DataNotFound") << "\nWarning: GenParticleHandle not found in the event" << std::endl;
   }
-  
+
   // loop over displaced vertices
   if (DispVertHandle.isValid()) {
     vector<l1t::DisplacedTrackVertex>::const_iterator dispVertIter;
@@ -2294,7 +2303,6 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_dv_isReal->push_back(dispVertIter->isReal());
       m_dv_score->push_back(dispVertIter->score());
     }
-    
   }
 
   // ----------------------------------------------------------------------------------------------
@@ -2368,8 +2376,8 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
         edm::Ptr<TrackingParticle> my_tp = MCTruthTTStubHandle->findTrackingParticlePtr(tempStubPtr);
 
         int myTP_pdgid = -999;
-	//bool myTP_isHToMu = false;
-	//bool myTP_isHToB = false;
+        //bool myTP_isHToMu = false;
+        //bool myTP_isHToB = false;
         float myTP_pt = -999;
         float myTP_eta = -999;
         float myTP_phi = -999;
@@ -2379,8 +2387,8 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
           if (tmp_eventid > 0)
             continue;  // this means stub from pileup track
           myTP_pdgid = my_tp->pdgId();
-	  //myTP_isHToMu = findHiggsToMuAncestor(my_tp);
-	  //myTP_isHToB = findHiggsToBAncestor(my_tp);
+          //myTP_isHToMu = findHiggsToMuAncestor(my_tp);
+          //myTP_isHToB = findHiggsToBAncestor(my_tp);
           myTP_pt = my_tp->p4().pt();
           myTP_eta = my_tp->p4().eta();
           myTP_phi = my_tp->p4().phi();
@@ -2562,10 +2570,12 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
 
         myTP_pdgid = my_tp->pdgId();
         if (my_tp->genParticles().size() > 0) {
-          myTP_mother_pdgid = my_tp->genParticles().at(0)->mother(0)->pdgId();
+          if (my_tp->genParticles().at(0)->numberOfMothers() > 0) {
+            myTP_mother_pdgid = my_tp->genParticles().at(0)->mother(0)->pdgId();
+          }
         }
-	myTP_isHToMu = findHiggsToMuAncestor(my_tp);
-	myTP_isHToB = findHiggsToBAncestor(my_tp);
+        myTP_isHToMu = findHiggsToMuAncestor(my_tp);
+        myTP_isHToB = findHiggsToBAncestor(my_tp);
         myTP_pt = my_tp->p4().pt();
         myTP_eta = my_tp->p4().eta();
         myTP_phi = my_tp->p4().phi();
@@ -2593,7 +2603,6 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_trk_matchtp_phi->push_back(myTP_phi);
       m_trk_matchtp_z0->push_back(myTP_z0);
       m_trk_matchtp_dxy->push_back(myTP_dxy);
-    
 
       // ----------------------------------------------------------------------------------------------
       // store the index to the selected track or -1 if not selected
@@ -2786,7 +2795,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       float myTP_d0 = -999;
       float myTP_x0 = -999;
       float myTP_y0 = -999;
-      
+
       if (my_tp.isNull())
         myFake = 0;
       else {
@@ -2797,8 +2806,8 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
           myFake = 1;
 
         myTP_pdgid = my_tp->pdgId();
-	myTP_isHToMu = findHiggsToMuAncestor(my_tp);
-	myTP_isHToB = findHiggsToBAncestor(my_tp);
+        myTP_isHToMu = findHiggsToMuAncestor(my_tp);
+        myTP_isHToB = findHiggsToBAncestor(my_tp);
         myTP_pt = my_tp->p4().pt();
         myTP_eta = my_tp->p4().eta();
         myTP_phi = my_tp->p4().phi();
@@ -2806,31 +2815,31 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
 
         myTP_x0 = my_tp->vertex().x();
         myTP_y0 = my_tp->vertex().y();
- 
+
         myTP_dxy = sqrt(myTP_x0 * myTP_x0 + myTP_y0 * myTP_y0);
 
-	// get d0/z0 propagated back to the IP
-	float tmp_tp_t = tan(2.0 * atan(1.0) - 2.0 * atan(exp(-myTP_eta)));
-	float delx = -myTP_x0;
-	float dely = -myTP_y0;
-	float A = 0.01 * 0.5696;
-	float Kmagnitude = A / myTP_pt;
-	float tmp_tp_charge = my_tp->charge();
-	float K = Kmagnitude * tmp_tp_charge;
-	float d = 0;
-	float tmp_tp_x0p = delx - (d + 1. / (2. * K) * sin(myTP_phi));
-	float tmp_tp_y0p = dely + (d + 1. / (2. * K) * cos(myTP_phi));
-	float tmp_tp_rp = sqrt(tmp_tp_x0p * tmp_tp_x0p + tmp_tp_y0p * tmp_tp_y0p);
-	float tmp_tp_d0 = tmp_tp_charge * tmp_tp_rp - (1. / (2. * K));
-	myTP_d0 = tmp_tp_d0 * (-1);  //fix d0 sign
-	const double pi = 4.0 * atan(1.0);
-	float delphi = myTP_phi - atan2(-K * tmp_tp_x0p, K * tmp_tp_y0p);
-	if (delphi < -pi)
-	  delphi += 2.0 * pi;
-	if (delphi > pi)
-	  delphi -= 2.0 * pi;
+        // get d0/z0 propagated back to the IP
+        float tmp_tp_t = tan(2.0 * atan(1.0) - 2.0 * atan(exp(-myTP_eta)));
+        float delx = -myTP_x0;
+        float dely = -myTP_y0;
+        float A = 0.01 * 0.5696;
+        float Kmagnitude = A / myTP_pt;
+        float tmp_tp_charge = my_tp->charge();
+        float K = Kmagnitude * tmp_tp_charge;
+        float d = 0;
+        float tmp_tp_x0p = delx - (d + 1. / (2. * K) * sin(myTP_phi));
+        float tmp_tp_y0p = dely + (d + 1. / (2. * K) * cos(myTP_phi));
+        float tmp_tp_rp = sqrt(tmp_tp_x0p * tmp_tp_x0p + tmp_tp_y0p * tmp_tp_y0p);
+        float tmp_tp_d0 = tmp_tp_charge * tmp_tp_rp - (1. / (2. * K));
+        myTP_d0 = tmp_tp_d0 * (-1);  //fix d0 sign
+        const double pi = 4.0 * atan(1.0);
+        float delphi = myTP_phi - atan2(-K * tmp_tp_x0p, K * tmp_tp_y0p);
+        if (delphi < -pi)
+          delphi += 2.0 * pi;
+        if (delphi > pi)
+          delphi -= 2.0 * pi;
 
-	myTP_z0 = myTP_z + tmp_tp_t * delphi / (2.0 * K);
+        myTP_z0 = myTP_z + tmp_tp_t * delphi / (2.0 * K);
         if (DebugMode) {
           edm::LogVerbatim("Tracklet") << "TP matched to track has pt = " << my_tp->p4().pt()
                                        << " eta = " << my_tp->momentum().eta() << " phi = " << my_tp->momentum().phi()
@@ -2852,8 +2861,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
       m_trkExt_matchtp_x->push_back(myTP_x0);
       m_trkExt_matchtp_y->push_back(myTP_y0);
       m_trkExt_matchtp_z->push_back(myTP_z);
-      
-      
+
       // ----------------------------------------------------------------------------------------------
       // store the index to the selected track or -1 if not selected
       // ----------------------------------------------------------------------------------------------
@@ -2964,7 +2972,7 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
 
     bool tmp_tp_isHToMu = findHiggsToMuAncestor(iterTP);
     bool tmp_tp_isHToB = findHiggsToBAncestor(iterTP);
-    
+
     if (DebugMode && (Displaced == "Prompt" || Displaced == "Both"))
       edm::LogVerbatim("Tracklet") << "Tracking particle, pt: " << tmp_tp_pt << " eta: " << tmp_tp_eta
                                    << " phi: " << tmp_tp_phi << " z0: " << tmp_tp_z0 << " d0: " << tmp_tp_d0
@@ -3181,14 +3189,14 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
           tmp_matchtrk_d0 = -tmp_matchtrk_x0 * sin(tmp_matchtrk_phi) + tmp_matchtrk_y0 * cos(tmp_matchtrk_phi);
           // tmp_matchtrk_d0 = matchedTracks.at(i_track)->d0();
         }
-	tmp_matchtrk_rinv = matchedTracks.at(i_track)->rInv();
+        tmp_matchtrk_rinv = matchedTracks.at(i_track)->rInv();
         tmp_matchtrk_chi2 = matchedTracks.at(i_track)->chi2();
         tmp_matchtrk_chi2dof = matchedTracks.at(i_track)->chi2Red();
         tmp_matchtrk_chi2rphi = matchedTracks.at(i_track)->chi2XYRed();
         tmp_matchtrk_chi2rz = matchedTracks.at(i_track)->chi2ZRed();
         tmp_matchtrk_bendchi2 = matchedTracks.at(i_track)->stubPtConsistency();
         tmp_matchtrk_MVA1 = matchedTracks.at(i_track)->trkMVA1();
-	tmp_matchtrk_MVA2 = matchedTracks.at(i_track)->trkMVA2();
+        tmp_matchtrk_MVA2 = matchedTracks.at(i_track)->trkMVA2();
         tmp_matchtrk_nstub = (int)matchedTracks.at(i_track)->getStubRefs().size();
         tmp_matchtrk_seed = (int)matchedTracks.at(i_track)->trackSeedType();
         tmp_matchtrk_hitpattern = (int)matchedTracks.at(i_track)->hitPattern();
@@ -3359,14 +3367,14 @@ void L1TrackObjectNtupleMaker::analyze(const edm::Event& iEvent, const edm::Even
           // tmp_matchtrkExt_d0 = matchedTracks.at(i_track)->d0();
         }
 
-	tmp_matchtrkExt_rinv = matchedTracks.at(i_track)->rInv();
+        tmp_matchtrkExt_rinv = matchedTracks.at(i_track)->rInv();
         tmp_matchtrkExt_chi2 = matchedTracks.at(i_track)->chi2();
         tmp_matchtrkExt_chi2dof = matchedTracks.at(i_track)->chi2Red();
         tmp_matchtrkExt_chi2rphi = matchedTracks.at(i_track)->chi2XYRed();
         tmp_matchtrkExt_chi2rz = matchedTracks.at(i_track)->chi2ZRed();
         tmp_matchtrkExt_bendchi2 = matchedTracks.at(i_track)->stubPtConsistency();
         tmp_matchtrkExt_MVA = matchedTracks.at(i_track)->trkMVA1();
-	tmp_matchtrkExt_MVA2 = matchedTracks.at(i_track)->trkMVA2();
+        tmp_matchtrkExt_MVA2 = matchedTracks.at(i_track)->trkMVA2();
         tmp_matchtrkExt_nstub = (int)matchedTracks.at(i_track)->getStubRefs().size();
         tmp_matchtrkExt_seed = (int)matchedTracks.at(i_track)->trackSeedType();
         tmp_matchtrkExt_hitpattern = (int)matchedTracks.at(i_track)->hitPattern();
