@@ -13,16 +13,15 @@ L1TrackQuality::L1TrackQuality(const edm::ParameterSet& qualityParams) : useHPH_
   edm::FileInPath modelPath = qualityParams.getParameter<edm::FileInPath>("model");
   std::string fullPath = modelPath.fullPath();
 
-  if(fullPath.substr(fullPath.length()-4)=="onnx"){
+  if (fullPath.substr(fullPath.length() - 4) == "onnx") {
     setModel(qualityParams.getParameter<edm::FileInPath>("model"),
-	     qualityParams.getParameter<std::vector<std::string>>("featureNames"),
-	     qualityParams.getParameter<std::string>("ONNXInputName"));
+             qualityParams.getParameter<std::vector<std::string>>("featureNames"),
+             qualityParams.getParameter<std::string>("ONNXInputName"));
     runTime_ = std::make_unique<cms::Ort::ONNXRuntime>(this->model_.fullPath());
-  }
-  else{
+  } else {
     // Unpacks EDM parameter set itself to save unecessary processing within TrackProducers
     setModel(qualityParams.getParameter<edm::FileInPath>("model"),
-	     qualityParams.getParameter<std::vector<std::string>>("featureNames"));
+             qualityParams.getParameter<std::vector<std::string>>("featureNames"));
   }
 }
 
@@ -97,9 +96,8 @@ std::vector<float> L1TrackQuality::featureTransform(TTTrack<Ref_Phase2TrackerDig
 }
 
 double L1TrackQuality::getL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack) {
-
   std::string fullPath = this->model_.fullPath();
-  if(fullPath.substr(fullPath.length()-4)=="onnx"){
+  if (fullPath.substr(fullPath.length() - 4) == "onnx") {
     // Setup ONNX input and output names and arrays
     std::vector<std::string> ortinput_names;
     std::vector<std::string> ortoutput_names;
@@ -130,7 +128,6 @@ double L1TrackQuality::getL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack
   std::vector<float> inputs = featureTransform(aTrack, this->featureNames_);
   std::vector<float> output = bdt.decision_function(inputs);
   return (1. / (1. + exp(-output.at(0))));
-
 }
 
 float L1TrackQuality::runEmulatedTQ(std::vector<ap_fixed<10, 5>> inputFeatures) {
@@ -143,7 +140,9 @@ float L1TrackQuality::runEmulatedTQ(std::vector<ap_fixed<10, 5>> inputFeatures) 
   return output.at(0).to_float();  // need logistic sigmoid fcn applied to xgb output
 }
 
-void L1TrackQuality::setModel(edm::FileInPath const& model, std::vector<std::string> const& featureNames, std::string const& inputName) {
+void L1TrackQuality::setModel(edm::FileInPath const& model,
+                              std::vector<std::string> const& featureNames,
+                              std::string const& inputName) {
   //Convert algorithm string to Enum class for track by track comparison
   model_ = model;
   featureNames_ = featureNames;

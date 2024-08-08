@@ -47,7 +47,9 @@ public:
   // where a TTTrack datatype is unavailable to be passed to the track quality
   float runEmulatedTQ(std::vector<ap_fixed<10, 5>> inputFeatures);
 
-  void setModel(edm::FileInPath const& model, std::vector<std::string> const& featureNames, std::string const& inputName = "");
+  void setModel(edm::FileInPath const& model,
+                std::vector<std::string> const& featureNames,
+                std::string const& inputName = "");
 
   void setBonusFeatures(std::vector<float> bonusFeatures);
 
