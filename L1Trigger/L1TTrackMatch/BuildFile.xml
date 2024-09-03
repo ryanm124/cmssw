@@ -5,6 +5,7 @@
 <use   name="DataFormats/Math"/>
 <use   name="PhysicsTools/TensorFlow"/>
 <use   name="PhysicsTools/ONNXRuntime"/>
+<use   name="SimTracker/TrackTriggerAssociation"/>
 <use   name="boost"/>
 <use   name="xerces-c"/>
 <use   name="clhep"/>
