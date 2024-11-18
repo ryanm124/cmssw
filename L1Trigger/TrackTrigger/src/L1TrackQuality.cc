@@ -78,7 +78,6 @@ std::vector<float> L1TrackQuality::featureTransform(TTTrack<Ref_Phase2TrackerDig
   float tmp_trk_phi = aTrack.phi();
   float tmp_trk_eta = aTrack.eta();
   float tmp_trk_tanl = aTrack.tanL();
-  float tmp_trk_d0 = aTrack.d0();
 
   // -------- fill the feature map ---------
 
@@ -92,7 +91,6 @@ std::vector<float> L1TrackQuality::featureTransform(TTTrack<Ref_Phase2TrackerDig
   feature_map["chi2rphi_bin"] = tmp_trk_chi2rphi_bin;
   feature_map["chi2rz_bin"] = tmp_trk_chi2rz_bin;
   feature_map["tanl"] = tmp_trk_tanl;
-  feature_map["d0"] = tmp_trk_d0;
 
   // fill tensor with track params
   transformedFeatures.reserve(featureNames.size());
@@ -102,7 +100,7 @@ std::vector<float> L1TrackQuality::featureTransform(TTTrack<Ref_Phase2TrackerDig
   return transformedFeatures;
 }
 
-double L1TrackQuality::getL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack) {
+void L1TrackQuality::setL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack) {
   if (this->qualityAlgorithm_ == QualityAlgorithm::Cut) {
     // Get Track parameters
     float trk_pt = aTrack.momentum().perp();
@@ -119,7 +117,8 @@ double L1TrackQuality::getL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack
         trk_chi2 < this->chi2dofMax_ && trk_bend_chi2 < this->bendchi2Max_ && nStubs >= this->nStubsmin_)
       classification = 1.0;
     // Classification updated to 1 if conditions are met
-    return classification;
+
+    aTrack.settrkMVA1(classification);
   }
 
   else if (this->qualityAlgorithm_ == QualityAlgorithm::GBDT_cpp) {
@@ -129,7 +128,7 @@ double L1TrackQuality::getL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack
     // collect features and classify using bdt
     std::vector<float> inputs = featureTransform(aTrack, this->featureNames_);
     std::vector<float> output = bdt.decision_function(inputs);
-    return (1. / (1. + exp(-output.at(0))));  // need logistic sigmoid fcn applied to xgb output
+    aTrack.settrkMVA1(1. / (1. + exp(-output.at(0))));  // need logistic sigmoid fcn applied to xgb output
   }
 
   else if ((this->qualityAlgorithm_ == QualityAlgorithm::NN) || (this->qualityAlgorithm_ == QualityAlgorithm::GBDT)) {
@@ -156,16 +155,19 @@ double L1TrackQuality::getL1TrackQuality(TTTrack<Ref_Phase2TrackerDigi_>& aTrack
     ortoutputs = runTime_->run(ortinput_names, ortinput, {}, ortoutput_names, batch_size);
 
     if (this->qualityAlgorithm_ == QualityAlgorithm::NN) {
-      return ortoutputs[0][0];
+      aTrack.settrkMVA1(ortoutputs[0][0]);
     }
 
     else if (this->qualityAlgorithm_ == QualityAlgorithm::GBDT) {
-      return ortoutputs[1][1];
+      aTrack.settrkMVA1(ortoutputs[1][1]);
     }
     // Slight differences in the ONNX models of the GBDTs and NNs mean different
     // indices of the ortoutput need to be accessed
   }
-  return -999;
+
+  else {
+    aTrack.settrkMVA1(-999);
+  }
 }
 
 float L1TrackQuality::runEmulatedTQ(std::vector<ap_fixed<10, 5>> inputFeatures) {
